@@ -11,7 +11,8 @@ build --flag_alias=download_prebuilt_gki_fips140=//private/devices/google/common
 build --action_env=KLEAF_DOWNLOAD_BUILD_NUMBER_MAP="gki_prebuilts=13202960,gki_prebuilts_aarch64_16k=13202960"
 
 # Use prebuilt GKI
-build --use_prebuilt_gki=true
+build --use_prebuilt_gki=false
+build --config=use_source_tree_aosp
 build --use_signed_prebuilts=true
 
 # Use prebuilt fips140.ko

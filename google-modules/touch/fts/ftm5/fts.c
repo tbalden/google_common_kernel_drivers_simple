@@ -70,6 +70,11 @@
 #include "fts_lib/ftsTime.h"
 #include "fts_lib/ftsTool.h"
 
+
+#ifdef CONFIG_UCI
+#include <linux/inputfilter/sweep2sleep.h>
+#endif
+
 /**
   * Event handler installer helpers
   */
@@ -3186,11 +3191,34 @@ static bool fts_enter_pointer_event_handler(struct fts_ts_info *info, unsigned
 	}
 
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+#ifdef CONFIG_UCI
+	{
+		int x2, y2;
+		bool frozen_coords = s2s_freeze_coords(&x2,&y2,x,y);
+#endif
 	goog_input_mt_slot(info->gti, info->input_dev, touchId);
 	goog_input_report_key(info->gti, info->input_dev, BTN_TOUCH, touch_condition);
 	goog_input_mt_report_slot_state(info->gti, info->input_dev, tool, 1);
+#ifdef CONFIG_UCI
+                                {
+					//pr_info("%s uci UCI goog input s2s...\n",__func__);
+					s2s_direct_input(info->input_dev->grab, 1, BTN_TOUCH, touch_condition, touchId);
+					s2s_direct_input(info->input_dev->grab, 3, ABS_MT_POSITION_X, (frozen_coords?x2:x), touchId);
+					s2s_direct_input(info->input_dev->grab, 3, ABS_MT_POSITION_Y, (frozen_coords?y2:y), touchId);
+                                        if (frozen_coords) {
+						// with direct input, we can return original X and Y as well, as freeze state and s2s states are already calculated...
+						// based on s2s_direct_input calls. Also this is a must with Google common touch driver...
+						// as it will start to ommit events if coords are off max/min limits of input dev resolution!
+						goog_input_report_abs(info->gti, info->input_dev, ABS_MT_POSITION_X, x);
+						goog_input_report_abs(info->gti, info->input_dev, ABS_MT_POSITION_Y, y);
+                                        } else {
+#endif
 	goog_input_report_abs(info->gti, info->input_dev, ABS_MT_POSITION_X, x);
 	goog_input_report_abs(info->gti, info->input_dev, ABS_MT_POSITION_Y, y);
+#ifdef CONFIG_UCI
+                                        }
+                                }
+#endif
 	goog_input_report_abs(info->gti, info->input_dev, ABS_MT_TOUCH_MAJOR, major);
 	goog_input_report_abs(info->gti, info->input_dev, ABS_MT_TOUCH_MINOR, minor);
 #ifndef SKIP_PRESSURE
@@ -3204,8 +3232,22 @@ static bool fts_enter_pointer_event_handler(struct fts_ts_info *info, unsigned
 	input_mt_slot(info->input_dev, touchId);
 	input_report_key(info->input_dev, BTN_TOUCH, touch_condition);
 	input_mt_report_slot_state(info->input_dev, tool, 1);
+#ifdef CONFIG_UCI
+                                {
+                                        int x2, y2;
+                                        bool frozen_coords = s2s_freeze_coords(&x2,&y2,x,y);
+					//pr_info("%s uci UCI normal input s2s...\n",__func__);
+                                        if (frozen_coords) {
+	                                            input_report_abs(info->input_dev, ABS_MT_POSITION_X, x2);
+	                                            input_report_abs(info->input_dev, ABS_MT_POSITION_Y, y2);
+                                        } else {
+#endif
 	input_report_abs(info->input_dev, ABS_MT_POSITION_X, x);
 	input_report_abs(info->input_dev, ABS_MT_POSITION_Y, y);
+#ifdef CONFIG_UCI
+                                        }
+                                }
+#endif
 	input_report_abs(info->input_dev, ABS_MT_TOUCH_MAJOR, major);
 	input_report_abs(info->input_dev, ABS_MT_TOUCH_MINOR, minor);
 #ifndef SKIP_PRESSURE
@@ -4105,7 +4147,14 @@ static irqreturn_t fts_interrupt_handler(int irq, void *handle)
 		if (has_pointer_event) {
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 			if (info->touch_id == 0)
+#ifdef CONFIG_UCI
+{
+				s2s_direct_input(info->input_dev->grab, 1, BTN_TOUCH, 0, info->touch_id);
+#endif
 				goog_input_report_key(info->gti, info->input_dev, BTN_TOUCH, 0);
+#ifdef CONFIG_UCI
+}
+#endif
 
 			goog_input_sync(info->gti, info->input_dev);
 			goog_input_unlock(info->gti);
@@ -5152,6 +5201,10 @@ static void check_finger_status(struct fts_ts_info *info)
 	}
 }
 
+#ifdef CONFIG_UCI
+extern void uci_screen_state(int state);
+#endif
+
 /**
   * Resume function which perform a system reset, clean all the touches
   * from the linux input system and prepare the ground for enabling the sensing
@@ -5168,6 +5221,10 @@ static void fts_resume(struct fts_ts_info *info)
 	fts_mode_handler(info, 0);
 	fts_enableInterrupt(info, true);
 	info->sensor_sleep = false;
+#ifdef CONFIG_UCI
+	pr_info("%s uci screen state call %d... \n",__func__,0);
+	uci_screen_state(2);
+#endif
 }
 
 /**
@@ -5189,6 +5246,10 @@ static void fts_suspend(struct fts_ts_info *info)
 	clear_touch_flags(info);
 #else
 	release_all_touches(info);
+#endif
+#ifdef CONFIG_UCI
+	pr_info("%s uci screen state call %d... \n",__func__,0);
+	uci_screen_state(0);
 #endif
 }
 

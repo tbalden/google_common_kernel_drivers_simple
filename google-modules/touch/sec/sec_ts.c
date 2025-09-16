@@ -32,6 +32,10 @@ static struct sec_ts_coordinate last_coord[SEC_TS_DEBUG_KFIFO_LEN];
 #define SEC_SWITCH_GPIO_VALUE_SLPI_MASTER	1
 #define SEC_SWITCH_GPIO_VALUE_AP_MASTER		0
 
+#ifdef CONFIG_UCI
+#include <linux/inputfilter/sweep2sleep.h>
+#endif
+
 struct sec_ts_data *ts_dup;
 
 #ifndef CONFIG_SEC_SYSFS
@@ -2180,10 +2184,25 @@ static void sec_ts_handle_coord_event(struct sec_ts_data *ts,
 				input_report_key(ts->input_dev,
 							BTN_TOOL_FINGER, 1);
 
+
+#ifdef CONFIG_UCI
+                                {
+                                        int x2, y2;
+                                        bool frozen_coords = s2s_freeze_coords(&x2,&y2,ts->coord[t_id].x,ts->coord[t_id].y);
+//                                	pr_info("%s uci UCI ...\n",__func__);
+                                        if (frozen_coords) {
+                                                input_report_abs(ts->input_dev, ABS_MT_POSITION_X, x2);
+                                                input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, y2);
+                                        } else {
+#endif
 				input_report_abs(ts->input_dev,
 					ABS_MT_POSITION_X, ts->coord[t_id].x);
 				input_report_abs(ts->input_dev,
 					ABS_MT_POSITION_Y, ts->coord[t_id].y);
+#ifdef CONFIG_UCI
+                                        }
+                                }
+#endif
 				input_report_abs(ts->input_dev,
 						ABS_MT_TOUCH_MAJOR,
 						ts->coord[t_id].major);
@@ -2267,10 +2286,24 @@ static void sec_ts_handle_coord_event(struct sec_ts_data *ts,
 				input_report_key(ts->input_dev,
 							BTN_TOOL_FINGER, 1);
 
+#ifdef CONFIG_UCI
+                                {
+                                        int x2, y2;
+                                        bool frozen_coords = s2s_freeze_coords(&x2,&y2,ts->coord[t_id].x,ts->coord[t_id].y);
+//                                	pr_info("%s uci UCI ...\n",__func__);
+                                        if (frozen_coords) {
+                                                input_report_abs(ts->input_dev, ABS_MT_POSITION_X, x2);
+                                                input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, y2);
+                                        } else {
+#endif
 				input_report_abs(ts->input_dev,
 					ABS_MT_POSITION_X, ts->coord[t_id].x);
 				input_report_abs(ts->input_dev,
 					ABS_MT_POSITION_Y, ts->coord[t_id].y);
+#ifdef CONFIG_UCI
+                                        }
+                                }
+#endif
 				input_report_abs(ts->input_dev,
 						ABS_MT_TOUCH_MAJOR,
 						ts->coord[t_id].major);
@@ -3479,10 +3512,24 @@ static void sec_ts_offload_report(void *handle,
 					 touch_down);
 			input_mt_report_slot_state(ts->input_dev,
 						   MT_TOOL_FINGER, 1);
+#ifdef CONFIG_UCI
+                                {
+                                        int x2, y2;
+                                        bool frozen_coords = s2s_freeze_coords(&x2,&y2,report->coords[i].x,report->coords[i].y);
+//                                	pr_info("%s uci UCI ...\n",__func__);
+                                        if (frozen_coords) {
+                                                input_report_abs(ts->input_dev, ABS_MT_POSITION_X, x2);
+                                                input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, y2);
+                                        } else {
+#endif
 			input_report_abs(ts->input_dev, ABS_MT_POSITION_X,
 					 report->coords[i].x);
 			input_report_abs(ts->input_dev, ABS_MT_POSITION_Y,
 					 report->coords[i].y);
+#ifdef CONFIG_UCI
+                                        }
+                                }
+#endif
 			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR,
 					 report->coords[i].major);
 			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MINOR,
@@ -5730,6 +5777,10 @@ static void sec_set_switch_gpio(struct sec_ts_data *ts, int gpio_value)
 			  __func__, retval);
 }
 
+#ifdef CONFIG_UCI
+extern void uci_screen_state(int state);
+#endif
+
 static void sec_ts_suspend_work(struct work_struct *work)
 {
 	struct sec_ts_data *ts = container_of(work, struct sec_ts_data,
@@ -5800,6 +5851,10 @@ static void sec_ts_suspend_work(struct work_struct *work)
 
 	sec_ts_hc_dump(ts);
 	sec_ts_debug_dump(ts);
+#ifdef CONFIG_UCI
+	pr_info("%s uci screen state call %d... \n",__func__,0);
+	uci_screen_state(0);
+#endif
 }
 
 static void sec_ts_resume_work(struct work_struct *work)
@@ -5988,6 +6043,10 @@ static void sec_ts_resume_work(struct work_struct *work)
 	complete_all(&ts->bus_resumed);
 
 	mutex_unlock(&ts->device_mutex);
+#ifdef CONFIG_UCI
+	pr_info("%s uci screen state call %d... \n",__func__,1);
+	uci_screen_state(2);
+#endif
 }
 
 #ifdef USE_CHARGER_WORK
