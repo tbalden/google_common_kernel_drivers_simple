@@ -3279,7 +3279,9 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 	dhd_info_t *dhd = handle;
 	int ifidx;
 	dhd_if_event_t *if_event = event_info;
-
+	dhd_pub_t *dhdp = &dhd->pub;
+	struct net_device *ndev = NULL;
+	bool del_cmd_in_progress = NULL;
 
 	if (event != DHD_WQ_WORK_IF_DEL) {
 		DHD_ERROR(("%s: unexpected event \n", __FUNCTION__));
@@ -3306,6 +3308,20 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 		DHD_ERROR(("Netdev not found! Do nothing.\n"));
 		goto done;
 	}
+
+	/* Check whether command context has set del in progress */
+	del_cmd_in_progress = dhd_check_del_in_progress(dhdp, ifidx);
+
+	ndev = dhd_idx2net(dhdp, ifidx);
+	if (!ndev) {
+		DHD_ERROR(("ndev null\n"));
+		goto done;
+	}
+
+	if (!del_cmd_in_progress) {
+		dhd_set_del_in_progress(dhdp, ndev);
+	}
+
 #if defined(WL_CFG80211) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
 	if (if_event->event.ifidx > 0) {
 		/* Do the post interface del ops */
@@ -3320,6 +3336,8 @@ dhd_ifdel_event_handler(void *handle, void *event_info, u8 event)
 	dhd_remove_if(&dhd->pub, ifidx, TRUE);
 
 #endif /* WL_CFG80211 && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
+
+	dhd_clear_del_in_progress(dhdp, ndev);
 
 done:
 	MFREE(dhd->pub.osh, if_event, sizeof(dhd_if_event_t));
@@ -3436,8 +3454,9 @@ dhd_set_mcast_list_handler(void *handle, void *event_info, u8 event)
 
 	ifp = dhd->iflist[ifidx];
 
-	if (ifp == NULL || !dhd->pub.up) {
-		DHD_ERROR(("%s: interface info not available/down \n", __FUNCTION__));
+	if (ifp == NULL || !dhd->pub.up || ifp->del_in_progress) {
+		DHD_ERROR(("%s: interface info not available/down/del_cmd in prog\n",
+			__FUNCTION__));
 		goto done;
 	}
 
@@ -7524,7 +7543,10 @@ dhd_static_if_stop(struct net_device *net)
 		return BCME_OK;
 	}
 
+	dhd_net_if_lock_local(dhd);
 	dhd_set_del_in_progress(cfg->pub, net);
+	dhd_net_if_unlock_local(dhd);
+
 	/* Ensure queue is disabled */
 	netif_tx_disable(net);
 	ret = wl_cfg80211_static_if_close(net);
@@ -20189,6 +20211,11 @@ void dhd_schedule_memdump(dhd_pub_t *dhdp, uint8 *buf, uint32 size)
 #endif /* DHD_LOG_DUMP */
 		return;
 	}
+#ifdef DHD_DUMP_RXPKTIDMAP
+	else if (dhdp->memdump_type == DUMP_TYPE_BY_SYSDUMP) {
+		dhd_dump_rxpktidmap(dhdp);
+	}
+#endif /* DHD_DUMP_RXPKTIDMAP */
 
 	dhd_info->scheduled_memdump = TRUE;
 
@@ -25321,6 +25348,22 @@ dhd_cancel_delayed_work(void *dwork)
 	if (dwk && dwk->work.func) {
 		ret =  cancel_delayed_work(dwk);
 	}
+	return ret;
+}
+
+bool
+dhd_check_del_in_progress(dhd_pub_t *dhdp, uint8 ifindex)
+{
+	dhd_if_t *ifp = NULL;
+	unsigned long flags;
+	bool ret = TRUE;
+
+	DHD_GENERAL_LOCK(dhdp, flags);
+	ifp = dhd_get_ifp(dhdp, ifindex);
+	if (ifp) {
+		ret = ifp->del_in_progress;
+	}
+	DHD_GENERAL_UNLOCK(dhdp, flags);
 	return ret;
 }
 

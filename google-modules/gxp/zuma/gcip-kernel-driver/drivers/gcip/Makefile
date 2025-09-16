@@ -26,11 +26,14 @@ gcip-objs		:= gcip-alloc-helper.o \
 			   gcip-pm.o \
 			   gcip-resource-accessor.o \
 			   gcip-slc.o \
+			   gcip-status-code.o \
 			   gcip-telemetry.o \
 			   gcip-thermal.o \
 			   gcip-usage-stats.o
 
-gcip-objs		+= iif/iif-fence-table.o \
+gcip-objs		+= iif/iif-direct.o \
+			   iif/iif-dma-fence.o \
+			   iif/iif-fence-table.o \
 			   iif/iif-fence.o \
 			   iif/iif-manager.o \
 			   iif/iif-signaler-submission-waiter.o \

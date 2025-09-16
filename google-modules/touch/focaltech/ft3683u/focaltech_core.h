@@ -239,8 +239,8 @@ struct fw_status_ts {
       unsigned char B1_b7_continuous_status:1;
 
       unsigned char B2_b0_frequency_hopping:3;
-      unsigned char B2_b3_v_sync_status:1;
-      unsigned char B2_b4_reserved:4;
+      unsigned char B2_b3_v_sync_status:2;
+      unsigned char B2_b5_reserved:3;
 
       unsigned char B3_b0_glove_reg:1;
       unsigned char B3_b1_grip_reg:1;
@@ -253,8 +253,6 @@ struct fw_status_ts {
     unsigned char data[4];
   };
 };
-
-
 
 enum SS_TYPE {
     SS_NORMAL,
@@ -347,6 +345,10 @@ struct fts_ts_data {
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
     struct early_suspend early_suspend;
 #endif
+
+    u8 *mutual_data;
+    uint16_t *self_water_data;
+    uint16_t *self_normal_data;
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
     struct goog_touch_interface *gti;
 #endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
@@ -394,10 +396,12 @@ int fts_gesture_init(struct fts_ts_data *ts_data);
 int fts_gesture_exit(struct fts_ts_data *ts_data);
 int fts_gesture_readdata(struct fts_ts_data *ts_data);
 
+int fts_write_reg_safe(u8 reg, u8 write_val);
 int fts_set_heatmap_mode(struct fts_ts_data *ts_data, u8 heatmap_mode);
 int fts_set_grip_mode(struct fts_ts_data *ts_datam, u8 grip_mode);
 int fts_set_palm_mode(struct fts_ts_data *ts_data, u8 palm_mode);
 int fts_set_glove_mode(struct fts_ts_data *ts_data, bool en);
+int fts_set_continuous_mode(u8 mode);
 
 /* Apk and functions */
 int fts_create_apk_debug_channel(struct fts_ts_data *);
@@ -446,6 +450,7 @@ void fts_tp_state_recovery(struct fts_ts_data *ts_data);
 int fts_ex_mode_init(struct fts_ts_data *ts_data);
 int fts_ex_mode_exit(struct fts_ts_data *ts_data);
 int fts_ex_mode_recovery(struct fts_ts_data *ts_data);
+int fts_set_irq_report_onoff(bool en);
 void fts_update_feature_setting(struct fts_ts_data *ts_data);
 void fts_irq_disable(void);
 void fts_irq_enable(void);

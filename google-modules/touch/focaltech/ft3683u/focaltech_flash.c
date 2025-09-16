@@ -2067,6 +2067,11 @@ int fts_fwupg_exit(struct fts_ts_data *ts_data)
 {
     FTS_FUNC_ENTER();
     if (fwupgrade) {
+#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+    cancel_delayed_work_sync(&ts_data->fwupg_work);
+#else
+    cancel_work_sync(&ts_data->fwupg_work);
+#endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
         if (fwupgrade->fw_from_request) {
             vfree(fwupgrade->fw);
             fwupgrade->fw = NULL;

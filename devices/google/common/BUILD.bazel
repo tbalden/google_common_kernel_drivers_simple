@@ -2,6 +2,8 @@
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@kernel_toolchain_info//:dict.bzl", "VARS")
+load("//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_genrule")
 load("//private/devices/google/common:constants.bzl", "PIXEL_GKI_MODULES_LIST")
 load("//private/devices/google/common/kleaf:extracted_system_dlkm.bzl", "extracted_system_dlkm")
 
@@ -37,6 +39,19 @@ config_setting(
     flag_values = {
         ":download_prebuilt_gki_fips140": "0",
     },
+)
+
+_STRIP = "//prebuilts/clang/host/linux-x86/clang-{}:bin/llvm-strip".format(VARS["CLANG_VERSION"])
+
+hermetic_genrule(
+    name = "fips140",
+    srcs = ["@gki_prebuilt_fips140//fips140.ko"],
+    outs = ["fips140.ko"],
+    cmd = """
+        $(location {strip}) --strip-debug -o $(location fips140.ko) \\
+                $(location @gki_prebuilt_fips140//fips140.ko)
+    """.format(strip = _STRIP),
+    tools = [_STRIP],
 )
 
 # Do not use this flag directly, use --config=testing or --config=kunit,

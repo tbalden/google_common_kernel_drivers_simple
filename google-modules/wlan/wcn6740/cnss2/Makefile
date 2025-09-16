@@ -40,11 +40,8 @@ EXTRA_SYMBOLS +=$(OUT_DIR)/../private/google-modules/soc/gs/Module.symvers
 
 endif
 
-all:
-	$(MAKE) -C $(KERNEL_SRC) M=$(M) modules $(KBUILD_OPTIONS) KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)"
+# Define and "all" target, which isn't really needed but doesn't hurt.
+all: modules
 
-modules_install:
-	$(MAKE) INSTALL_MOD_STRIP=1 -C $(KERNEL_SRC) M=$(M) modules_install
-
-clean:
-	$(MAKE) -C $(KERNEL_SRC) M=$(M) clean
+modules modules_install clean compile_commands.json:
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) $(KBUILD_OPTIONS) KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" $(@)

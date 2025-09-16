@@ -14,7 +14,6 @@ fi
 GKI_SHA=`repo --color=never info aosp | grep "Manifest revision" | sed 's/Manifest revision: //g'`
 GKI_BRANCH="android14-6.1" # Need to push symbol list changes to the main ACK branch (not release branches)
 GKI_STAGING_REMOTE="partner-common"
-GKI_STAGING_BRANCH=`repo --color=never info aosp-staging | grep "Manifest revision" | sed 's/Manifest revision: //g'`
 PIXEL_SYMBOL_LIST="android/abi_gki_aarch64_pixel"
 TARGET=
 FOR_AOSP_PUSH_BRANCH="update_symbol_list-delete-after-push"
@@ -90,25 +89,31 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# Enforce the target selection. Needs to be run at the repo root
-if [[ -z "${TARGET}" ]] || [[ ! -d "private/devices/google/${TARGET}" ]]; then
-  echo "Invalid target: ${TARGET}"
-  usage 1
-fi
+function bazel_cquery() {
+  tools/bazel cquery --config="${TARGET}" "$@"
+}
 
-CHIPSET=`sed -n 's/.*:gs_soc_module=\/\/private\/devices\/google\/'$TARGET':\.*//p' private/devices/google/$TARGET/device.bazelrc | sed 's/_soc.'$TARGET\.*'//g' | head -1`
-if [[ -n "${CHIPSET}" ]]; then
-  echo "$TARGET -> $CHIPSET"
-else
-  echo "Could not find chipset for $TARGET"
+function bazel_run() {
+  tools/bazel run --config="${TARGET}" "$@"
+}
+
+KERNEL_TARGET="$(bazel_cquery \
+  'kind("kernel_build rule", deps(//private/devices/google/common:kernel))' \
+  2>/dev/null | head -n 1 | cut -d ' ' -f1)"
+if [[ -z "${KERNEL_TARGET}" ]]; then
+  echo "Could not detect kernel target" >&2
   exit 1
 fi
+echo "KERNEL_TARGET=${KERNEL_TARGET}"
 
-BASE_KERNEL=$(tools/bazel cquery filter\(kernel_aarch64_sources, deps\(//private/devices/google/${TARGET}:${CHIPSET}_${TARGET}\)\) 2>/dev/null --config=${TARGET})
-if [[ "${BASE_KERNEL}" =~ aosp-staging ]]; then
-  KERNEL_DIR="aosp-staging/"
+KERNEL_DIR="$(bazel_cquery \
+  'filter(kernel_aarch64_sources, deps(//private/devices/google/common:kernel))' \
+  2>/dev/null | grep -v common | sed -n 's://\(.*\)\:kernel_aarch64_sources.*:\1:p')"
+if [[ -n "${KERNEL_DIR}" ]]; then
+  echo "KERNEL_DIR=${KERNEL_DIR}"
 else
-  KERNEL_DIR="aosp/"
+  echo "Could not detect kernel dir"
+  exit 1
 fi
 
 
@@ -177,6 +182,7 @@ function apply_to_aosp_symbol_list {
 
   # Only apply the new symbol additions. This makes sure that we don't copy
   # over any symbols that are only found in the aosp-staging branch.
+  GKI_STAGING_BRANCH=`repo --color=never info ${KERNEL_DIR} | grep "Manifest revision" | sed 's/Manifest revision: //g'`
   git -C $1 diff ${GKI_STAGING_REMOTE}/${GKI_STAGING_BRANCH}..HEAD ${PIXEL_SYMBOL_LIST} | grep "^+  " >> ${TMP_LIST}
 
   # Remove leading plus signs from the `git show`
@@ -203,7 +209,7 @@ function commit_the_symbol_list {
 
   # Create the symbol list commit
   COMMIT_TEXT=$(mktemp -t abi_sym_commit_text.XXXXX)
-  echo "ANDROID: Update the ABI symbol list" > ${COMMIT_TEXT}
+  echo "ANDROID: ABI: Update pixel symbol list" > ${COMMIT_TEXT}
   echo >> ${COMMIT_TEXT}
   if [ -n "${ADDING}" ]; then
     echo "Adding the following symbols:" >> ${COMMIT_TEXT}
@@ -224,8 +230,8 @@ function commit_the_symbol_list {
   if [ -n "${CHANGE_ID}" ]; then
     echo "Change-Id: ${CHANGE_ID}" >> ${COMMIT_TEXT}
   fi
-  git -C "${aosp_dir}" commit --quiet -s -F ${COMMIT_TEXT} -- "${PIXEL_SYMBOL_LIST}"
-  if [[ "$?" != 0 ]] && [[ ${aosp_dir} =~ aosp-staging ]]; then
+  git -C "${aosp_dir}" commit --quiet -s -F ${COMMIT_TEXT} -- android/
+  if [[ "$?" != 0 ]] && [[ ${aosp_dir} =~ "aosp-" ]]; then
     rm -f ${COMMIT_TEXT}
     echo "No symbol list changes detected in ${aosp_dir}."
     exit 0
@@ -260,7 +266,7 @@ function update_aosp_to_tot {
     fi
   popd >/dev/null
 
-  if [[ "${BASE_KERNEL}" =~ aosp-staging ]]; then
+  if [[ "${KERNEL_DIR}" != "aosp" ]]; then
     # Since we are using aosp-staging, we need to update the AOSP symbol list
     # too.
     #
@@ -275,6 +281,14 @@ function update_aosp_to_tot {
     git -C aosp show --quiet ${GKI_REMOTE}/${GKI_BRANCH}:"${PIXEL_SYMBOL_LIST}" \
       > aosp/"${PIXEL_SYMBOL_LIST}"
     apply_to_aosp_symbol_list ${KERNEL_DIR} "aosp/${PIXEL_SYMBOL_LIST}"
+    # Sometimes protected exports are not up to date, which blocks abi update.
+    bazel_run //aosp:kernel_aarch64_abi_update_protected_exports
+    # Update abi in aosp, return 0: no update, 4: updated
+    bazel_run //aosp:kernel_aarch64_abi_update
+    ret="$?"
+    if (( ret != 4 )); then
+      exit_if_error ${ret} "Failed to update abi_gki_aarch64.stg"
+    fi
 
     # Create the AOSP symbol list commit
     commit_the_symbol_list "aosp"
@@ -287,8 +301,17 @@ verify_aosp_tree
 
 if [ "${CONTINUE_AFTER_REBASE}" = "0" ]; then
   # Update the symbol list now
-  tools/bazel run --config=${TARGET} --config=fast //private/devices/google/${TARGET}:${CHIPSET}_${TARGET}_abi_update_symbol_list
+  bazel_run ${KERNEL_TARGET}_abi_update_symbol_list
   exit_if_error $? "Failed to update the ${TARGET} symbol list"
+
+  # Sometimes protected exports are not up to date, which blocks abi update.
+  bazel_run //${KERNEL_DIR}:kernel_aarch64_abi_update_protected_exports
+  # Update abi, return 0: no update, 4: updated
+  bazel_run //${KERNEL_DIR}:kernel_aarch64_abi_update
+  ret="$?"
+  if (( ret != 4 )); then
+    exit_if_error ${ret} "Failed to update abi_gki_aarch64.stg"
+  fi
 
   if [ -z "${BUG}" ]; then
     # Not committing the change
@@ -302,6 +325,8 @@ if [ "${CONTINUE_AFTER_REBASE}" = "0" ]; then
 fi
 
 # Rebase the symbol list change to the AOSP ToT
-update_aosp_to_tot
+if [ -z "$BUILD_ON_BUILD_BOT" ]; then
+  update_aosp_to_tot
+fi
 
 print_final_message

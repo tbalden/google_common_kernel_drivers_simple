@@ -18,6 +18,10 @@
 	maxim,filtercfg-default = /bits/ 16 <0xc613>;
 	maxim,filtercfg-adjust = /bits/ 16 <0xc617>;
 
+	maxim,r_regval_1720x = /bits/ 16 <
+        0x2A 0x143b     /* RelaxCfg Register */
+    >;
+
 	maxim,fg-data {
 		#include "gs201-cheetah-battery-data.dtsi"
 	};

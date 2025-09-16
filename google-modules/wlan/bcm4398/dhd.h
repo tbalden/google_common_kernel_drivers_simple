@@ -3316,6 +3316,13 @@ extern int wl_iw_send_priv_event(struct net_device *dev, char *flag);
 extern void dhd_flush_rx_tx_wq(dhd_pub_t *dhdp);
 #endif /* DHD_PCIE_NATIVE_RUNTIMEPM */
 
+#ifdef __linux__
+bool dhd_check_del_in_progress(dhd_pub_t *dhdp, uint8 ifindex);
+#else
+static INLINE bool dhd_check_del_in_progress(dhd_pub_t *dhdp, uint8 ifindex)
+{ return FALSE; }
+#endif
+
 /*
  * Insmod parameters for debug/test
  */
@@ -4414,6 +4421,9 @@ static INLINE void dhd_pktid_logging_dump(dhd_pub_t *dhdp) { }
 #endif /* __linux__ */
 #endif /* DHD_MAP_PKTID_LOGGING */
 
+#ifdef DHD_DUMP_RXPKTIDMAP
+void dhd_dump_rxpktidmap(dhd_pub_t *dhd);
+#endif /* DHD_DUMP_RXPKTIDMAP */
 #ifdef DHD_PCIE_RUNTIMEPM
 #define DEFAULT_DHD_RUNTIME_MS 100
 #ifndef CUSTOM_DHD_RUNTIME_MS

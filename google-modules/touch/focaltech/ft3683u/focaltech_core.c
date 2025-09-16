@@ -744,64 +744,53 @@ static int fts_input_pen_report(struct fts_ts_data *data)
 }
 #endif
 
-struct fts_heatmap_st {
-// TODO: be care TX, RX number between difference project
-// if heatmap struct is very similar with next project, please make it protable
-    union {
-        struct {
-            u8 count;
-            u16 mc[576];
-            u16 sc_water_rx[36];
-            u16 sc_water_tx[16];
-            u16 dummy1[9];
-            u16 sc_normal_rx[36];
-            u16 sc_normal_tx[16];
-            u16 dummy2[9];
-        };
-        u8 data[1397];
-    };
-};
-
-#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
-static void fts_show_heatmap_buffer(struct fts_ts_data *ts_data, u8 *data, int datalen)
+static int goog_create_heatmap_data(struct fts_ts_data *ts_data)
 {
-  struct fts_heatmap_st* heatmap;
-  int i, j;
-  char *tmpbuf = NULL;
-  int count = 0;
-
-  if (data == NULL || datalen < FTS_FULL_TOUCH_DATA_SIZE)
-    return ;
-
-  tmpbuf = kzalloc(1024, GFP_KERNEL);
-  if (!tmpbuf) {
-    FTS_ERROR("tmpbuf zalloc fail");
-    return ;
-  }
-
-  heatmap = (struct fts_heatmap_st*)(data + FTS_CAP_DATA_LEN + FTS_CAP_DUMMY_DATA_SIZE);
+  if (ts_data == NULL)
+    return -EINVAL;
 
   u8 tx = ts_data->pdata->tx_ch_num;
   u8 rx = ts_data->pdata->rx_ch_num;
-  for (i = 0 ; i < tx; i++ ) {
-    for (j = 0; j < rx; j++) {
-      count += scnprintf(tmpbuf + count, 1024 - count, "%d,",
-        (int16_t)heatmap->mc[i*rx + j]);
-    }
 
-    FTS_DEBUG("%s", tmpbuf);
-    count = 0;
+  int mutual_data_size = tx * rx * sizeof(u16);
+  int self_data_size = (tx + rx)* sizeof(u16);
+
+  FTS_DEBUG("Allocate mutual_data size=%d\n", mutual_data_size);
+  ts_data->mutual_data = kzalloc(mutual_data_size, GFP_KERNEL);
+  if (!ts_data->mutual_data) {
+    FTS_ERROR("allocate mutual_data failed\n");
+    return -ENOMEM;
   }
 
-  if (tmpbuf) {
-    kfree(tmpbuf);
-    tmpbuf = NULL;
+  FTS_DEBUG("Allocate self_data size=%d\n", self_data_size);
+  ts_data->self_normal_data = kzalloc(self_data_size, GFP_KERNEL);
+  if (!ts_data->self_normal_data) {
+    FTS_ERROR("allocate self_normal_data failed\n");
+    return -ENOMEM;
   }
+
+  ts_data->self_water_data = kzalloc(self_data_size, GFP_KERNEL);
+  if (!ts_data->self_water_data) {
+    FTS_ERROR("allocate self_water_data failed\n");
+    return -ENOMEM;
+  }
+
+  return 0;
 }
 
+static void goog_remove_heatmap_data(struct fts_ts_data *ts_data)
+{
+  if (ts_data == NULL)
+    return;
+
+  kfree_safe(ts_data->mutual_data);
+  kfree_safe(ts_data->self_water_data);
+  kfree_safe(ts_data->self_normal_data);
+}
+
+extern void transpose_raw(u8 *src, u8 *dist, int tx, int rx, bool big_endian);
 static void goog_handle_heatmap_format(struct fts_ts_data *ts_data, u8 *data, int datalen)
 {
-  int i, j;
   if (data == NULL || datalen < FTS_FULL_TOUCH_DATA_SIZE)
     return ;
 
@@ -809,23 +798,29 @@ static void goog_handle_heatmap_format(struct fts_ts_data *ts_data, u8 *data, in
   u8 rx = ts_data->pdata->rx_ch_num;
 
   int mc_index = FTS_CAP_DATA_LEN + FTS_CAP_DUMMY_DATA_SIZE;
-  int sc_water_index = FTS_CAP_DATA_LEN + FTS_CAP_DUMMY_DATA_SIZE + FTS_MUTUAL_DATA_SIZE;
-  int sc_normal_index = FTS_CAP_DATA_LEN + FTS_CAP_DUMMY_DATA_SIZE + FTS_MUTUAL_DATA_SIZE +FTS_SELF_DATA_SIZE;
-  int heatmap_range[3][2] = {
-    {mc_index, mc_index + FTS_MUTUAL_DATA_SIZE},
-    {sc_water_index, sc_water_index + (tx + rx) * 2},
-    {sc_normal_index, sc_normal_index + (tx + rx) * 2},
-  };
+  transpose_raw(data + mc_index, (u8*)ts_data->mutual_data, tx, rx, false);
 
-  for (i = 0; i < 3; i++) {
-    for (j = heatmap_range[i][0]; j < heatmap_range[i][1]; j = j+2) {
-        be16_to_cpus((u16*)(data + j));
-    }
+  int i;
+  int sc_water_index = FTS_CAP_DATA_LEN + FTS_CAP_DUMMY_DATA_SIZE + FTS_MUTUAL_DATA_SIZE;
+  for (i = 0; i < tx; i++) {
+    ts_data->self_water_data[i] = be16_to_cpup((u16*)(data + sc_water_index + (rx + i)*2)) ;
+  }
+
+  for (i = 0; i < rx; i++) {
+    ts_data->self_water_data[tx + i] = be16_to_cpup((u16*)(data + sc_water_index + i*2)) ;
+  }
+
+  int sc_normal_index = FTS_CAP_DATA_LEN + FTS_CAP_DUMMY_DATA_SIZE + FTS_MUTUAL_DATA_SIZE +FTS_SELF_DATA_SIZE;
+  for (i = 0; i < tx; i++) {
+    ts_data->self_normal_data[i] = be16_to_cpup((u16*)(data + sc_normal_index + (rx + i)*2)) ;
+  }
+
+  for (i = 0; i < rx; i++) {
+    ts_data->self_normal_data[tx + i] = be16_to_cpup((u16*)(data + sc_normal_index + i*2)) ;
   }
 
   return ;
 }
-#endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 
 #if GOOGLE_REPORT_MODE
 static void fts_update_abnormal_reset(struct fts_ts_data *data,
@@ -840,6 +835,7 @@ static void fts_update_abnormal_reset(struct fts_ts_data *data,
           break;
         case 2:
           FTS_ERROR("Touch ic reset: Software reset");
+          fts_update_feature_setting(data);
           break;
         case 3:
           FTS_ERROR("Touch ic reset: AFE watchdog");
@@ -847,6 +843,7 @@ static void fts_update_abnormal_reset(struct fts_ts_data *data,
           break;
         case 4:
           FTS_ERROR("Touch ic reset: Hardware reset");
+          fts_update_feature_setting(data);
           break;
         case 5:
           FTS_ERROR("Touch ic reset: Power on");
@@ -974,11 +971,7 @@ static int fts_read_touchdata(struct fts_ts_data *data)
     }
 
 
-#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
     goog_handle_heatmap_format(data, buf, data->pnt_buf_size);
-    if (data->log_level == 4)
-      fts_show_heatmap_buffer(data, buf, data->pnt_buf_size);
-#endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 
     if (data->log_level >= 5)
         fts_show_touch_buffer(buf, data->pnt_buf_size);
@@ -1025,7 +1018,7 @@ static int fts_read_parse_touchdata(struct fts_ts_data *data)
     }
 
     if (data->point_num > max_touch_num) {
-        FTS_DEBUG("invalid point_num(%d)", data->point_num);
+        //FTS_DEBUG("invalid point_num(%d)", data->point_num);
         data->point_num = 0;
         return -EIO;
     }
@@ -1035,7 +1028,7 @@ static int fts_read_parse_touchdata(struct fts_ts_data *data)
 	case TOUCH_PROTOCOL_v2:
 		event_num = buf[FTS_TOUCH_E_NUM] & 0x0F;
 		if (!event_num || (event_num > max_touch_num)) {
-			FTS_ERROR("invalid touch event num(%d)", event_num);
+			//FTS_ERROR("invalid touch event num(%d)", event_num);
 			return -EIO;
 		}
 
@@ -2100,6 +2093,12 @@ static int fts_ts_probe_entry(struct fts_ts_data *ts_data)
         FTS_ERROR("create apk debug node fail");
     }
 
+    ret = goog_create_heatmap_data(ts_data);
+    if (ret) {
+        FTS_ERROR("create heatmap data fail");
+        goto err_heatmap_data;
+    }
+
 #if GOOGLE_REPORT_MODE
     memset(ts_data->current_host_status.data, 0, sizeof(struct fw_status_ts));
 #endif
@@ -2204,6 +2203,9 @@ static int fts_ts_probe_entry(struct fts_ts_data *ts_data)
 err_irq_req:
     cpu_latency_qos_remove_request(&ts_data->pm_qos_req);
 
+    goog_remove_heatmap_data(ts_data);
+err_heatmap_data:
+
 #if FTS_POWER_SOURCE_CUST_EN
 err_power_init:
     fts_power_source_exit(ts_data);
@@ -2236,6 +2238,8 @@ static int fts_ts_remove_entry(struct fts_ts_data *ts_data)
 {
     FTS_FUNC_ENTER();
 
+    fts_fwupg_exit(ts_data);
+
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
     if (ts_data->gti)
         goog_gti_remove(ts_data);
@@ -2259,14 +2263,11 @@ static int fts_ts_remove_entry(struct fts_ts_data *ts_data)
 
     fts_ex_mode_exit(ts_data);
 
-    fts_fwupg_exit(ts_data);
-
 #if FTS_ESDCHECK_EN
     fts_esdcheck_exit(ts_data);
 #endif
 
     fts_gesture_exit(ts_data);
-    fts_bus_exit(ts_data);
 
     input_unregister_device(ts_data->input_dev);
 #if FTS_PEN_EN
@@ -2276,8 +2277,13 @@ static int fts_ts_remove_entry(struct fts_ts_data *ts_data)
     cancel_work_sync(&ts_data->suspend_work);
     cancel_work_sync(&ts_data->resume_work);
 
-    if (ts_data->ts_workqueue)
-        destroy_workqueue(ts_data->ts_workqueue);
+    if (ts_data->ts_workqueue) {
+      flush_workqueue(ts_data->ts_workqueue);
+      destroy_workqueue(ts_data->ts_workqueue);
+      ts_data->ts_workqueue = NULL;
+    }
+
+    fts_bus_exit(ts_data);
 
     cpu_latency_qos_remove_request(&ts_data->pm_qos_req);
 
@@ -2306,6 +2312,8 @@ static int fts_ts_remove_entry(struct fts_ts_data *ts_data)
     fts_power_source_exit(ts_data);
 #endif
 
+    goog_remove_heatmap_data(ts_data);
+
     kfree_safe(ts_data->point_buf);
     kfree_safe(ts_data->events);
 
@@ -2317,7 +2325,7 @@ static int fts_ts_remove_entry(struct fts_ts_data *ts_data)
     return 0;
 }
 
-static int fts_write_reg_safe(u8 reg, u8 write_val) {
+int fts_write_reg_safe(u8 reg, u8 write_val) {
     int ret = 0;
     int i;
     int j;
@@ -2390,7 +2398,7 @@ int fts_set_grip_mode(struct fts_ts_data *ts_data, u8 grip_mode)
 {
     int ret = 0;
     bool en = grip_mode % 2;
-    u8 value = en ? 0x00 : 0xAA;
+    u8 value = en ? 0x01 : 0xAA;
     u8 reg = FTS_REG_EDGE_MODE_EN;
 
     ret = fts_write_reg_safe(reg, value);
@@ -2432,6 +2440,43 @@ int fts_set_glove_mode(struct fts_ts_data *ts_data, bool en)
     return ret;
 }
 
+int fts_set_continuous_mode(u8 mode)
+{
+    int ret = 0;
+    bool is_continuous = false;
+    u8 continuous_frame = 0;
+
+    // Bit   [0]: 0 -> Non Continuous, 1 -> Continuous
+    // Bit [7:1]: continuous frame number
+
+    is_continuous = mode & 0x01;
+    continuous_frame = (mode >> 1) & 0xFF;
+
+    FTS_INFO("Set continuous mode: %s, continuous frame: %u ",
+             is_continuous ? "continuous" : "non-continuous", continuous_frame);
+
+    ret = fts_write_reg_safe(FTS_REG_CONTINUOUS_EN, mode);
+    if (ret < 0) {
+        FTS_ERROR("write reg_0xE7 fails");
+        return ret;
+    }
+
+    return ret;
+}
+
+int fts_set_irq_report_onoff(bool en) {
+    int ret = 0;
+    u8 value = en ? ENABLE : DISABLE;
+    u8 reg = FTS_REG_IRQ_ONOFF;
+
+    ret = fts_write_reg_safe(reg, value);
+
+    FTS_DEBUG("switch touch IRQ report %s (%s)", en ? "ON" : "OFF",
+        (ret == 0) ? "successfully" : "failed");
+
+    return ret;
+}
+
 /**
  * fts_update_feature_setting()
  *
@@ -2449,6 +2494,8 @@ void fts_update_feature_setting(struct fts_ts_data *ts_data)
 
     goog_notify_fw_status_changed(ts_data->gti, GTI_FW_STATUS_RESET, &gti_status_data);
 #endif /* IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE) */
+
+    fts_set_irq_report_onoff(ENABLE);
 }
 
 static int fts_ts_suspend(struct device *dev)
@@ -2703,11 +2750,6 @@ static void fts_ts_remove(struct spi_device *spi)
     fts_ts_remove_entry(spi_get_drvdata(spi));
 }
 
-static void fts_ts_shutdown(struct spi_device *spi)
-{
-    fts_ts_remove(spi);
-}
-
 static const struct spi_device_id fts_ts_id[] = {
     {FTS_DRIVER_NAME, 0},
     {},
@@ -2721,7 +2763,6 @@ MODULE_DEVICE_TABLE(of, fts_dt_match);
 static struct spi_driver fts_ts_driver = {
     .probe = fts_ts_probe,
     .remove = fts_ts_remove,
-    .shutdown = fts_ts_shutdown,
     .driver = {
         .name = FTS_DRIVER_NAME,
         .owner = THIS_MODULE,

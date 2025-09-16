@@ -24,6 +24,7 @@
 #include "gs201/gs201-ravenclaw-uwb.dtsi"
 
 #include "gs201-pantah-camera-pmic.dtsi"
+#include "gs201-pantah-haptics.dtsi"
 #include "gs201-cheetah-camera.dtsi"
 #include "gs201-cheetah-display.dtsi"
 #include "gs201-cheetah-pmic.dtsi"

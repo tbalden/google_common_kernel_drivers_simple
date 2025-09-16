@@ -582,7 +582,7 @@ static int gcip_pin_user_pages(struct device *dev, struct page **pages, unsigned
 			       struct mutex *pin_user_pages_lock)
 {
 	int ret, i;
-	__maybe_unused struct vm_area_struct **vmas = NULL;
+	struct vm_area_struct **vmas = NULL;
 
 	ret = gcip_pin_user_pages_fast(pages, start_addr, num_pages, gup_flags,
 				       pin_user_pages_lock);
@@ -596,7 +596,6 @@ static int gcip_pin_user_pages(struct device *dev, struct page **pages, unsigned
 	vmas = kvmalloc((num_pages * sizeof(*vmas)), GFP_KERNEL | __GFP_NOWARN);
 	if (!vmas)
 		return -ENOMEM;
-
 	if (pin_user_pages_lock)
 		mutex_lock(pin_user_pages_lock);
 	mmap_read_lock(current->mm);
@@ -608,7 +607,6 @@ static int gcip_pin_user_pages(struct device *dev, struct page **pages, unsigned
 		mutex_unlock(pin_user_pages_lock);
 
 	kvfree(vmas);
-
 	if (ret < num_pages) {
 		if (ret > 0) {
 			dev_err(dev, "Can only lock %u of %u pages requested", ret, num_pages);
