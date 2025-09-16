@@ -61,7 +61,7 @@
 
 #define FTS_STTW_E5_BUF_LEN                 14
 #define FTS_LPTW_E3_BUF_LEN                 12
-#define FTS_LPTW_E4_BUF_LEN                 20
+#define FTS_LPTW_E4_BUF_LEN                 24
 #define FTS_LPTW_BUF_LEN                    (max(FTS_LPTW_E3_BUF_LEN, FTS_LPTW_E4_BUF_LEN))
 
 #define FILE_NAME_LENGTH                    128
@@ -115,6 +115,7 @@
 #define FTS_REG_IRQ_ONOFF                   0xEB
 #define FTS_REG_INT2                        0xBF
 #define FTS_REG_CLR_RESET                   0xEC
+#define FTS_REG_FW_MAJOR_MINOR_ORIENTATION  0xEE
 
 #define FTS_REG_WAKEUP                      0x95
 #define FTS_WAKEUP_VALUE                    0x55
@@ -125,7 +126,14 @@
 #define FTS_LPTW_REG_SET_E4                 0xE4
 #define FTS_STTW_REG_SET_E5                 0xE5
 #define FTS_GESTURE_MAJOR_MINOR             0xE1
-#define FTS_REG_COORDINATE_FILTER          0xE6
+
+#define FTS_REG_COORDINATE_FILTER           0xE6
+// bit0 disable mapping
+// bit1 disable smooth
+// bit2 disable stable
+#define FTS_REG_COORDINATE_FILTER_ENABLE    0x07
+#define FTS_REG_COORDINATE_FILTER_DISABLE   0x00
+
 #define FTS_REG_CONTINUOUS_EN               0xE7
 
 #define FTS_REG_CUSTOMER_STATUS             0xB2    // follow FTS_CUSTOMER_STATUS.

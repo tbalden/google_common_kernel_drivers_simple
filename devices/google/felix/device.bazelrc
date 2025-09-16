@@ -2,5 +2,5 @@
 #
 # Copyright (C) 2022 Google LLC
 
-build:felix --//private/devices/google/common:kernel=//private/devices/google/felix:kernel
-build:felix --//private/google-modules/soc/gs:gs_soc_module=//private/devices/google/felix:gs201_soc.felix
+build:felix --config=gs201_base
+build:felix --//private/devices/google/common:kernel=//private/devices/google/felix:felix/kernel

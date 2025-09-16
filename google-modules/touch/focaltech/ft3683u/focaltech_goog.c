@@ -13,6 +13,10 @@
 
 #include <goog_touch_interface.h>
 
+#define TX_RX_MAX_NUMBER                               52
+#define CONTINUOUS_REPORT_VALUE_ALWAYS_CONTINUOUS      0x01
+#define CONTINUOUS_REPORT_VALUE_NOT_CONTINUOUS         0x00
+
 static irqreturn_t goog_fts_irq_ts(int irq, void *data)
 {
     struct fts_ts_data *ts_data = data;
@@ -31,7 +35,47 @@ static irqreturn_t goog_fts_irq_handler(int irq, void *data)
     return IRQ_HANDLED;
 }
 
-static int google_enter_normal_sensing(struct fts_ts_data *ts_data)
+static int goog_enter_deep_sleep_mode(struct fts_ts_data *ts_data)
+{
+    int ret = 0;
+    int i = 0;
+    u8 wake_value = 0;
+    mutex_lock(&ts_data->reg_lock);
+
+    ret = fts_write_reg(FTS_REG_POWER_MODE, FTS_REG_POWER_MODE_SLEEP);
+    if (ret < 0) {
+      FTS_ERROR("Write reg(%x) = %x fail", FTS_REG_POWER_MODE,
+                FTS_REG_POWER_MODE_SLEEP);
+      goto exit;
+    }
+
+    for (i = 0; i < 200; i++) {
+        ret = fts_read_reg(FTS_REG_WAKEUP, &wake_value);
+        if (ret < 0) {
+          FTS_ERROR("read reg0x(%x) fails", FTS_REG_WAKEUP);
+          goto exit;
+        }
+
+        // reg(0x95) == 0xAA: success entr deep sleep mode
+        if (wake_value == 0xAA)
+            break;
+
+        usleep_range(1000, 1000);
+    }
+
+    if (i >= 200) {
+        FTS_ERROR("Enter deep sleep failed");
+        goto exit;
+    } else {
+        FTS_INFO("Enter deep sleep (%d ms)", i);
+    }
+exit:
+    mutex_unlock(&ts_data->reg_lock);
+    return ret;
+}
+
+
+static int goog_enter_normal_sensing(struct fts_ts_data *ts_data)
 {
     int ret = 0;
     int i = 0;
@@ -110,13 +154,17 @@ static int goog_fts_ts_suspend(struct device *dev)
         FTS_ERROR("Suspend has been cancelled by wake up timeout");
         return ret;
     }
+
+    // Clear reset flag
+    fts_write_reg(FTS_REG_CLR_RESET, 0x01);
+
     FTS_INFO("Device has been reset");
 
+    fts_set_irq_report_onoff(ENABLE);
+
     FTS_DEBUG("make TP enter into sleep mode");
-    mutex_lock(&ts_data->reg_lock);
-    ret = fts_write_reg(FTS_REG_POWER_MODE, FTS_REG_POWER_MODE_SLEEP);
+    ret = goog_enter_deep_sleep_mode(ts_data);
     ts_data->is_deepsleep = true;
-    mutex_unlock(&ts_data->reg_lock);
     if (ret < 0)
       FTS_ERROR("set TP to sleep mode fail, ret=%d", ret);
 
@@ -140,7 +188,7 @@ static int goog_fts_ts_resume(struct device *dev)
     if (ret < 0)
       FTS_ERROR("set pinctrl normal fail, ret=%d", ret);
 
-    ret = google_enter_normal_sensing(ts_data);
+    ret = goog_enter_normal_sensing(ts_data);
     if (ret < 0) {
       FTS_ERROR("Fail to enter normal power mode, trigger reset to recover\n");
       fts_reset_proc(FTS_RESET_INTERVAL);
@@ -171,7 +219,7 @@ extern int fts_test_get_raw(int *raw, u8 tx, u8 rx);
 extern int fts_test_get_short(int *short_data, u8 tx, u8 rx);
 extern int fts_test_get_short_ch_to_gnd(int *res, u8 *ab_ch, u8 tx, u8 rx);
 extern int fts_test_get_short_ch_to_ch(int *res, u8 *ab_ch, u8 tx, u8 rx);
-extern size_t google_internal_sttw_setting_read(char *buf, size_t buf_size);
+extern size_t goog_internal_sttw_setting_read(char *buf, size_t buf_size);
 
 // Reference: proc_test_raw_show
 static int goog_selfttest_test_raw(void)
@@ -210,6 +258,13 @@ static int goog_selfttest_test_raw(void)
         FTS_ERROR("read rx fails");
         goto exit;
     }
+
+    if (tx > TX_RX_MAX_NUMBER || rx > TX_RX_MAX_NUMBER) {
+        FTS_ERROR("Error: tx(%u), rx(%u): out of bound", tx, rx);
+        ret = -ENODATA;
+        goto exit;
+    }
+
 
     node_num = tx * rx;
     raw = fts_malloc(node_num * sizeof(int));
@@ -308,6 +363,12 @@ static int goog_selfttest_test_short(void)
     ret = fts_read_reg(FACTORY_REG_CHY_NUM, &rx);
     if (ret < 0) {
         FTS_ERROR("read rx fails");
+        goto exit;
+    }
+
+    if (tx > TX_RX_MAX_NUMBER || rx > TX_RX_MAX_NUMBER) {
+        FTS_ERROR("Error: tx(%u), rx(%u): out of bound", tx, rx);
+        ret = -ENODATA;
         goto exit;
     }
 
@@ -515,6 +576,14 @@ exit:
     return ret;
 }
 
+static int gti_set_continuous_report(void *private_data, struct gti_continuous_report_cmd *cmd)
+{
+    u8 mode = cmd->setting == GTI_CONTINUOUS_REPORT_ENABLE ?
+        CONTINUOUS_REPORT_VALUE_ALWAYS_CONTINUOUS : CONTINUOUS_REPORT_VALUE_NOT_CONTINUOUS;
+
+    return fts_set_continuous_mode(mode);
+}
+
 // Reference: fts_driverinfo_show
 static int gti_get_fw_version(void *private_data,
                               struct gti_fw_version_cmd *cmd)
@@ -566,7 +635,7 @@ static int gti_get_fw_version(void *private_data,
                       "BUS:%s,mode:%d,max_freq:%d\n", "SPI",
                       ts_data->spi->mode, ts_data->spi->max_speed_hz);
 
-    count += google_internal_sttw_setting_read(buf + count, buf_size - count);
+    count += goog_internal_sttw_setting_read(buf + count, buf_size - count);
 exit:
 
     return ret;
@@ -576,7 +645,8 @@ exit:
 static int gti_set_irq_mode(void *private_data,
                               struct gti_irq_cmd *cmd)
 {
-    struct input_dev *input_dev = fts_data->input_dev;
+    struct fts_ts_data *ts_data = private_data;
+    struct input_dev *input_dev = ts_data->input_dev;
 
     mutex_lock(&input_dev->mutex);
     if (cmd->setting == GTI_IRQ_MODE_ENABLE) {
@@ -603,8 +673,8 @@ static int gti_get_irq_mode(void *private_data,
 // Reference: fts_hw_reset_show
 static int gti_reset(void *private_data, struct gti_reset_cmd *cmd)
 {
-    struct input_dev *input_dev = fts_data->input_dev;
     struct fts_ts_data *ts_data = private_data;
+    struct input_dev *input_dev = ts_data->input_dev;
     int ret = 0;
 
     mutex_lock(&input_dev->mutex);
@@ -621,8 +691,7 @@ static int gti_reset(void *private_data, struct gti_reset_cmd *cmd)
         goto exit;
       }
     } else if (cmd->setting == GTI_RESET_MODE_HW || cmd->setting == GTI_RESET_MODE_AUTO) {
-      fts_reset_proc(0);
-      fts_update_feature_setting(ts_data);
+        fts_reset_proc(FTS_RESET_INTERVAL);
     } else {
       ret = -EOPNOTSUPP;
     }
@@ -636,7 +705,7 @@ exit:
 // Reference: proc_grip_read
 static int gti_get_grip_mode(void *private_data, struct gti_grip_cmd *cmd)
 {
-    struct fts_ts_data *ts_data = fts_data;
+    struct fts_ts_data *ts_data = private_data;
 
     cmd->setting = (ts_data->enable_fw_grip % 2) ?
         GTI_GRIP_ENABLE : GTI_GRIP_DISABLE;
@@ -644,11 +713,29 @@ static int gti_get_grip_mode(void *private_data, struct gti_grip_cmd *cmd)
     return 0;
 }
 
+static int gti_set_fw_shape_algo_mode(bool enable)
+{
+    int ret = 0;
+    u8 value = enable ? 0x01 : 0x00;
+    u8 reg = FTS_REG_FW_MAJOR_MINOR_ORIENTATION;
+
+    ret = fts_write_reg_safe(reg, value);
+
+    FTS_INFO("%s fw_shape_algo %s.\n", enable ? "Enable" : "Disable",
+        (ret == 0)  ? "successfully" : "unsuccessfully");
+    return ret;
+}
+
 // Reference: proc_grip_write
 static int gti_set_grip_mode(void *private_data, struct gti_grip_cmd *cmd)
 {
-    struct fts_ts_data *ts_data = fts_data;
+    struct fts_ts_data *ts_data = private_data;
     int ret = 0;
+
+    // Due to firmware performance limitations, disable firmware reporting of
+    // major/minor/orientation when using the in-house algorithm .
+    ret = gti_set_fw_shape_algo_mode(
+        cmd->setting == GTI_GRIP_ENABLE ? ENABLE : DISABLE);
 
     ts_data->enable_fw_grip = (cmd->setting == GTI_GRIP_ENABLE) ?
         FW_GRIP_ENABLE : FW_GRIP_DISABLE;
@@ -679,7 +766,7 @@ static int gti_ping(void *private_data, struct gti_ping_cmd *cmd)
 // Reference:
 static int gti_get_sensing_mode(void *private_data, struct gti_sensing_cmd *cmd)
 {
-    struct fts_ts_data *ts_data = fts_data;
+    struct fts_ts_data *ts_data = private_data;
 
     cmd->setting = (!ts_data->is_deepsleep) ?
         GTI_SENSING_MODE_ENABLE : GTI_SENSING_MODE_DISABLE;
@@ -698,27 +785,237 @@ static int gti_set_sensing_mode(void *private_data, struct gti_sensing_cmd *cmd)
     return 0;
 }
 
+extern int fts_test_get_strength(u8 *base_raw, u16 base_raw_size);
+extern void transpose_raw(u8 *src, u8 *dist, int tx, int rx, bool big_endian);
+static int gti_get_mutual_or_self_sensor_data(void *private_data, struct gti_sensor_data_cmd *cmd)
+{
+    struct fts_ts_data *ts_data = private_data;
+    u8 tx = ts_data->pdata->tx_ch_num;
+    u8 rx = ts_data->pdata->rx_ch_num;
+    int i = 0;
+    int ret = 0;
+    int heatmap_mode = 0;
+    short *temp_pointer = NULL;
+    short base_result = 0;
+
+    int ms_cap_idx = FTS_CAP_DATA_LEN + 28 + 1;
+    int ss_cap_on_idx = ms_cap_idx + tx * rx * sizeof(u16);
+    int ss_cap_off_idx = ss_cap_on_idx + FTS_SELF_DATA_LEN * sizeof(u16);
+    int node_num = tx * rx;
+    int self_node = tx + rx;
+    u8 *base_raw = NULL;
+    int base_raw_size = FTS_FULL_TOUCH_RAW_SIZE(tx, rx);
+    u8 *trans_raw = NULL;
+    int trans_raw_size = node_num * sizeof(u16);
+    u8 *out_buffer = NULL;
+
+    if (cmd->type == GTI_SENSOR_DATA_TYPE_MS) {
+      cmd->buffer = (u8 *)ts_data->mutual_data;
+      cmd->size = tx * rx * sizeof(uint16_t);
+      return 0;
+    } else if (cmd->type == GTI_SENSOR_DATA_TYPE_SS) {
+        if (cmd->type & TOUCH_DATA_TYPE_FILTERED) {
+          cmd->buffer = (u8*) ts_data->self_water_data;
+        } else {
+          cmd->buffer = (u8*) ts_data->self_normal_data;
+        }
+        cmd->size = (tx + rx) * sizeof(uint16_t);
+        return 0;
+    }
+
+    switch (cmd->type) {
+      case GTI_SENSOR_DATA_TYPE_MS_BASELINE:
+      case GTI_SENSOR_DATA_TYPE_SS_BASELINE:
+        heatmap_mode = FW_HEATMAP_MODE_BASELINE;
+        break;
+      case GTI_SENSOR_DATA_TYPE_MS_DIFF:
+      case GTI_SENSOR_DATA_TYPE_SS_DIFF:
+        heatmap_mode = FW_HEATMAP_MODE_DIFF;
+        break;
+      case GTI_SENSOR_DATA_TYPE_MS_RAW:
+      case GTI_SENSOR_DATA_TYPE_SS_RAW:
+        heatmap_mode = FW_HEATMAP_MODE_RAWDATA;
+        break;
+      default:
+        FTS_ERROR("Unsupported report type %u", cmd->type);
+        return -EOPNOTSUPP;
+    }
+
+    fts_set_irq_report_onoff(DISABLE);
+    msleep(10);
+
+    base_raw = fts_malloc(base_raw_size);
+    if (!base_raw) {
+      FTS_ERROR("Failed to allocate memory for base_raw");
+      goto exit;
+    }
+
+    trans_raw = fts_malloc(trans_raw_size);
+    if (!trans_raw) {
+      FTS_ERROR("Failed to allocate memory for trans_raw");
+      goto exit;
+    }
+
+    /*
+      Note: Set scan mode to normal active mode to make sure heatmap data is
+      written correctly (temporary workaround)
+    */
+    ret = fts_write_reg(FTS_REG_POWER_MODE, 0);
+    if (ret < 0) {
+      FTS_ERROR("Failed to write 0 to 0x%X: %d", FTS_REG_POWER_MODE, ret);
+      goto exit;
+    }
+
+    ret = fts_write_reg(FTS_REG_MONITOR_CTRL, 0);
+    if (ret < 0) {
+      FTS_ERROR("Failed to write 0 to 0x%X: %d", FTS_REG_MONITOR_CTRL, ret);
+      goto exit;
+    }
+
+    FTS_DEBUG("Switch to normal active mode successfully");
+
+    /* Delay around 1 frame after switching to normal active mode */
+    msleep(10);
+
+    ret = fts_write_reg_safe(FTS_REG_HEATMAP_98, heatmap_mode);
+    if (ret < 0) {
+      FTS_ERROR("Failed to switch to heatmap mode %u: %d", cmd->type, ret);
+      goto exit;
+    }
+
+    /* Delay around 1 frame after switching heatmap mode */
+    msleep(10);
+
+    ret = fts_test_get_strength(base_raw, base_raw_size);
+    if (ret) {
+      FTS_ERROR("Failed to get strength: %d", ret);
+      goto exit;
+    }
+
+    transpose_raw(base_raw + ms_cap_idx, trans_raw, tx, rx, true);
+
+    if (cmd->type == GTI_SENSOR_DATA_TYPE_SS_BASELINE ||
+        cmd->type == GTI_SENSOR_DATA_TYPE_SS_DIFF ||
+        cmd->type == GTI_SENSOR_DATA_TYPE_SS_RAW)
+        goto self_data;
+
+    out_buffer = fts_malloc(trans_raw_size);
+    if (!out_buffer) {
+      FTS_ERROR("Failed to allocate memory for out buffer");
+      goto exit;
+    }
+
+    temp_pointer = (short *)out_buffer;
+    for (i = 0; i < node_num; i++) {
+      base_result =
+          (int)(trans_raw[(i * 2)] << 8) + (int)trans_raw[(i * 2) + 1];
+      (*temp_pointer) = base_result;
+      temp_pointer++;
+    }
+
+    cmd->buffer = out_buffer;
+    cmd->size = trans_raw_size;
+    goto exit;
+
+self_data:
+    out_buffer = fts_malloc(self_node * sizeof(u16));
+    if (!out_buffer) {
+        FTS_ERROR("Failed to allocate memory for out buffer");
+        goto exit;
+    }
+
+    /* Data in base_raw starts with RX first then TX, but cmd->buffer requires TX to be first */
+    temp_pointer = (short *)out_buffer;
+    for (i = rx; i < self_node; i++) {
+        base_result = (int)(base_raw[(i * 2) + ss_cap_off_idx] << 8) +
+            (int)base_raw[(i * 2) + ss_cap_off_idx + 1];
+        (*temp_pointer) = base_result;
+        temp_pointer++;
+    }
+    for (i = 0; i < rx; i++) {
+        base_result = (int)(base_raw[(i * 2) + ss_cap_off_idx] << 8) +
+            (int)base_raw[(i * 2) + ss_cap_off_idx + 1];
+        (*temp_pointer) = base_result;
+        temp_pointer++;
+    }
+
+    cmd->buffer = out_buffer;
+    cmd->size = self_node * sizeof(u16);
+
+exit:
+    fts_free(trans_raw);
+    fts_free(base_raw);
+
+    ret = fts_write_reg_safe(FTS_REG_HEATMAP_98, FW_HEATMAP_MODE_DIFF);
+    if (ret < 0)
+        FTS_ERROR("Error switching heatmode back to diff");
+
+    ret = fts_write_reg(FTS_REG_MONITOR_CTRL, 1);
+    if (ret < 0)
+        FTS_ERROR("Failed to switch scan mode back to auto: %d", ret);
+
+    fts_set_irq_report_onoff(ENABLE);
+    msleep(10);
+
+  return ret;
+}
+
+static int gti_get_coord_filter_enabled(void *private_data, struct gti_coord_filter_cmd *cmd)
+{
+    int ret = 0;
+    u8 mode = 0;
+
+    ret = fts_read_reg(FTS_REG_COORDINATE_FILTER, &mode);
+    if (ret) {
+      FTS_ERROR("Failed to read coordinate filter reg, ret = %d", ret);
+    } else {
+      FTS_INFO("Coordinate filter reg value is %#x", mode);
+      cmd->setting = mode == FTS_REG_COORDINATE_FILTER_DISABLE ?
+          GTI_COORD_FILTER_DISABLE : GTI_COORD_FILTER_ENABLE;
+    }
+
+    return ret;
+}
+
+static int gti_set_coord_filter_enabled(void *private_data, struct gti_coord_filter_cmd *cmd)
+{
+    int ret = 0;
+    u8 mode = 0;
+
+    mode = cmd->setting == GTI_COORD_FILTER_DISABLE ?
+        FTS_REG_COORDINATE_FILTER_DISABLE : FTS_REG_COORDINATE_FILTER_ENABLE;
+
+    ret = fts_write_reg_safe(FTS_REG_COORDINATE_FILTER, mode);
+    if (ret)
+      FTS_ERROR("Failed to write coordinate filter reg, ret = %d", ret);
+    else
+      FTS_INFO("%s firmware coordinte filter",
+          cmd->setting == GTI_COORD_FILTER_DISABLE ? "Disable" : "Enable");
+
+    return ret;
+}
+
 static void goog_register_options(struct gti_optional_configuration *options,
     struct fts_ts_data *ts)
 {
     //options->calibrate = gti_calibrate;
     //options->get_context_driver = gti_get_context_driver;
-    //options->get_coord_filter_enabled = get_coord_filter_enabled;
+    options->get_coord_filter_enabled = gti_get_coord_filter_enabled;
     options->get_fw_version = gti_get_fw_version;
     options->get_grip_mode = gti_get_grip_mode;
     options->get_irq_mode = gti_get_irq_mode;
-    //options->get_mutual_sensor_data = get_mutual_sensor_data;
+    options->get_mutual_sensor_data = gti_get_mutual_or_self_sensor_data;
     options->get_palm_mode = gti_get_palm_mode;
     options->get_scan_mode = gti_get_scan_mode;
     options->get_screen_protector_mode = gti_get_screen_protector_mode;
-    //options->get_self_sensor_data = get_self_sensor_data;
+    options->get_self_sensor_data = gti_get_mutual_or_self_sensor_data;
     options->get_sensing_mode = gti_get_sensing_mode;
     options->ping = gti_ping;
     //options->post_irq_thread_fn = goodix_ts_post_threadirq_func;
     options->reset = gti_reset;
     options->selftest = gti_selftest;
-    //options->set_continuous_report = set_continuous_report;
-    //options->set_coord_filter_enabled = set_coord_filter_enabled;
+    options->set_continuous_report = gti_set_continuous_report;
+    options->set_coord_filter_enabled = gti_set_coord_filter_enabled;
     //options->set_gesture_config = syna_set_gesture_config;
     options->set_grip_mode = gti_set_grip_mode;
     options->set_irq_mode = gti_set_irq_mode;
@@ -898,6 +1195,8 @@ void goog_gti_probe(struct fts_ts_data *ts_data)
 
     if (retval < 0)
         FTS_ERROR("Failed to request GTI IRQ");
+
+    fts_update_feature_setting(ts_data);
 
 err:
     if (options)

@@ -2,5 +2,5 @@
 #
 # Copyright (C) 2023 Google LLC
 
-build:lynx --//private/devices/google/common:kernel=//private/devices/google/lynx:kernel
-build:lynx --//private/google-modules/soc/gs:gs_soc_module=//private/devices/google/lynx:gs201_soc.lynx
+build:lynx --config=gs201_base
+build:lynx --//private/devices/google/common:kernel=//private/devices/google/lynx:lynx/kernel

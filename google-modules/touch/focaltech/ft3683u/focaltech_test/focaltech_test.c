@@ -271,8 +271,10 @@ int enter_work_mode(void)
     FTS_TEST_FUNC_ENTER();
 
     ret = fts_test_read_reg(DIVIDE_MODE_ADDR, &mode);
-    if ((ret >= 0) && (0x00 == mode))
+    if ((ret >= 0) && (0x00 == mode)) {
+        fts_set_irq_report_onoff(ENABLE);
         return 0;
+    }
 
     for (i = 0; i < ENTER_WORK_FACTORY_RETRIES; i++) {
         ret = fts_test_write_reg(DIVIDE_MODE_ADDR, 0x00);
@@ -283,6 +285,7 @@ int enter_work_mode(void)
                 if ((ret >= 0) && (mode == FTS_REG_WORKMODE_WORK_VALUE)) {
                     FTS_TEST_INFO("enter work mode success");
                     ts_data->work_mode = mode;
+                    fts_set_irq_report_onoff(ENABLE);
                     return 0;
                 } else {
                     sys_delay(FACTORY_TEST_DELAY);
@@ -292,6 +295,8 @@ int enter_work_mode(void)
 
         sys_delay(50);
     }
+
+    fts_set_irq_report_onoff(ENABLE);
 
     if (i >= ENTER_WORK_FACTORY_RETRIES) {
         FTS_TEST_ERROR("Enter work mode fail");
@@ -2695,6 +2700,8 @@ static int proc_test_hw_reset_show(struct seq_file *s, void *v)
 
     fts_reset_proc(200);
 
+    fts_set_irq_report_onoff(ENABLE);
+
     ret = fts_read_reg(FTS_TMP_REG_AD, &tmp_val);
     if (ret < 0) {
         FTS_ERROR("read reg88 fails");
@@ -3164,11 +3171,6 @@ static int proc_test_strength_show(struct seq_file *s, void *v)
     int tp_events_x = 0;
     int tp_events_y = 0;
     u8 tp_events_id = 0;
-
-    ret = enter_work_mode();
-    if (ret < 0) {
-        goto exit;
-    }
 
     node_num = tx * rx;
     self_node = tx + rx;

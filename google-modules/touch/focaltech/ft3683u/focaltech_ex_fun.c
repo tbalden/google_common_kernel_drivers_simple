@@ -647,7 +647,7 @@ static ssize_t fts_hw_reset_show(
     ssize_t count = 0;
 
     mutex_lock(&input_dev->mutex);
-    fts_reset_proc(0);
+    fts_reset_proc(FTS_RESET_INTERVAL);
     count = snprintf(buf, PAGE_SIZE, "hw reset executed\n");
     mutex_unlock(&input_dev->mutex);
 
@@ -1688,7 +1688,7 @@ int gti_set_palm_mode(void *private_data, struct gti_palm_cmd *cmd)
     ts_data->enable_fw_palm = (cmd->setting == GTI_GRIP_ENABLE) ?
         FW_GRIP_ENABLE : FW_GRIP_DISABLE;
 
-    FTS_INFO("switch fw_aplm to %u\n", ts_data->enable_fw_palm);
+    FTS_INFO("switch fw_palm to %u\n", ts_data->enable_fw_palm);
 
     ret = fts_set_palm_mode(ts_data, ts_data->enable_fw_palm);
     if (ret < 0)
@@ -2242,14 +2242,15 @@ static ssize_t proc_LPTW_setting_write(
         return -EFAULT;
     }
 
-    ret = sscanf(tmpbuf, "%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x", &lptw_write_data[0],
+    ret = sscanf(tmpbuf, "%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x", &lptw_write_data[0],
         &lptw_write_data[1], &lptw_write_data[2], &lptw_write_data[3],
         &lptw_write_data[4], &lptw_write_data[5], &lptw_write_data[6],
         &lptw_write_data[7], &lptw_write_data[8], &lptw_write_data[9],
         &lptw_write_data[10], &lptw_write_data[11], &lptw_write_data[12],
         &lptw_write_data[13], &lptw_write_data[14], &lptw_write_data[15],
         &lptw_write_data[16], &lptw_write_data[17], &lptw_write_data[18],
-        &lptw_write_data[19]);
+        &lptw_write_data[19], &lptw_write_data[20], &lptw_write_data[21],
+        &lptw_write_data[22], &lptw_write_data[23]);
 
     if(lptw_write_data[0] == FTS_LPTW_REG_SET_E3)
         data_length = FTS_LPTW_E3_BUF_LEN;
@@ -2316,9 +2317,9 @@ static ssize_t proc_LPTW_setting_read(
         "==LPTW Gesture setting(E3)==\n");
     cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "min_x :%4d\n",
         FTS_TOUCH_HIRES(((readbuf[0] & 0xFF) << 8) + (readbuf[1] & 0xFF)));
-    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "max_x :%4d\n",
-        FTS_TOUCH_HIRES(((readbuf[2] & 0xFF) << 8) + (readbuf[3] & 0xFF)));
     cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "min_y :%4d\n",
+        FTS_TOUCH_HIRES(((readbuf[2] & 0xFF) << 8) + (readbuf[3] & 0xFF)));
+    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "max_x :%4d\n",
         FTS_TOUCH_HIRES(((readbuf[4] & 0xFF) << 8) + (readbuf[5] & 0xFF)));
     cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "max_y :%4d\n",
         FTS_TOUCH_HIRES(((readbuf[6] & 0xFF) << 8) + (readbuf[7] & 0xFF)));
@@ -2346,24 +2347,24 @@ static ssize_t proc_LPTW_setting_read(
         FTS_TOUCH_HIRES(((readbuf[6] & 0xFF) << 8) + (readbuf[7] & 0xFF)));
     cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "INT2_deassert_max_y:%4d\n",
         FTS_TOUCH_HIRES(((readbuf[8] & 0xFF) << 8) + (readbuf[9] & 0xFF)));
+    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "marginal_min_x:%4d\n",
+        FTS_TOUCH_HIRES(((readbuf[10] & 0xFF) << 8) + (readbuf[11] & 0xFF)));
+    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "marginal_min_y:%4d\n",
+        FTS_TOUCH_HIRES(((readbuf[12] & 0xFF) << 8) + (readbuf[13] & 0xFF)));
+    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "marginal_max_x:%4d\n",
+        FTS_TOUCH_HIRES(((readbuf[14] & 0xFF) << 8) + (readbuf[15] & 0xFF)));
+    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt, "marginal_max_y:%4d\n",
+        FTS_TOUCH_HIRES(((readbuf[16] & 0xFF) << 8) + (readbuf[17] & 0xFF)));
     cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "marginal_min_x :%2d\n", (readbuf[10] & 0xFF));
+        "monitor_channel_min_tx :%2d\n", (readbuf[18] & 0xFF));
     cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "marginal_max_x :%2d\n", (readbuf[11] & 0xFF));
+        "monitor_channel_max_tx :%2d\n", (readbuf[19] & 0xFF));
     cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "marginal_min_y :%2d\n", (readbuf[12] & 0xFF));
+        "monitor_channel_min_rx :%2d\n", (readbuf[20] & 0xFF));
     cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "marginal_max_y :%2d\n", (readbuf[13] & 0xFF));
+        "monitor_channel_max_rx :%2d\n", (readbuf[21] & 0xFF));
     cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "monitor_channel_min_tx :%2d\n", (readbuf[14] & 0xFF));
-    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "monitor_channel_max_tx :%2d\n", (readbuf[15] & 0xFF));
-    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "monitor_channel_min_rx :%2d\n", (readbuf[16] & 0xFF));
-    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "monitor_channel_max_rx :%2d\n", (readbuf[17] & 0xFF));
-    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "min_node_count :%2d\n", (readbuf[18] & 0xFF));
+        "min_node_count :%2d\n", (readbuf[22] & 0xFF));
 
     if (copy_to_user(buff, tmpbuf, cnt)) {
         FTS_ERROR("copy to user error");
@@ -2444,7 +2445,7 @@ static ssize_t proc_STTW_setting_write(
 }
 
 /*STTW setting read*/
-size_t google_internal_sttw_setting_read(char *buf, size_t buf_size)
+size_t goog_internal_sttw_setting_read(char *buf, size_t buf_size)
 {
     u8 readbuf[FTS_STTW_E5_BUF_LEN] = {0};
     u8 cmd[2] = {0};
@@ -2499,7 +2500,7 @@ static ssize_t proc_STTW_setting_read(
     if (pos)
         return 0;
 
-    cnt = google_internal_sttw_setting_read(tmpbuf, PROC_BUF_SIZE);
+    cnt = goog_internal_sttw_setting_read(tmpbuf, PROC_BUF_SIZE);
 
     if (copy_to_user(buff, tmpbuf, cnt)) {
         FTS_ERROR("copy to user error");
@@ -2570,8 +2571,6 @@ static ssize_t proc_continuous_report_write(struct file *filp,
     char tmpbuf[PROC_BUF_SIZE] = { 0 };
     int mode = 0xFF;
     int buflen = count;
-    bool is_continuous = false;
-    u8 continuous_frame = 0;
 
     if (buflen >= PROC_BUF_SIZE) {
         FTS_ERROR("proc write length(%d) fails", buflen);
@@ -2591,17 +2590,9 @@ static ssize_t proc_continuous_report_write(struct file *filp,
 
     // Bit   [0]: 0 -> Non Continuous, 1 -> Continuous
     // Bit [7:1]: continuous frame number
-
-    is_continuous = mode & 0x01;
-    continuous_frame = (mode >> 1) & 0xFF;
-
-    FTS_INFO("Set continuous mode: %s\n",
-             is_continuous ? "continuous" : "non-continuous");
-    FTS_INFO("Set continuous frame: %u\n", continuous_frame);
-
-    ret = fts_write_reg(FTS_REG_CONTINUOUS_EN, mode);
+    ret = fts_set_continuous_mode(mode);
     if (ret < 0) {
-        FTS_ERROR("write reg_0xE7 fails");
+        FTS_ERROR("write reg_0xE7 fails %d", ret);
         return ret;
     }
 

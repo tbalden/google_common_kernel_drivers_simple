@@ -19,20 +19,28 @@ def _create_file_impl(ctx):
         )
         srcs.append(content_file)
 
-    add_newline = """
-        echo >> "{out}"
+    command = hermetic_tools.setup
+
+    # Create the file even when there is no srcs or content.
+    command += """
+        touch "{out}"
     """.format(out = out.path)
+
+    # Add newlines between source files.
+    command += """
+        echo >> "{out}"
+    """.format(out = out.path).join([
+        """
+        cat "{src}" >> "{out}"
+        """.format(src = src.path, out = out.path)
+        for src in srcs
+    ])
 
     ctx.actions.run_shell(
         inputs = srcs,
         tools = hermetic_tools.deps,
         outputs = [out],
-        command = hermetic_tools.setup + add_newline.join([
-            """
-            cat "{src}" >> "{out}"
-            """.format(src = src.path, out = out.path)
-            for src in srcs
-        ]),
+        command = command,
     )
 
     return [DefaultInfo(files = depset([out]))]

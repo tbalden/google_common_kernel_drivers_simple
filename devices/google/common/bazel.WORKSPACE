@@ -12,10 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("//build/kernel/kleaf:download_repo.bzl", "download_artifacts_repo")
 load("//build/kernel/kleaf:workspace.bzl", "define_kleaf_workspace")
 
 define_kleaf_workspace()
+
+# Optional epilog for analysis testing.
+load("//build/kernel/kleaf:workspace_epilog.bzl", "define_kleaf_workspace_epilog")
+
+define_kleaf_workspace_epilog()
+
+load("//build/kernel/kleaf:download_repo.bzl", "download_artifacts_repo")
 
 download_artifacts_repo(
     name = "gki_prebuilt_fips140",

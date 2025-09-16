@@ -7,6 +7,7 @@
 #ifndef __EDGETPU_FIRMWARE_H__
 #define __EDGETPU_FIRMWARE_H__
 
+#include <linux/bits.h>
 #include <linux/seq_file.h>
 #include <linux/sizes.h>
 
@@ -21,41 +22,7 @@
 
 #define EDGETPU_FW_HEADER_SIZE SZ_4K
 
-struct edgetpu_image_sub_header_common {
-	int Magic;
-	int Generation;
-	int RollbackInfo;
-	int Length;
-	char Flags[16];
-};
-
-struct edgetpu_image_sub_header_gen1 {
-	char BodyHash[32];
-	char ChipId[32];
-	char AuthConfig[256];
-	struct gcip_image_config ImageConfig;
-};
-
-struct edgetpu_image_sub_header_gen2 {
-	char BodyHash[64];
-	char ChipId[32];
-	char AuthConfig[256];
-	struct gcip_image_config ImageConfig;
-};
-
-struct edgetpu_image_header {
-	char sig[512];
-	char pub[512];
-	struct {
-		struct edgetpu_image_sub_header_common common;
-		union {
-			struct edgetpu_image_sub_header_gen1 gen1;
-			struct edgetpu_image_sub_header_gen2 gen2;
-		};
-	};
-};
-
-/* Value of Magic field above: 'TPUF' as a 32-bit LE int */
+/* Value of magic field above: 'TPUF' as a 32-bit LE int */
 #define EDGETPU_FW_MAGIC	0x46555054
 
 /*
@@ -83,6 +50,14 @@ struct edgetpu_image_header {
  */
 #define EDGETPU_DEFAULT_REMAPPED_DATA_ADDR                                                         \
 	(EDGETPU_INSTRUCTION_REMAP_BASE + EDGETPU_DEFAULT_FW_LIMIT)
+
+/* Firmware client_id fields. */
+#define CLIENT_ID_REALM		GENMASK(31, 30)
+#define CLIENT_ID_VM		GENMASK(29, 16)
+#define CLIENT_ID_PASID		GENMASK(15, 0)
+
+/* Firmware client_id realm IDs. */
+#define CLIENT_REALM_NS		0	/* kHostVmId  */
 
 /*
  * Load and run firmware.

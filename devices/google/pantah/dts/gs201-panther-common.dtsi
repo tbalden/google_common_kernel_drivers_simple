@@ -21,6 +21,7 @@
 #include "gs201-ravenclaw-usecases.dtsi"
 
 #include "gs201-pantah-camera-pmic.dtsi"
+#include "gs201-pantah-haptics.dtsi"
 #include "gs201-panther-camera.dtsi"
 #include "gs201-panther-display.dtsi"
 #include "gs201-panther-pmic.dtsi"

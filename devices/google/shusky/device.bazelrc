@@ -2,5 +2,5 @@
 #
 # Copyright (C) 2022 Google LLC
 
-build:shusky --//private/devices/google/common:kernel=//private/devices/google/shusky:kernel
-build:shusky --//private/google-modules/soc/gs:gs_soc_module=//private/devices/google/shusky:zuma_soc.shusky
+build:shusky --config=zuma_base
+build:shusky --//private/devices/google/common:kernel=//private/devices/google/shusky:shusky/kernel

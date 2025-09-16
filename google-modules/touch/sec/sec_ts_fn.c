@@ -4174,6 +4174,12 @@ static int sec_ts_read_frame_stdev(struct sec_ts_data *ts,
 	frame_tot = 100;
 
 	/* set data length, allocation buffer memory */
+	if (ts->tx_count >= 64 || ts->rx_count >= 64) {
+		ret = -EINVAL;
+		input_err(true, &ts->client->dev, "%s: invalid Tx# %d or Rx# %d!\n",
+			__func__, ts->tx_count, ts->rx_count);
+		goto ErrorAlloc;
+	}
 
 	ret = -ENOMEM;
 	pBuff = kzalloc(buff_size, GFP_KERNEL);

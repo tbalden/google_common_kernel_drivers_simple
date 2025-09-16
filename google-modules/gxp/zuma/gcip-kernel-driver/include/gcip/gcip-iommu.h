@@ -61,8 +61,7 @@
 #define GCIP_MAP_FLAGS_MMIO_OFFSET \
 	(GCIP_MAP_FLAGS_RESTRICT_IOVA_OFFSET + GCIP_MAP_FLAGS_RESTRICT_IOVA_BIT_SIZE)
 #define GCIP_MAP_FLAGS_MMIO_BIT_SIZE 1
-#define GCIP_MAP_FLAGS_MMIO_TO_FLAGS(mmio) \
-	((u64)(mmio) << GCIP_MAP_FLAGS_RESTRICT_IOVA_OFFSET)
+#define GCIP_MAP_FLAGS_MMIO_TO_FLAGS(mmio) ((u64)(mmio) << GCIP_MAP_FLAGS_MMIO_OFFSET)
 
 /* Helper macros to easily create the mapping direction flags. */
 #define GCIP_MAP_FLAGS_DMA_RW GCIP_MAP_FLAGS_DMA_DIRECTION_TO_FLAGS(DMA_BIDIRECTIONAL)
@@ -101,6 +100,21 @@ struct gcip_iommu_domain_ops;
 enum gcip_iommu_mapping_type {
 	GCIP_IOMMU_MAPPING_BUFFER,
 	GCIP_IOMMU_MAPPING_DMA_BUF,
+};
+
+/**
+ * enum gcip_map_debug_flags - Mapping status flags for debugging, noting various attributes of the
+ *                             mapping used for diagnosis of access problems.
+ * GCIP_MAP_DEBUG_COW: VMA is copy-on-write, writeable mappings may have made a copy of pages
+ * GCIP_MAP_DEBUG_OVRRD_RDDIR: map direction override to read-only, writable page pin failed
+ * GCIP_MAP_DEBUG_VMA_NF: VMA for host addr not found, so initially assumed writeable by default
+ * GCIP_MAP_DEBUG_ASSUME_RDONLY: writable page pin failed, assuming read-only
+ */
+enum gcip_map_debug_flags {
+	GCIP_MAP_DEBUG_COW = 0x1,
+	GCIP_MAP_DEBUG_OVRRD_RDDIR = 0x2,
+	GCIP_MAP_DEBUG_VMA_NF = 0x4,
+	GCIP_MAP_DEBUG_ASSUME_RDONLY = 0x8,
 };
 
 /* Operaters for `struct gcip_iommu_mapping`. */
@@ -146,6 +160,7 @@ struct gcip_iommu_mapping {
 	struct sg_table *sgt;
 	enum dma_data_direction dir;
 	u64 gcip_map_flags;
+	enum gcip_map_debug_flags map_debug_flags;
 	/*
 	 * TODO(b/302510715): Use another wrapper struct to contain this because it is used in
 	 *                    buffer mapping only.
@@ -193,6 +208,14 @@ struct gcip_iommu_domain_pool {
 	struct ida pasid_pool;
 };
 
+/* For GCIP_IOMMU_DOMAIN_TYPE_MEM_POOL, gen_pools for 32-bit and > 32-bit spaces. */
+struct gcip_iommu_domain_iova_mem_pools {
+	struct gcip_mem_pool pool32;
+	struct gcip_mem_pool pool64;
+	/* If true then pool64 is valid, else this is a 32-bit-only pool. */
+	bool pool64_valid;
+};
+
 /*
  * Wrapper of iommu_domain.
  * It has its own IOVA space pool based on iova_domain or gcip_mem_pool. One can choose one of them
@@ -206,7 +229,7 @@ struct gcip_iommu_domain {
 	bool default_domain;
 	union {
 		struct iova_domain iovad;
-		struct gcip_mem_pool mem_pool;
+		struct gcip_iommu_domain_iova_mem_pools mem_pool;
 	} iova_space;
 	const struct gcip_iommu_domain_ops *ops;
 	ioasid_t pasid; /* Only valid if attached */

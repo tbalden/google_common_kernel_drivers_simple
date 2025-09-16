@@ -16,11 +16,13 @@
 #include <linux/limits.h>
 #include <linux/log2.h>
 #include <linux/math.h>
+#include <linux/mm.h>
 #include <linux/of.h>
 #include <linux/scatterlist.h>
 #include <linux/sched/mm.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/swap.h>
 
 #include <gcip/gcip-config.h>
 #include <gcip/gcip-domain-pool.h>
@@ -277,39 +279,66 @@ static int mem_pool_initialize_domain(struct gcip_iommu_domain *domain)
 	size_t size = dpool->size;
 	int ret;
 
-	/* Restrict mem_pool IOVAs to 32 bits. */
-	if (dpool->base_daddr + size > UINT_MAX)
-		size = UINT_MAX - dpool->base_daddr;
-	ret = gcip_mem_pool_init(&domain->iova_space.mem_pool, dpool->dev, dpool->base_daddr, size,
-				 dpool->granule);
+	/*
+	 * Use separate gen_pools for 32-bit vs. unrestricted IOVAs.  Must have a non-empty 32-bit
+	 * space.
+	 */
+	if (dpool->base_daddr > UINT_MAX)
+		return -EINVAL;
+	if (dpool->base_daddr + size + 1 > UINT_MAX) {
+		size = dpool->size - ((unsigned long long)UINT_MAX - dpool->base_daddr + 1);
+		ret = gcip_mem_pool_init(&domain->iova_space.mem_pool.pool64, dpool->dev,
+					 (unsigned long long)UINT_MAX + 1, size, dpool->granule);
+		if (ret)
+			return ret;
 
-	dev_warn(domain->dev, "gcip-reserved-map is not supported in mem_pool mode.");
+		domain->iova_space.mem_pool.pool64_valid = true;
+		size = UINT_MAX - dpool->base_daddr + 1;
+	}
+	ret = gcip_mem_pool_init(&domain->iova_space.mem_pool.pool32, dpool->dev,
+				 dpool->base_daddr, size, dpool->granule);
+	if (ret) {
+		if (domain->iova_space.mem_pool.pool64_valid)
+			gcip_mem_pool_exit(&domain->iova_space.mem_pool.pool64);
+		return ret;
+	}
 
-	return ret;
+	if (dpool->reserved_size)
+		dev_warn(domain->dev, "gcip-reserved-map is not supported in mem_pool mode.");
+
+	return 0;
 }
 
 static void mem_pool_finalize_domain(struct gcip_iommu_domain *domain)
 {
-	gcip_mem_pool_exit(&domain->iova_space.mem_pool);
+	gcip_mem_pool_exit(&domain->iova_space.mem_pool.pool32);
+	if (domain->iova_space.mem_pool.pool64_valid)
+		gcip_mem_pool_exit(&domain->iova_space.mem_pool.pool64);
 }
 
 static void mem_pool_enable_best_fit_algo(struct gcip_iommu_domain *domain)
 {
-	gen_pool_set_algo(domain->iova_space.mem_pool.gen_pool, gen_pool_best_fit, NULL);
+	gen_pool_set_algo(domain->iova_space.mem_pool.pool32.gen_pool, gen_pool_best_fit, NULL);
+	if (domain->iova_space.mem_pool.pool64_valid)
+		gen_pool_set_algo(domain->iova_space.mem_pool.pool64.gen_pool, gen_pool_best_fit,
+				  NULL);
 }
 
 static dma_addr_t mem_pool_alloc_iova_space(struct gcip_iommu_domain *domain, size_t size,
 					    bool restrict_iova)
 {
-	/* mem pool IOVA allocs are currently always restricted. */
-	if (!restrict_iova)
-		dev_warn_once(domain->dev, "IOVA size always restricted to 32-bit");
-	return (dma_addr_t)gcip_mem_pool_alloc(&domain->iova_space.mem_pool, size);
+	if (restrict_iova || !domain->iova_space.mem_pool.pool64_valid)
+		return (dma_addr_t)gcip_mem_pool_alloc(&domain->iova_space.mem_pool.pool32, size);
+	return (dma_addr_t)gcip_mem_pool_alloc(&domain->iova_space.mem_pool.pool64, size);
 }
+
 
 static void mem_pool_free_iova_space(struct gcip_iommu_domain *domain, dma_addr_t iova, size_t size)
 {
-	gcip_mem_pool_free(&domain->iova_space.mem_pool, iova, size);
+	if (iova <= UINT_MAX)
+		gcip_mem_pool_free(&domain->iova_space.mem_pool.pool32, iova, size);
+	else
+		gcip_mem_pool_free(&domain->iova_space.mem_pool.pool64, iova, size);
 }
 
 static const struct gcip_iommu_domain_ops mem_pool_ops = {
@@ -582,7 +611,8 @@ static int gcip_pin_user_pages(struct device *dev, struct page **pages, unsigned
 			       struct mutex *pin_user_pages_lock)
 {
 	int ret, i;
-	__maybe_unused struct vm_area_struct **vmas = NULL;
+	struct vm_area_struct **vmas = NULL;
+	int tried;
 
 	ret = gcip_pin_user_pages_fast(pages, start_addr, num_pages, gup_flags,
 				       pin_user_pages_lock);
@@ -592,26 +622,39 @@ static int gcip_pin_user_pages(struct device *dev, struct page **pages, unsigned
 	dev_dbg(dev, "Failed to pin user pages in fast mode (ret=%d, addr=%lu, num_pages=%d)", ret,
 		start_addr, num_pages);
 
-	/* Allocate our own vmas array non-contiguous. */
-	vmas = kvmalloc((num_pages * sizeof(*vmas)), GFP_KERNEL | __GFP_NOWARN);
-	if (!vmas)
-		return -ENOMEM;
+	/*
+	 * pin_user_pages may fail due to temporary page reference counts held
+	 * in various areas. Retry under lru_cache_disable to release additional
+	 * reference counts from the LRU cache.
+	 */
+	for (tried = 0; tried < 5; tried++) {
+		if (tried > 0) {
+			dev_info(dev, "Retrying mapping with LRU cache disabled (tries=%d)", tried);
+			lru_cache_disable();
+		}
+		/* Allocate our own vmas array non-contiguous. */
+		vmas = kvmalloc((num_pages * sizeof(*vmas)), GFP_KERNEL | __GFP_NOWARN);
+		if (!vmas)
+			return -ENOMEM;
+		if (pin_user_pages_lock)
+			mutex_lock(pin_user_pages_lock);
+		mmap_read_lock(current->mm);
 
-	if (pin_user_pages_lock)
-		mutex_lock(pin_user_pages_lock);
-	mmap_read_lock(current->mm);
+		ret = pin_user_pages(start_addr, num_pages, gup_flags, pages, vmas);
 
-	ret = pin_user_pages(start_addr, num_pages, gup_flags, pages, vmas);
+		mmap_read_unlock(current->mm);
+		if (pin_user_pages_lock)
+			mutex_unlock(pin_user_pages_lock);
 
-	mmap_read_unlock(current->mm);
-	if (pin_user_pages_lock)
-		mutex_unlock(pin_user_pages_lock);
+		kvfree(vmas);
+		if (tried > 0)
+			lru_cache_enable();
 
-	kvfree(vmas);
+		if (ret == num_pages)
+			break;
 
-	if (ret < num_pages) {
-		if (ret > 0) {
-			dev_err(dev, "Can only lock %u of %u pages requested", ret, num_pages);
+		if (ret >= 0) {
+			dev_err(dev, "Can only pin %u of %u pages requested", ret, num_pages);
 			for (i = 0; i < ret; i++)
 				unpin_user_page(pages[i]);
 		}
@@ -660,10 +703,9 @@ int gcip_iommu_domain_pool_init(struct gcip_iommu_domain_pool *pool, struct devi
 	if (!pool->base_daddr || !pool->size) {
 		gcip_domain_pool_destroy(&pool->domain_pool);
 		return -EINVAL;
-	} else {
-		pool->last_daddr = pool->base_daddr + pool->size - 1;
 	}
 
+	pool->last_daddr = pool->base_daddr + pool->size - 1;
 	pool->min_pasid = 0;
 	pool->max_pasid = 0;
 	ida_init(&pool->pasid_pool);
@@ -894,28 +936,40 @@ static int gcip_iommu_get_offset_npages(struct device *dev, u64 host_address, si
  * gcip_iommu_get_gup_flags() - Checks the access mode of the given address with VMA.
  * @host_addr: The target host_addr for checking the access.
  * @dev: The device struct used to print messages.
+ * @map_debug_flags: Pointer to initialized gcip_map_debug_flags, bits may be set for any findings
+ *                   here to be noted
  *
  * Checks and returns the read/write permission of address @host_addr.
  * If the target address can not be found in current->mm, assuming it is RW.
  *
  * Return: The encoded gup_flags of target host_addr.
  */
-static unsigned int gcip_iommu_get_gup_flags(u64 host_addr, struct device *dev)
+static unsigned int gcip_iommu_get_gup_flags(u64 host_addr, struct device *dev,
+					     enum gcip_map_debug_flags *map_debug_flags)
 {
 	struct vm_area_struct *vma;
 	unsigned int gup_flags;
+	vm_flags_t vm_flags;
 
 	mmap_read_lock(current->mm);
 	vma = vma_lookup(current->mm, host_addr & PAGE_MASK);
+	if (vma)
+		vm_flags = vma->vm_flags;
 	mmap_read_unlock(current->mm);
 
 	if (!vma) {
 		dev_dbg(dev, "unable to find address in VMA, assuming buffer writable");
 		gup_flags = FOLL_LONGTERM | FOLL_WRITE;
-	} else if (vma->vm_flags & VM_WRITE) {
+		*map_debug_flags |= GCIP_MAP_DEBUG_VMA_NF;
+	} else if (vm_flags & VM_WRITE) {
 		gup_flags = FOLL_LONGTERM | FOLL_WRITE;
 	} else {
 		gup_flags = FOLL_LONGTERM;
+	}
+
+	if (vma && is_cow_mapping(vm_flags) && (gup_flags & FOLL_WRITE)) {
+		dev_dbg(dev, "%#llx maps copy-on-write (vm_flags %#lx)", host_addr, vm_flags);
+		*map_debug_flags |= GCIP_MAP_DEBUG_COW;
 	}
 
 	return gup_flags;
@@ -932,6 +986,8 @@ static unsigned int gcip_iommu_get_gup_flags(u64 host_addr, struct device *dev)
  *             The flag FOLL_WRITE in gup_flags may be reomved if the user pages cannot be pinned
  *             with write access.
  * @pin_user_pages_lock: The lock to protect pin_user_page
+ * @map_debug_flags: Pointer to initialized gcip_map_debug_flags, bits may be set for any findings
+ *                   here to be noted
  *
  * This function tries to pin the user pages with `pin_user_page_fast` first and will try
  * `pin_user_page` on failure.
@@ -941,7 +997,8 @@ static unsigned int gcip_iommu_get_gup_flags(u64 host_addr, struct device *dev)
  */
 static struct page **gcip_iommu_alloc_and_pin_user_pages(struct device *dev, u64 host_address,
 							 uint num_pages, unsigned int *gup_flags,
-							 struct mutex *pin_user_pages_lock)
+							 struct mutex *pin_user_pages_lock,
+							 enum gcip_map_debug_flags *map_debug_flags)
 {
 	unsigned long start_addr = host_address & PAGE_MASK;
 	struct page **pages;
@@ -963,8 +1020,9 @@ static struct page **gcip_iommu_alloc_and_pin_user_pages(struct device *dev, u64
 	if (!(*gup_flags & FOLL_WRITE))
 		goto err_pin_read_only;
 
-	dev_dbg(dev, "pin failed with fault, assuming buffer is read-only");
+	dev_warn_ratelimited(dev, "pin failed (ret=%d), assuming buffer is read-only", ret);
 	*gup_flags &= ~FOLL_WRITE;
+	*map_debug_flags |= GCIP_MAP_DEBUG_ASSUME_RDONLY;
 
 	ret = gcip_pin_user_pages(dev, pages, start_addr, num_pages, *gup_flags,
 				  pin_user_pages_lock);
@@ -1126,7 +1184,8 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_to_iova(struct gcip_iomm
 	ulong offset;
 	int ret, i;
 	struct sg_table *sgt;
-	uint gup_flags = gcip_iommu_get_gup_flags(host_address, domain->dev);
+	uint gup_flags;
+	enum gcip_map_debug_flags map_debug_flags = 0;
 
 	if (!valid_dma_direction(orig_dir))
 		return ERR_PTR(-EINVAL);
@@ -1139,6 +1198,7 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_to_iova(struct gcip_iomm
 		return ERR_PTR(-EFAULT);
 	}
 
+	gup_flags = gcip_iommu_get_gup_flags(host_address, domain->dev, &map_debug_flags);
 	ret = gcip_iommu_get_offset_npages(domain->dev, host_address, size, &offset, &num_pages);
 	if (ret) {
 		dev_err(domain->dev, "Buffer size overflow: size=%#zx", size);
@@ -1146,17 +1206,23 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_to_iova(struct gcip_iomm
 	}
 
 	pages = gcip_iommu_alloc_and_pin_user_pages(domain->dev, host_address, num_pages,
-						    &gup_flags, pin_user_pages_lock);
+						    &gup_flags, pin_user_pages_lock,
+						    &map_debug_flags);
 	if (IS_ERR(pages)) {
 		dev_err(domain->dev, "Failed to pin user pages (ret=%ld)\n", PTR_ERR(pages));
 		return ERR_CAST(pages);
 	}
 
-	if (!(gup_flags & FOLL_WRITE)) {
+	if (!(gup_flags & FOLL_WRITE) && orig_dir != DMA_TO_DEVICE) {
 		gcip_map_flags &= ~(((BIT(GCIP_MAP_FLAGS_DMA_DIRECTION_BIT_SIZE) - 1)
 				     << GCIP_MAP_FLAGS_DMA_DIRECTION_OFFSET));
 		gcip_map_flags |= GCIP_MAP_FLAGS_DMA_DIRECTION_TO_FLAGS(DMA_TO_DEVICE);
+		map_debug_flags |= GCIP_MAP_DEBUG_OVRRD_RDDIR;
 	}
+
+	/* If mapping a writeable VMA read-only, clear CoW debug flag if set. */
+	if (GCIP_MAP_FLAGS_GET_DMA_DIRECTION(gcip_map_flags) == DMA_TO_DEVICE)
+		map_debug_flags &= ~(GCIP_MAP_DEBUG_COW);
 
 	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
 	if (!sgt) {
@@ -1180,6 +1246,7 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_to_iova(struct gcip_iomm
 
 	atomic64_add(num_pages, &current->mm->pinned_vm);
 	kvfree(pages);
+	mapping->map_debug_flags = map_debug_flags;
 
 	return mapping;
 
@@ -1274,11 +1341,10 @@ void gcip_iommu_mapping_unmap(struct gcip_iommu_mapping *mapping)
 	void *data = mapping->data;
 	const struct gcip_iommu_mapping_ops *ops = mapping->ops;
 
-	if (mapping->type == GCIP_IOMMU_MAPPING_BUFFER) {
+	if (mapping->type == GCIP_IOMMU_MAPPING_BUFFER)
 		gcip_iommu_mapping_unmap_buffer(mapping);
-	} else if (mapping->type == GCIP_IOMMU_MAPPING_DMA_BUF) {
+	else if (mapping->type == GCIP_IOMMU_MAPPING_DMA_BUF)
 		gcip_iommu_mapping_unmap_dma_buf(mapping);
-	}
 
 	/* From now on, @mapping is released and must not be accessed. */
 

@@ -9,5 +9,5 @@ obj-$(CONFIG_SUBSYSTEM_COREDUMP_TEST) += sscoredump_test.o sscoredump_sample_tes
 
 EXTRA_CFLAGS    += -I$(KERNEL_SRC)/../private/google-modules/soc/gs/include
 
-modules modules_install clean:
+modules modules_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 $(KBUILD_OPTIONS) $(@)

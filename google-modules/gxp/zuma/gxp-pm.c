@@ -15,6 +15,7 @@
 #include <linux/workqueue.h>
 
 #include <gcip/gcip-pm.h>
+#include <gcip/gcip-status-code.h>
 
 #include "gxp-client.h"
 #include "gxp-config.h"
@@ -332,7 +333,6 @@ int gxp_pm_blk_off(struct gxp_dev *gxp)
 static bool gxp_pm_is_blk_down_timeout(struct gxp_dev *gxp, uint timeout_ms)
 {
 	int timeout_cnt = 0, max_delay_count;
-	int curr_state;
 
 	if (!gxp->power_mgr->aur_status)
 		return gxp->power_mgr->curr_state == AUR_OFF;
@@ -340,11 +340,10 @@ static bool gxp_pm_is_blk_down_timeout(struct gxp_dev *gxp, uint timeout_ms)
 	max_delay_count = (timeout_ms * 1000) / SHUTDOWN_DELAY_US_MIN;
 
 	do {
+		if (gxp_pm_is_blk_down(gxp))
+			return true;
 		/* Delay 200~400us per retry till blk shutdown finished */
 		usleep_range(SHUTDOWN_DELAY_US_MIN, SHUTDOWN_DELAY_US_MAX);
-		curr_state = readl(gxp->power_mgr->aur_status);
-		if (!curr_state)
-			return true;
 		timeout_cnt++;
 	} while (timeout_cnt < max_delay_count);
 
@@ -780,7 +779,7 @@ static int gxp_pm_update_freq_limits_locked(struct gxp_dev *gxp)
 	ret = gxp_kci_set_freq_limits(kci, mgr->min_freq_limit, mgr->max_freq_limit);
 	if (ret) {
 		dev_warn(gxp->dev, "Set frequency limit request failed with error %d.", ret);
-		if (ret == GCIP_KCI_ERROR_INVALID_ARGUMENT) {
+		if (ret == GCIP_STATUS_CODE_INVALID_ARGUMENT) {
 			dev_warn(gxp->dev, "Invalid values within frequency limits: [%u, %u]kHz.\n",
 				 mgr->min_freq_limit, mgr->max_freq_limit);
 			ret = -EINVAL;
@@ -803,34 +802,58 @@ int gxp_pm_set_min_max_freq_limit(struct gxp_dev *gxp, uint min_freq_khz, uint m
 #if GXP_HAS_MCU
 	struct gxp_power_manager *mgr = gxp->power_mgr;
 	int ret = 0;
+	bool is_off;
 
 	/*
-	 * Need to hold pm lock to prevent races with power up/down when checking block state and
-	 * sending the KCI command to update limits.
+	 * Get reference to pm count to prevent race with power down while sending the KCI command
+	 * to update limits.
 	 *
 	 * Since power_up will also acquire freq_limits_lock to send initial limits, pm lock must be
 	 * held first to avoid lock inversion.
 	 */
-	gcip_pm_lock(mgr->pm);
+	is_off = gcip_pm_get_if_powered(mgr->pm, true);
 	mutex_lock(&mgr->freq_limits_lock);
 
 	mgr->min_freq_limit = min_freq_khz;
 	mgr->max_freq_limit = max_freq_khz;
 
-	if (!gxp_pm_is_blk_down(gxp))
+	if (!is_off)
 		ret = gxp_pm_update_freq_limits_locked(gxp);
 
 	mutex_unlock(&mgr->freq_limits_lock);
-	gcip_pm_unlock(mgr->pm);
+	if (!is_off)
+		gcip_pm_put(mgr->pm);
 	return ret;
 #else
 	return -EOPNOTSUPP;
 #endif /* GXP_HAS_MCU */
 }
 
+#if GXP_ALLOW_MULTIPLE_DEBUG_WAKELOCK
+
 static int debugfs_wakelock_set(void *data, u64 val)
 {
-	struct gxp_dev *gxp = (struct gxp_dev *)data;
+	struct gxp_dev *gxp = data;
+
+	if (val > 0) {
+		int ret = gcip_pm_get(gxp->power_mgr->pm);
+
+		if (ret) {
+			dev_err(gxp->dev, "gcip_pm_get failed ret=%d\n", ret);
+			return ret;
+		}
+	} else {
+		gcip_pm_put(gxp->power_mgr->pm);
+	}
+
+	return 0;
+}
+
+#else /* GXP_ALLOW_MULTIPLE_DEBUG_WAKELOCK */
+
+static int debugfs_wakelock_set(void *data, u64 val)
+{
+	struct gxp_dev *gxp = data;
 	int ret = 0;
 
 	mutex_lock(&gxp->debugfs_client_lock);
@@ -871,6 +894,8 @@ out:
 
 	return ret;
 }
+
+#endif /* GXP_ALLOW_MULTIPLE_DEBUG_WAKELOCK */
 
 DEFINE_DEBUGFS_ATTRIBUTE(debugfs_wakelock_fops, NULL, debugfs_wakelock_set,
 			 "%llx\n");
@@ -918,8 +943,15 @@ DEFINE_DEBUGFS_ATTRIBUTE(debugfs_blk_powerstate_fops,
 static int gxp_pm_power_up(void *data)
 {
 	struct gxp_dev *gxp = data;
-	int ret = gxp_pm_blk_on(gxp);
+	int ret;
 
+	ret = gxp_pm_is_blk_down_timeout(gxp, 5000);
+	if (!ret) {
+		dev_err(gxp->dev, "power up failed, block already on");
+		return -EAGAIN;
+	}
+
+	ret = gxp_pm_blk_on(gxp);
 	if (ret) {
 		dev_err(gxp->dev, "Failed to power on BLK_AUR (ret=%d)\n", ret);
 		return ret;
@@ -945,9 +977,12 @@ static int gxp_pm_power_up(void *data)
 static int gxp_pm_power_down(void *data)
 {
 	struct gxp_dev *gxp = data;
+	int ret = 0;
 
 	if (gxp->pm_before_blk_off)
-		gxp->pm_before_blk_off(gxp);
+		ret = gxp->pm_before_blk_off(gxp);
+	if (ret)
+		return ret;
 	return gxp_pm_blk_off(gxp);
 }
 
@@ -997,7 +1032,7 @@ static void gxp_pm_parse_pmu_base(struct gxp_dev *gxp)
 
 out:
 	if (IS_ERR(aur_status))
-		dev_warn(gxp->dev, "Failed to get PMU register base, ret=%ld\n",
+		dev_info(gxp->dev, "Failed to get PMU register base, ret=%ld\n",
 			 PTR_ERR(aur_status));
 
 	gxp->power_mgr->aur_status = IS_ERR(aur_status) ? NULL : aur_status;
