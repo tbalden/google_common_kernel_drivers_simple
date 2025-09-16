@@ -3218,6 +3218,7 @@ static bool fts_enter_pointer_event_handler(struct fts_ts_info *info, unsigned
 #ifdef CONFIG_UCI
                                         }
                                 }
+	}
 #endif
 	goog_input_report_abs(info->gti, info->input_dev, ABS_MT_TOUCH_MAJOR, major);
 	goog_input_report_abs(info->gti, info->input_dev, ABS_MT_TOUCH_MINOR, minor);
