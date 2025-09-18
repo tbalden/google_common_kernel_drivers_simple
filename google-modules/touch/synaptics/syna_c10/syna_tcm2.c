@@ -53,6 +53,9 @@
 #include <samsung/panel/panel-samsung-drv.h>
 #endif
 
+#ifdef CONFIG_UCI
+#include <linux/inputfilter/sweep2sleep.h>
+#endif
 /* Init the kfifo for health check. */
 #define SYNA_HC_KFIFO_LEN 4 /* Must be power of 2. */
 DEFINE_KFIFO(hc_fifo, struct syna_health_check_fifo, SYNA_HC_KFIFO_LEN);
@@ -1027,8 +1030,21 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 #endif
 			input_report_key(input_dev, BTN_TOUCH, 1);
 			input_report_key(input_dev, BTN_TOOL_FINGER, 1);
+#ifdef CONFIG_UCI
+                                {
+                                        int x2, y2;
+                                        bool frozen_coords = s2s_freeze_coords(&x2,&y2,x,y);
+                                        if (frozen_coords) {
+                                                input_report_abs(input_dev, ABS_MT_POSITION_X, x2);
+                                                input_report_abs(input_dev, ABS_MT_POSITION_Y, y2);
+                                        } else {
+#endif
 			input_report_abs(input_dev, ABS_MT_POSITION_X, x);
 			input_report_abs(input_dev, ABS_MT_POSITION_Y, y);
+#ifdef CONFIG_UCI
+                                        }
+                                }
+#endif
 			input_report_abs(input_dev, ABS_MT_PRESSURE, z);
 #ifdef REPORT_TOUCH_WIDTH
 #ifdef ENABLE_CUSTOM_TOUCH_ENTITY
@@ -1357,10 +1373,23 @@ static void syna_offload_report(void *handle,
 			}
 			input_mt_report_slot_state(tcm->input_dev,
 						   tool_type, 1);
+#ifdef CONFIG_UCI
+                                {
+                                        int x2, y2;
+                                        bool frozen_coords = s2s_freeze_coords(&x2,&y2,report->coords[i].x,report->coords[i].y);
+                                        if (frozen_coords) {
+                                                input_report_abs(tcm->input_dev, ABS_MT_POSITION_X, x2);
+                                                input_report_abs(tcm->input_dev, ABS_MT_POSITION_Y, y2);
+                                        } else {
+#endif
 			input_report_abs(tcm->input_dev, ABS_MT_POSITION_X,
 					 report->coords[i].x);
 			input_report_abs(tcm->input_dev, ABS_MT_POSITION_Y,
 					 report->coords[i].y);
+#ifdef CONFIG_UCI
+					}
+				}
+#endif
 			input_report_abs(tcm->input_dev, ABS_MT_TOUCH_MAJOR,
 					 report->coords[i].major);
 			input_report_abs(tcm->input_dev, ABS_MT_TOUCH_MINOR,
@@ -2311,6 +2340,10 @@ static void syna_check_finger_status(struct syna_tcm *tcm)
 	}
 }
 
+#ifdef CONFIG_UCI
+extern void uci_screen_state(int state);
+#endif
+
 /**
  * syna_dev_resume()
  *
@@ -2411,6 +2444,10 @@ static int syna_dev_resume(struct device *dev)
 	retval = 0;
 
 	LOGI("Device resumed (pwr_state:%d)\n", tcm->pwr_state);
+#ifdef CONFIG_UCI
+	pr_info("%s uci screen state call %d... \n",__func__,2);
+	uci_screen_state(2);
+#endif
 exit:
 	/* set irq back to active mode if not enabled yet */
 	irq_enabled = (!hw_if->bdata_attn.irq_enabled);
@@ -2504,6 +2541,10 @@ static int syna_dev_suspend(struct device *dev)
 #endif
 	LOGI("Device suspended (pwr_state:%d), int_cnt:%llu\n", tcm->pwr_state,
 	     tcm->syna_hc.int_cnt);
+#ifdef CONFIG_UCI
+	pr_info("%s uci screen state call %d... \n",__func__,0);
+	uci_screen_state(0);
+#endif
 
 	return 0;
 }
