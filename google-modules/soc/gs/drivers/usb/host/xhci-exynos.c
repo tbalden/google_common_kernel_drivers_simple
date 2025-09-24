@@ -15,7 +15,6 @@
 #include <host/xhci.h> /* $(srctree)/drivers/usb/host/xhci.h */
 #include <host/xhci-mvebu.h> /* $(srctree)/drivers/usb/host/xhci-mvebu.h */
 #include <host/xhci-plat.h> /* $(srctree)/drivers/usb/host/xhci-plat.h */
-#include <host/xhci-rcar.h> /* $(srctree)/drivers/usb/host/xhci-rcar.h */
 
 #include <linux/acpi.h>
 #include <linux/clk.h>
@@ -33,7 +32,10 @@
 #include <linux/usb/phy.h>
 
 #include <soc/google/exynos-cpupm.h>
+
+#if IS_ENABLED(CONFIG_USB_VENDOR_HOOKS)
 #include <trace/hooks/usb.h>
+#endif /* CONFIG_USB_VENDOR_HOOKS */
 
 #include "xhci-exynos.h"
 
@@ -367,11 +369,6 @@ static void xhci_exynos_scan_roothub(struct xhci_hcd_exynos *xhci_exynos,
 
 			if (!child_udev->config->interface[0]) {
 				*suspend = false;
-
-				if (child_udev->speed >= USB_SPEED_SUPER)
-					xhci_exynos->port_state = PORT_USB3;
-				else
-					xhci_exynos->port_state = PORT_USB2;
 				break;
 			}
 
@@ -477,7 +474,6 @@ static void xhci_exynos_set_port(struct usb_device *udev, unsigned long action)
 	struct xhci_hcd_exynos *xhci_exynos = priv->xhci_exynos;
 	struct device *dev = &udev->dev;
 	int check_port;
-	int ret;
 
 	if (!xhci_exynos) {
 		dev_err(dev, "Couldn't get exynos xhci!\n");
@@ -493,12 +489,6 @@ static void xhci_exynos_set_port(struct usb_device *udev, unsigned long action)
 	case PORT_EMPTY:
 		dev_dbg(dev, "Port check empty\n");
 		xhci_exynos->is_otg_only = 1;
-		if (!xhci_exynos->usb3_phy_control) {
-			ret = usb_power_notify_control(1);
-			xhci_exynos->usb3_phy_control = true;
-			if (ret)
-				dev_warn(dev, "usb power control request ignored/rejected: %d\n", ret);
-		}
 		if (xhci_exynos->port_ctrl_allowed)
 			xhci_exynos_port_power_set(xhci_exynos, 1, 1);
 		break;
@@ -507,8 +497,6 @@ static void xhci_exynos_set_port(struct usb_device *udev, unsigned long action)
 		xhci_exynos->is_otg_only = 0;
 		if (xhci_exynos->port_ctrl_allowed)
 			xhci_exynos_port_power_set(xhci_exynos, 0, 1);
-		usb_power_notify_control(0);
-		xhci_exynos->usb3_phy_control = false;
 		break;
 	case PORT_USB3:
 		xhci_exynos->is_otg_only = 0;
@@ -645,51 +633,6 @@ static void xhci_exynos_pm_runtime_init(struct device *dev)
 	init_waitqueue_head(&dev->power.wait_queue);
 }
 
-static struct xhci_exynos_ops *xhci_vendor_ops;
-
-int xhci_exynos_register_offload_ops(struct xhci_exynos_ops *offload_ops)
-{
-	if (offload_ops == NULL)
-		return -EINVAL;
-
-	xhci_vendor_ops = offload_ops;
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(xhci_exynos_register_offload_ops);
-
-static int xhci_vendor_offload_init(struct device *dev, struct xhci_hcd *xhci)
-{
-	struct xhci_exynos_ops *ops = xhci_vendor_ops;
-
-	if (ops && ops->offload_init)
-		return ops->offload_init(xhci);
-
-	dev_err(dev, "Offload hooks or init function is null!\n");
-	return -EINVAL;
-}
-
-static void xhci_vendor_offload_cleanup(struct device *dev, struct xhci_hcd *xhci)
-{
-	struct xhci_exynos_ops *ops = xhci_vendor_ops;
-
-	if (ops && ops->offload_cleanup)
-		ops->offload_cleanup(xhci);
-	else
-		dev_err(dev, "Offload hooks or cleanup function is null!\n");
-}
-
-static int xhci_vendor_offload_setup(struct device *dev, struct xhci_hcd *xhci)
-{
-	struct xhci_exynos_ops *ops = xhci_vendor_ops;
-
-	if (ops && ops->offload_setup)
-		return ops->offload_setup(xhci);
-
-	dev_err(dev, "Offload hooks or setup function is null!\n");
-	return -EINVAL;
-}
-
 static int xhci_exynos_probe(struct platform_device *pdev)
 {
 	struct device		*parent = pdev->dev.parent;
@@ -788,7 +731,6 @@ static int xhci_exynos_probe(struct platform_device *pdev)
 	xhci_exynos->usb3_portsc = hcd->regs + PORTSC_OFFSET;
 	xhci_exynos->is_otg_only = 1;
 	xhci_exynos->port_state = PORT_EMPTY;
-	xhci_exynos->usb3_phy_control = true;
 
 	xhci_exynos_register_notify();
 
@@ -876,10 +818,6 @@ static int xhci_exynos_probe(struct platform_device *pdev)
 		}
 	}
 
-	ret = xhci_vendor_offload_init(&pdev->dev, xhci);
-	if (ret)
-		goto disable_usb_phy;
-
 	xhci_exynos->main_wakelock = main_wakelock;
 	xhci_exynos->shared_wakelock = shared_wakelock;
 
@@ -898,10 +836,6 @@ static int xhci_exynos_probe(struct platform_device *pdev)
 
 	xhci_exynos_early_stop_set(xhci_exynos, hcd);
 	xhci_exynos_early_stop_set(xhci_exynos, xhci->shared_hcd);
-
-	ret = xhci_vendor_offload_setup(&pdev->dev, xhci);
-	if (ret)
-		goto disable_usb_phy;
 
 	device_enable_async_suspend(&pdev->dev);
 	pm_runtime_put_noidle(&pdev->dev);
@@ -980,8 +914,6 @@ remove_hcd:
 	usb_phy_shutdown(hcd->usb_phy);
 	usb_remove_hcd(hcd);
 
-	xhci_vendor_offload_cleanup(&dev->dev, xhci);
-
 	devm_iounmap(&dev->dev, hcd->regs);
 	usb_put_hcd(shared_hcd);
 
@@ -1013,6 +945,8 @@ static int __maybe_unused xhci_exynos_suspend(struct device *dev)
 	struct xhci_hcd	*xhci = hcd_to_xhci(hcd);
 	int ret = 0;
 	int ret_phy = 0;
+
+#if IS_ENABLED(CONFIG_USB_VENDOR_HOOKS)
 	int bypass = 0;
 	struct usb_device *udev = hcd->self.root_hub;
 	pm_message_t msg;
@@ -1021,6 +955,7 @@ static int __maybe_unused xhci_exynos_suspend(struct device *dev)
 	trace_android_rvh_usb_dev_suspend(udev, msg, &bypass);
 	if (bypass)
 		return 0;
+#endif /* CONFIG_USB_VENDOR_HOOKS */
 
 	if (xhci_exynos->port_state == PORT_USB2 || (xhci_exynos->port_state == PORT_HUB)) {
 		ret_phy = exynos_usbdrd_phy_vendor_set(xhci_exynos->phy_usb2, 1, 0);
@@ -1055,6 +990,8 @@ static int __maybe_unused xhci_exynos_resume(struct device *dev)
 	struct xhci_hcd	*xhci = hcd_to_xhci(hcd);
 	int ret = 0;
 	int ret_phy = 0;
+
+#if IS_ENABLED(CONFIG_USB_VENDOR_HOOKS)
 	int bypass = 0;
 	struct usb_device *udev = hcd->self.root_hub;
 	pm_message_t msg;
@@ -1063,12 +1000,13 @@ static int __maybe_unused xhci_exynos_resume(struct device *dev)
 	trace_android_vh_usb_dev_resume(udev, msg, &bypass);
 	if (bypass)
 		return 0;
+#endif /* CONFIG_USB_VENDOR_HOOKS */
 
 	ret = xhci_priv_resume_quirk(hcd);
 	if (ret)
 		return ret;
 
-	ret = xhci_resume(xhci, 0);
+	ret = xhci_resume(xhci, PMSG_RESUME);
 	if (ret) {
 		dev_err(xhci_exynos->dev, "%s: xhci resume failed, ret = %d\n", __func__, ret);
 		return ret;

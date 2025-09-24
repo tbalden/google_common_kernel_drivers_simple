@@ -6,6 +6,8 @@
  *
  */
 
+#pragma clang diagnostic ignored "-Wenum-conversion"
+#pragma clang diagnostic ignored "-Wswitch"
 
 #include <linux/err.h>
 #include <linux/init.h>

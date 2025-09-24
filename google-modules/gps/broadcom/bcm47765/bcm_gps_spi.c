@@ -35,6 +35,7 @@
 #include <linux/kernel_stat.h>
 #include <linux/pm_runtime.h>
 #include <linux/platform_device.h>
+#include <linux/pinctrl/consumer.h>
 
 #include "bbd.h"
 #include "bcm_gps_spi.h"

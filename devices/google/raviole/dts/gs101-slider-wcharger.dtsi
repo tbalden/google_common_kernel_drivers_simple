@@ -69,8 +69,8 @@ WC_BUS {
 
 		interrupt-names = "p9382_int";
 
-		idt,gpio_ben = <&max20339_gpio 1 GPIO_ACTIVE_HIGH>;
-		idt,gpio_switch = <&max777x9_gpio 4 GPIO_ACTIVE_HIGH>;
+		idt,ben-gpios = <&max20339_gpio 1 GPIO_ACTIVE_HIGH>;
+		idt,switch-gpios = <&max777x9_gpio 4 GPIO_ACTIVE_HIGH>;
 	};
 
 	p9412@3c {
@@ -82,8 +82,8 @@ WC_BUS {
 		pinctrl-0 = <&wc_irq &wc_en>;
 
 		interrupt-names = "p9382_int";
-		idt,irq_gpio = <&gpa9 7 GPIO_ACTIVE_LOW>;
-		idt,gpio_qien = <&gpp27 3 GPIO_ACTIVE_HIGH>;
+		idt,irq-gpios = <&gpa9 7 GPIO_ACTIVE_LOW>;
+		idt,qien-gpios = <&gpp27 3 GPIO_ACTIVE_HIGH>;
 
 		google,epp_rp_value = <15000>; /* mW */
 		idt,max_vout_mv = <10000>;  /* max voltage in mV */

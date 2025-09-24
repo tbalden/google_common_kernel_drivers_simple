@@ -197,26 +197,6 @@ config EXYNOS_CPUHP
 	help
 	Support CPU Hotplug for Exynos SoC.
 
-config SLC_PARTITION_MANAGER
-	tristate "PT API framework"
-	default n
-	help
-	Enable PT framework for managing system level cache.
-
-config GS_SLC_ACPM
-	tristate "PT ACPM driver"
-	depends on SLC_PARTITION_MANAGER && GS_ACPM
-	default n
-	help
-	Support PT ACPM drvier
-
-config SLC_PMON
-	bool "Enable SLC perf counter support"
-	depends on GS_SLC_ACPM
-	default n
-	help
-	Enable SLC perf counter support in PT ACPM driver.
-
 config VH_KERNEL
 	bool "Vendor kernel modules"
 	default y
@@ -247,15 +227,13 @@ config PERF_TRACE_CTRS
 	help
 	Support perf_trace_counters
 
-source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/gsa/Kconfig"
-
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/debug/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/gnssif_spi/Kconfig"
 
-source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/eh/Kconfig"
-
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/gcma/Kconfig"
+
+source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/pt/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/pa_kill/Kconfig"
 

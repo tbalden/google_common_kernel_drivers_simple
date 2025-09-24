@@ -31,7 +31,9 @@
 #if IS_ENABLED(CONFIG_GS_S2MPU)
 #include <soc/google/s2mpu.h>
 #endif
-#include <misc/logbuffer.h>
+#if IS_ENABLED(CONFIG_GOOGLE_LOGBUFFER)
+#include <logbuffer.h>
+#endif
 #endif
 #include "modem_v1.h"
 
@@ -49,6 +51,8 @@
 
 /* #define DEBUG_MODEM_IF_PS_DATA */
 /* #define DEBUG_MODEM_IF_IP_DATA */
+
+#define NUM_ENABLED_MSI 5
 
 /*
  * IOCTL commands
@@ -634,7 +638,9 @@ struct modem_ctl {
 	enum modem_variant variant;
 	struct modem_data *mdm_data;
 	struct modem_shared *msd;
+#if IS_ENABLED(CONFIG_S5910)
 	struct device *s5910_dev;
+#endif
 #if IS_ENABLED(CONFIG_CP_PMIC)
 	struct device *pmic_dev;
 #endif
@@ -712,6 +718,8 @@ struct modem_ctl {
 	struct irq_chip *cp_wrst_irq_chip;
 	struct pci_dev *s51xx_pdev;
 	struct workqueue_struct *wakeup_wq;
+	struct workqueue_struct *ap2cp_wakeup_wq;
+	struct work_struct ap2cp_wakeup_work;
 	struct work_struct wakeup_work;
 	struct work_struct suspend_work;
 	struct workqueue_struct *crash_wq;
@@ -739,7 +747,8 @@ struct modem_ctl {
 	bool pcie_pm_resume_wait;
 	int pcie_pm_resume_gpio_val;
 	bool device_reboot;
-  bool l1ss_disable;
+	bool device_suspended;
+	bool l1ss_disable;
 
 #if IS_ENABLED(CONFIG_CPIF_AP_SUSPEND_DURING_VOICE_CALL)
 	bool pcie_voice_call_on;
@@ -789,13 +798,24 @@ struct modem_ctl {
 #if defined(CPIF_WAKEPKT_SET_MARK)
 	atomic_t mark_skb_wakeup;
 #endif
+#if IS_ENABLED(CONFIG_GOOGLE_LOGBUFFER)
 	struct logbuffer *log;
+#endif
+#if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
+	spinlock_t google_cdd_data_lock;
+	uint32_t google_cdd_modem_data;
+#endif
+
+#if IS_ENABLED(CONFIG_LINK_DEVICE_PCIE_SOC_GOOGLE)
+	u32 msi_missed[NUM_ENABLED_MSI];
+#endif
+
+	bool cp_ever_powered_on;
 
 	u32 tp_threshold;
 	u32 tp_hysteresis;
 	bool pcie_dynamic_spd_enabled;
-
-	bool cp_ever_powered_on;
+	int irq_offset;
 };
 
 static inline bool cp_offline(struct modem_ctl *mc)

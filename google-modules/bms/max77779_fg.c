@@ -16,6 +16,10 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": %s " fmt, __func__
 
+#pragma clang diagnostic ignored "-Wenum-conversion"
+#pragma clang diagnostic ignored "-Wswitch"
+#pragma clang diagnostic ignored "-Wunused-function"
+
 #include <linux/debugfs.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -102,12 +106,6 @@ static inline int reg_to_cycles(u32 val)
 {
 	/* LSB: 25% of one cycle */
 	return DIV_ROUND_CLOSEST(val * 25, 100);
-}
-
-static inline int reg_to_seconds(s16 val)
-{
-	/* LSB: 5.625 seconds */
-	return DIV_ROUND_CLOSEST((int) val * 5625, 1000);
 }
 
 static inline int reg_to_vempty(u16 val)
@@ -255,12 +253,12 @@ unlock_exit:
 	return ret;
 }
 
-static int max77779_fg_resume_check(struct max77779_fg_chip *chip)
+static int max77779_fg_init_check(struct max77779_fg_chip *chip)
 {
 	int ret = 0;
 
 	pm_runtime_get_sync(chip->dev);
-	if (!chip->init_complete || !chip->resume_complete)
+	if (!chip->init_complete)
 		ret = -EAGAIN;
 	pm_runtime_put_sync(chip->dev);
 
@@ -342,7 +340,7 @@ int max77779_external_fg_reg_read(struct device *dev, uint16_t reg, uint16_t *va
 	if (!chip || !chip->regmap.regmap)
 		return -ENODEV;
 
-	if (max77779_fg_resume_check(chip))
+	if (max77779_fg_init_check(chip))
 		return -EAGAIN;
 
 	tmp = *val;
@@ -365,7 +363,7 @@ int max77779_external_fg_reg_write(struct device *dev, uint16_t reg, uint16_t va
 	if (!chip || !chip->regmap.regmap)
 		return -ENODEV;
 
-	if (max77779_fg_resume_check(chip))
+	if (max77779_fg_init_check(chip))
 		return -EAGAIN;
 
 	mutex_lock(&chip->model_lock);
@@ -390,7 +388,7 @@ int max77779_external_fg_reg_write_nolock(struct device *dev, uint16_t reg, uint
 	if (!chip || !chip->regmap.regmap)
 		return -ENODEV;
 
-	if (max77779_fg_resume_check(chip))
+	if (max77779_fg_init_check(chip))
 		return -EAGAIN;
 
 	return regmap_write(chip->regmap.regmap, reg, val);
@@ -518,88 +516,6 @@ static ssize_t aafv_config_show(struct device *dev,
 }
 
 static DEVICE_ATTR_RW(aafv_config);
-
-static ssize_t bypass_chargelimit_fcn_delta_store(struct device *dev, struct device_attribute *attr,
-						const char *buf, size_t count)
-{
-	struct power_supply *psy = container_of(dev, struct power_supply, dev);
-	struct max77779_fg_chip *chip = power_supply_get_drvdata(psy);
-	int val, ret;
-
-	ret = kstrtoint(buf, 0, &val);
-	if (ret < 0)
-		return ret;
-
-	chip->bypass_chargelimit.threshold_fcn_delta = val;
-
-	return count;
-}
-
-static ssize_t bypass_chargelimit_fcn_delta_show(struct device *dev, struct device_attribute *attr,
-					       char *buf)
-{
-	struct power_supply *psy = container_of(dev, struct power_supply, dev);
-	struct max77779_fg_chip *chip = power_supply_get_drvdata(psy);
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n", chip->bypass_chargelimit.threshold_fcn_delta);
-}
-
-static DEVICE_ATTR_RW(bypass_chargelimit_fcn_delta);
-
-static ssize_t bypass_chargelimit_cycle_delta_store(struct device *dev,
-						    struct device_attribute *attr, const char *buf,
-						    size_t count)
-{
-	struct power_supply *psy = container_of(dev, struct power_supply, dev);
-	struct max77779_fg_chip *chip = power_supply_get_drvdata(psy);
-	int val, ret;
-
-	ret = kstrtoint(buf, 0, &val);
-	if (ret < 0)
-		return ret;
-
-	chip->bypass_chargelimit.threshold_cycle_delta = val;
-
-	return count;
-}
-
-static ssize_t bypass_chargelimit_cycle_delta_show(struct device *dev,
-						   struct device_attribute *attr, char *buf)
-{
-	struct power_supply *psy = container_of(dev, struct power_supply, dev);
-	struct max77779_fg_chip *chip = power_supply_get_drvdata(psy);
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n", chip->bypass_chargelimit.threshold_cycle_delta);
-}
-
-static DEVICE_ATTR_RW(bypass_chargelimit_cycle_delta);
-
-static ssize_t bypass_chargelimit_mode_store(struct device *dev, struct device_attribute *attr,
-					     const char *buf, size_t count)
-{
-	struct power_supply *psy = container_of(dev, struct power_supply, dev);
-	struct max77779_fg_chip *chip = power_supply_get_drvdata(psy);
-	int val, ret;
-
-	ret = kstrtoint(buf, 0, &val);
-	if (ret < 0)
-		return ret;
-
-	chip->bypass_chargelimit.mode = val;
-
-	return count;
-}
-
-static ssize_t bypass_chargelimit_mode_show(struct device *dev, struct device_attribute *attr,
-					    char *buf)
-{
-	struct power_supply *psy = container_of(dev, struct power_supply, dev);
-	struct max77779_fg_chip *chip = power_supply_get_drvdata(psy);
-
-	return scnprintf(buf, PAGE_SIZE, "%d\n", chip->bypass_chargelimit.mode);
-}
-
-static DEVICE_ATTR_RW(bypass_chargelimit_mode);
 
 /* lsb 1/256, race with max77779_fg_model_work()  */
 static int max77779_fg_get_capacity_raw(struct max77779_fg_chip *chip, u16 *data)
@@ -1541,7 +1457,7 @@ static int max77779_fg_get_property(struct power_supply *psy,
 
 	mutex_lock(&chip->model_lock);
 
-	if (max77779_fg_resume_check(chip) || !chip->model_ok) {
+	if (max77779_fg_init_check(chip) || !chip->model_ok) {
 		mutex_unlock(&chip->model_lock);
 		return -EAGAIN;
 	}
@@ -1644,35 +1560,10 @@ static int max77779_fg_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_TEMP:
 		val->intval = max77779_fg_get_temp(chip);
 		break;
-	case POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG:
-		err = REGMAP_READ(map, MAX77779_FG_TTE, &data);
-		if (err == 0)
-			val->intval = reg_to_seconds(data);
-		break;
-	case POWER_SUPPLY_PROP_TIME_TO_FULL_AVG:
-		err = REGMAP_READ(map, MAX77779_FG_TTF, &data);
-		if (err == 0)
-			val->intval = reg_to_seconds(data);
-		break;
-	case POWER_SUPPLY_PROP_TIME_TO_FULL_NOW:
-		val->intval = -1;
-		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_AVG:
 		rc = REGMAP_READ(map, MAX77779_FG_AvgVCell, &data);
 		if (rc == 0)
 			val->intval = reg_to_micro_volt(data);
-		break;
-	case POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN:
-		/* LSB: 20mV */
-		err = REGMAP_READ(map, MAX77779_FG_MaxMinVolt, &data);
-		if (err == 0)
-			val->intval = ((data >> 8) & 0xFF) * 20000;
-		break;
-	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
-		/* LSB: 20mV */
-		err = REGMAP_READ(map, MAX77779_FG_MaxMinVolt, &data);
-		if (err == 0)
-			val->intval = (data & 0xFF) * 20000;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		rc = REGMAP_READ(map, MAX77779_FG_VCell, &data);
@@ -1798,7 +1689,7 @@ static int max77779_gbms_fg_get_property(struct power_supply *psy,
 
 	mutex_lock(&chip->model_lock);
 
-	if (max77779_fg_resume_check(chip) || !chip->model_ok ||
+	if (max77779_fg_init_check(chip) || !chip->model_ok ||
 	    chip->model_reload != MAX77779_FG_LOAD_MODEL_IDLE) {
 		mutex_unlock(&chip->model_lock);
 		return -EAGAIN;
@@ -1844,12 +1735,6 @@ static int max77779_gbms_fg_get_property(struct power_supply *psy,
 	case GBMS_PROP_AAFV:
 		val->prop.intval = chip->aafv;
 		break;
-	case GBMS_PROP_NEED_CHARGE_TO_FULL:
-		val->prop.intval = maxfg_need_force_fullcharge(&chip->regmap,
-							       &chip->bypass_chargelimit,
-							       chip->cycle_count) ||
-				   chip->aafv_modified_fus;
-		break;
 	default:
 		pr_debug("%s: route to max77779_fg_get_property, psp:%d\n", __func__, psp);
 		err = -ENODATA;
@@ -1874,7 +1759,7 @@ static int max77779_gbms_fg_set_property(struct power_supply *psy,
 	int rc = 0;
 
 	mutex_lock(&chip->model_lock);
-	if (max77779_fg_resume_check(chip) || chip->fw_update_mode) {
+	if (max77779_fg_init_check(chip) || chip->fw_update_mode) {
 		mutex_unlock(&chip->model_lock);
 		return -EAGAIN;
 	}
@@ -1928,12 +1813,6 @@ static int max77779_gbms_fg_set_property(struct power_supply *psy,
 		rc = max77779_fg_aafv_update(chip);
 		mutex_unlock(&chip->model_lock);
 		break;
-	case GBMS_PROP_NEED_CHARGE_TO_FULL:
-		rc = maxfg_update_bypass_charge_limit(&chip->regmap, &chip->bypass_chargelimit,
-						      chip->cycle_count);
-		if (rc < 0)
-			dev_err(chip->dev, "failed to update bypass charge limit %d\n", rc);
-		break;
 	default:
 		pr_debug("%s: route to max77779_fg_set_property, psp:%d\n", __func__, psp);
 		return -ENODATA;
@@ -1952,7 +1831,6 @@ static int max77779_gbms_fg_property_is_writeable(struct power_supply *psy,
 	case GBMS_PROP_BATT_CE_CTRL:
 	case GBMS_PROP_HEALTH_ACT_IMPEDANCE:
 	case GBMS_PROP_AAFV:
-	case GBMS_PROP_NEED_CHARGE_TO_FULL:
 		return 1;
 	default:
 		break;
@@ -2188,7 +2066,7 @@ static irqreturn_t max77779_fg_irq_thread_fn(int irq, void *obj)
 		return IRQ_NONE;
 	}
 
-	if (irq != -1 && max77779_fg_resume_check(chip)) {
+	if (irq != -1 && max77779_fg_init_check(chip)) {
 		dev_warn_ratelimited(chip->dev, "%s: irq skipped, irq%d\n", __func__, irq);
 		return IRQ_NONE;
 	}
@@ -2436,7 +2314,7 @@ int max77779_fg_enable_firmware_update(struct device *dev, bool enable) {
 
 	mutex_lock(&chip->model_lock);
 
-	if (max77779_fg_resume_check(chip))
+	if (max77779_fg_init_check(chip))
 		goto max77779_fg_enable_firmware_update_exit;
 
 	/* enable/disable irq for firmware update */
@@ -3269,10 +3147,6 @@ static void max77779_fg_init_sysfs(struct max77779_fg_chip *chip, struct dentry 
 	debugfs_create_file("fw_update", 0600, de, chip, &debug_fw_update_fops);
 	debugfs_create_file("fw_revision", 0600, de, chip, &debug_fw_revision_fops);
 	debugfs_create_file("fw_sub_revision", 0600, de, chip, &debug_fw_sub_revision_fops);
-
-	/* bypass charge limits */
-	debugfs_create_u32("fcn_fcr_delta", 0644, de, &chip->bypass_chargelimit.fcn_fcr_delta);
-	debugfs_create_u32("last_fullcharge", 0644, de, &chip->bypass_chargelimit.last_fullcharge);
 }
 
 static u16 max77779_fg_read_rsense(const struct max77779_fg_chip *chip)
@@ -3726,15 +3600,6 @@ static int max77779_fg_prop_read(gbms_tag_t tag, void *buff, size_t size,
 	case GBMS_TAG_CLHI:
 		ret = maxfg_collect_history_data(buff, size, chip->por, chip->designcap,
 						 chip->RSense, &chip->regmap, &chip->regmap_debug);
-		/* size is the idx from google_battery */
-		if (!chip->history_idx)
-			chip->history_idx = size;
-
-		if (chip->history_idx != size) {
-			ret = maxfg_reset_max_min(&chip->regmap);
-			if (ret == 0)
-				chip->history_idx = size;
-		}
 		break;
 
 	default:
@@ -3789,7 +3654,6 @@ static void max77779_fg_init_work(struct work_struct *work)
 	mutex_init(&chip->cap_estimate.batt_ce_lock);
 	chip->prev_charge_status = POWER_SUPPLY_STATUS_UNKNOWN;
 	chip->fake_capacity = -EINVAL;
-	chip->resume_complete = true;
 	chip->init_complete = true;
 	chip->bhi_acim = 0;
 
@@ -3916,9 +3780,6 @@ static struct attribute *max77779_fg_attrs[] = {
 	&dev_attr_fg_learning_events.attr,
 	&dev_attr_registers_dump.attr,
 	&dev_attr_aafv_config.attr,
-	&dev_attr_bypass_chargelimit_fcn_delta.attr,
-	&dev_attr_bypass_chargelimit_cycle_delta.attr,
-	&dev_attr_bypass_chargelimit_mode.attr,
 	&dev_attr_full_cap_rep.attr,
 	NULL,
 };
@@ -4128,11 +3989,6 @@ int max77779_fg_init(struct max77779_fg_chip *chip)
 	if (ret < 0)
 		chip->bhi_fcn_count = BHI_CAP_FCN_COUNT;
 
-	ret = maxfg_init_bypass_charge_limit(&chip->regmap, dev->of_node,
-					     &chip->bypass_chargelimit);
-	if (ret < 0)
-		dev_err(dev, "error on init bypass charge limit(%d)\n", ret);
-
 	ret = max77779_init_fg_capture(chip);
 	if (ret < 0)
 		dev_err(dev, "Can not configure FG learning capture(%d)\n", ret);
@@ -4203,8 +4059,6 @@ int max77779_fg_pm_suspend(struct device *dev)
 
 	pm_runtime_get_sync(chip->dev);
 	dev_dbg(chip->dev, "%s\n", __func__);
-	chip->resume_complete = false;
-
 	pm_runtime_put_sync(chip->dev);
 
 	return 0;
@@ -4217,8 +4071,6 @@ int max77779_fg_pm_resume(struct device *dev)
 
 	pm_runtime_get_sync(chip->dev);
 	dev_dbg(chip->dev, "%s\n", __func__);
-	chip->resume_complete = true;
-
 	pm_runtime_put_sync(chip->dev);
 
 	return 0;

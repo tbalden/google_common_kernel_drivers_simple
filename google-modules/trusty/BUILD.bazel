@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "kernel_module")
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
+)
 
 filegroup(
     name = "headers",
@@ -9,9 +14,27 @@ filegroup(
     ]),
     visibility = [
         "//private/devices/google:__subpackages__",
-        "//private/google-modules/aoc:__pkg__",
-        "//private/google-modules/hdcp/samsung:__pkg__",
+        "//private/google-modules/powervr:__pkg__",
         "//private/google-modules/soc/gs:__pkg__",
+        "//private/google-modules/soc/gs/drivers/soc/google/gsa:__pkg__",
+        "//private/google-modules/video/cnm:__pkg__",
+    ],
+)
+
+ddk_headers(
+    name = "trusty_headers",
+    hdrs = [
+        ":headers",
+    ],
+    linux_includes = [
+        "include",
+    ],
+    visibility = [
+        "//private/google-modules/aoc:__subpackages__",
+        "//private/google-modules/display/vsi-drm/dwc_dptx:__subpackages__",
+        "//private/google-modules/hdcp/samsung:__subpackages__",
+        "//private/google-modules/soc/gs/drivers/soc/google/gsa:__subpackages__",
+        "//private/google-modules/video/cnm:__subpackages__",
     ],
 )
 
@@ -48,7 +71,11 @@ kernel_module(
     kernel_build = "//private/devices/google/common:kernel",
     visibility = [
         "//private/devices/google:__subpackages__",
+        "//private/google-modules/display/vsi-drm/dwc_dptx:__pkg__",
         "//private/google-modules/hdcp/samsung:__pkg__",
+        "//private/google-modules/powervr:__pkg__",
         "//private/google-modules/soc/gs:__pkg__",
+        "//private/google-modules/soc/gs/drivers/soc/google/gsa:__pkg__",
+        "//private/google-modules/video/cnm:__pkg__",
     ],
 )

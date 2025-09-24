@@ -1220,7 +1220,7 @@ static long amcs_cdev_compat_ioctl(struct file *file, unsigned int cmd, unsigned
 #define amcs_cdev_compat_ioctl NULL;
 #endif
 
-static char *amcs_devnode(struct device *dev, umode_t *mode)
+static char *amcs_devnode(const struct device *dev, umode_t *mode)
 {
 	struct audiometrics_priv_type *priv = NULL;
 
@@ -1363,7 +1363,7 @@ static int amcs_init_cdev(struct audiometrics_priv_type *priv)
 
 	priv->amcs_major = MAJOR(priv->amcs_dev);
 
-	priv->class = class_create(THIS_MODULE, AMCS_CDEV_NAME);
+	priv->class = class_create(AMCS_CDEV_NAME);
 	if (!priv->class) {
 		dev_err(&amcs_pdev->dev, "Failed to create amcs class\n");
 		ret = -ENXIO;

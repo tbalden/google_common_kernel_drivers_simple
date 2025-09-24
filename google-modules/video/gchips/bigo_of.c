@@ -41,7 +41,7 @@ static int bigo_of_get_resource(struct bigo_core *core)
 	core->regs_size = res->end - res->start + 1;
 	core->paddr = (phys_addr_t)res->start;
 
-#if IS_ENABLED(ENABLE_SLC)
+#if IS_ENABLED(CONFIG_BIGWAVE_ENABLE_SLC)
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ssmt_pid");
 	if (IS_ERR_OR_NULL(res)) {
 		rc = PTR_ERR(res);

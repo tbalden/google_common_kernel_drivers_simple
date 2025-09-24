@@ -7,7 +7,6 @@
  */
 
 #include <linux/usb.h>
-#include <trace/hooks/sound.h>
 #include <trace/hooks/usb.h>
 
 #include "aoc_usb.h"
@@ -19,34 +18,29 @@
 #define ap_suspend_enabled 1
 
 /*
- * Return true when the platform supports AP suspend with USB awake.
- * Currently this will respond to Kernel alsa pcm driver.
- */
-static void sound_vendor_support_suspend(void *unused, struct usb_device *udev,
-					 int direction, bool *is_support)
-{
-	if (!udev)
-		return;
-
-	*is_support = true;
-	return;
-}
-
-/*
  * Set bypass = 1 will skip USB suspend.
  */
 static void usb_vendor_dev_suspend(void *unused, struct usb_device *udev,
 				   pm_message_t msg, int *bypass)
 {
+	int port1, usb_audio_count = xhci_get_usb_audio_count();
+	struct usb_device *child_dev = NULL;
 	bool usb_playback = false;
 	bool usb_capture = false;
-	int usb_audio_count = xhci_get_usb_audio_count();
 
 	*bypass = 0;
 
 	/* If no USB audio device is connected, we won't skip suspend.*/
 	if (!udev || usb_audio_count < 1)
 		return;
+
+	/* If no USB device is connected to the root hub, we will still suspend the root hub. */
+	if (!udev->parent) {
+		usb_hub_for_each_child(udev, port1, child_dev)
+			break;
+		if (!child_dev)
+			return;
+	}
 
 	usb_playback = aoc_alsa_usb_playback_enabled();
 	usb_capture = aoc_alsa_usb_capture_enabled();
@@ -91,12 +85,6 @@ int usb_vendor_helper_init(void)
 		pr_info("%s: AP suspend support is disabled\n", __func__);
 		return ret;
 	}
-
-	ret = register_trace_android_vh_sound_usb_support_cpu_suspend(sound_vendor_support_suspend,
-								      NULL);
-	if (ret)
-		pr_err("register_trace_android_vh_sound_usb_support_cpu_suspend failed, ret:%d\n",
-		       ret);
 
 	ret = register_trace_android_rvh_usb_dev_suspend(usb_vendor_dev_suspend, NULL);
 	if (ret)

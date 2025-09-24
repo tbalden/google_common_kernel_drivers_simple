@@ -30,19 +30,18 @@
 #define HOST_PORT 0
 #define HOST_ENDPOINT 0
 
-#ifndef DISPLAY_PANEL_INDEX_PRIMARY
-#define DISPLAY_PANEL_INDEX_PRIMARY 0
-#endif
-#ifndef DISPLAY_PANEL_INDEX_SECONDARY
-#define DISPLAY_PANEL_INDEX_SECONDARY 1
-#endif
-
-static char panel_name[PANEL_DRV_LEN] = "panel-gs-simple";
-module_param_string(panel_name, panel_name, sizeof(panel_name), 0644);
-MODULE_PARM_DESC(panel_name, "preferred panel name");
-static char sec_panel_name[PANEL_DRV_LEN] = "panel-gs-simple";
-module_param_string(sec_panel_name, sec_panel_name, sizeof(sec_panel_name), 0644);
-MODULE_PARM_DESC(sec_panel_name, "preferred panel name for secondary panel");
+static char panel0_name[PANEL_DRV_LEN] = { '\0' };
+module_param_string(panel0_name, panel0_name, sizeof(panel0_name), 0644);
+MODULE_PARM_DESC(panel0_name, "preferred panel name for primary panel");
+static char panel1_name[PANEL_DRV_LEN] = { '\0' };
+module_param_string(panel1_name, panel1_name, sizeof(panel1_name), 0644);
+MODULE_PARM_DESC(panel1_name, "preferred panel name for secondary panel");
+static char panel0_serial[PANEL_SERIAL_MAX] = { '\0' };
+module_param_string(panel0_serial, panel0_serial, sizeof(panel0_serial), 0644);
+MODULE_PARM_DESC(panel0_serial, "Serial number for primary panel");
+static char panel1_serial[PANEL_SERIAL_MAX] = { '\0' };
+module_param_string(panel1_serial, panel1_serial, sizeof(panel1_serial), 0644);
+MODULE_PARM_DESC(panel1_serial, "Serial number for secondary panel");
 
 int gs_drm_mode_bts_fps(const struct drm_display_mode *mode, unsigned int min_bts_fps)
 {
@@ -73,10 +72,10 @@ void gs_connector_set_panel_name(const char *new_name, size_t len, int idx)
 {
 	switch (idx) {
 	case DISPLAY_PANEL_INDEX_PRIMARY:
-		strscpy(panel_name, new_name, sizeof(panel_name));
+		strscpy(panel0_name, new_name, sizeof(panel0_name));
 		break;
 	case DISPLAY_PANEL_INDEX_SECONDARY:
-		strscpy(sec_panel_name, new_name, sizeof(sec_panel_name));
+		strscpy(panel1_name, new_name, sizeof(panel1_name));
 		break;
 	default:
 		pr_warn("Unsupported panel index %d\n", idx);
@@ -127,6 +126,7 @@ static struct drm_connector_state *gs_drm_connector_duplicate_state(struct drm_c
 {
 	struct gs_drm_connector_state *gs_connector_state;
 	struct gs_drm_connector_state *copy;
+	struct gs_drm_connector *gs_connector = to_gs_connector(connector);
 
 	gs_connector_state = to_gs_connector_state(connector->state);
 	copy = kmemdup(gs_connector_state, sizeof(*gs_connector_state), GFP_KERNEL);
@@ -134,6 +134,9 @@ static struct drm_connector_state *gs_drm_connector_duplicate_state(struct drm_c
 		return NULL;
 
 	__drm_atomic_helper_connector_duplicate_state(connector, &copy->base);
+
+	/* update any state that panel may have changed */
+	gs_connector->funcs->panel_update_connector_state(gs_connector, copy);
 
 	/* clear pending update */
 	copy->pending_update_flags = 0;
@@ -232,6 +235,7 @@ static int gs_drm_connector_create_brightness_properties(struct gs_drm_connector
 		{ __builtin_ffs(GS_MIPI_CMD_SYNC_GHBM) - 1, "sync_ghbm" },
 		{ __builtin_ffs(GS_MIPI_CMD_SYNC_BL) - 1, "sync_bl" },
 		{ __builtin_ffs(GS_MIPI_CMD_SYNC_OP_RATE) - 1, "sync_op_rate" },
+		{ __builtin_ffs(GS_MIPI_CMD_SYNC_PWM_MODE) - 1, "sync_pwm_mode" },
 	};
 
 	prop = drm_property_create(dev, DRM_MODE_PROP_BLOB | DRM_MODE_PROP_IMMUTABLE,
@@ -271,10 +275,35 @@ static int gs_drm_connector_create_brightness_properties(struct gs_drm_connector
 	prop = drm_property_create_bitmask(
 		dev, 0, "mipi_sync", mipi_sync_list, ARRAY_SIZE(mipi_sync_list),
 		GS_MIPI_CMD_SYNC_NONE | GS_MIPI_CMD_SYNC_REFRESH_RATE | GS_MIPI_CMD_SYNC_LHBM |
-			GS_MIPI_CMD_SYNC_GHBM | GS_MIPI_CMD_SYNC_BL | GS_MIPI_CMD_SYNC_OP_RATE);
+			GS_MIPI_CMD_SYNC_GHBM | GS_MIPI_CMD_SYNC_BL | GS_MIPI_CMD_SYNC_OP_RATE |
+			GS_MIPI_CMD_SYNC_PWM_MODE);
 	if (!prop)
 		return -ENOMEM;
 	p->mipi_sync = prop;
+
+	return 0;
+}
+
+static int gs_drm_connector_create_refresh_ctrl_properties(struct gs_drm_connector *gs_connector)
+{
+	struct drm_device *drm_dev = gs_connector->base.dev;
+	struct gs_drm_connector_properties *p = gs_drm_connector_get_properties(gs_connector);
+	struct drm_property *prop;
+
+	prop = drm_property_create_range(drm_dev, 0, "refresh_ctl_insert_frames", 0, UINT_MAX);
+	if (!prop)
+		return -ENOMEM;
+	p->refresh_ctl_insert_frames = prop;
+
+	prop = drm_property_create_range(drm_dev, 0, "refresh_ctl_min_refresh_rate", 0, UINT_MAX);
+	if (!prop)
+		return -ENOMEM;
+	p->refresh_ctl_min_refresh_rate = prop;
+
+	prop = drm_property_create_bool(drm_dev, 0, "refresh_ctl_auto_frame_enabled");
+	if (!prop)
+		return -ENOMEM;
+	p->refresh_ctl_auto_frame_enabled = prop;
 
 	return 0;
 }
@@ -341,6 +370,40 @@ static int gs_drm_connector_create_orientation_property(struct gs_drm_connector 
 	return 0;
 }
 
+static int gs_drm_connector_create_pwm_mode_property(struct gs_drm_connector *gs_connector)
+{
+	struct drm_device *dev = gs_connector->base.dev;
+	struct gs_drm_connector_properties *p = gs_drm_connector_get_properties(gs_connector);
+	static const struct drm_prop_enum_list list[] = {
+		{ GS_PWM_RATE_STANDARD, "standard" },
+		{ GS_PWM_RATE_HIGH, "high" },
+	};
+
+	p->pwm_mode = drm_property_create_enum(dev, 0, "pwm_mode", list, ARRAY_SIZE(list));
+	if (!p->pwm_mode)
+		return -ENOMEM;
+
+	return 0;
+}
+
+static int gs_drm_connector_create_panel_power_state_property(struct gs_drm_connector *gs_connector)
+{
+	struct drm_device *dev = gs_connector->base.dev;
+	struct gs_drm_connector_properties *p = gs_drm_connector_get_properties(gs_connector);
+	/* TODO: b/402868084 - add other power states to be controlled by HWC */
+	static const struct drm_prop_enum_list list[] = {
+		{ GS_PANEL_POWER_STATE_MP_OFF, "MP_OFF" },
+		{ GS_PANEL_POWER_STATE_MP, "MP" },
+	};
+
+	p->panel_power_state = drm_property_create_enum(dev, 0, "panel_power_state", list,
+							ARRAY_SIZE(list));
+	if (!p->panel_power_state)
+		return -ENOMEM;
+
+	return 0;
+}
+
 int gs_drm_connector_create_properties(struct drm_connector *connector)
 {
 	struct gs_drm_connector *gs_connector = to_gs_connector(connector);
@@ -353,6 +416,10 @@ int gs_drm_connector_create_properties(struct drm_connector *connector)
 
 	p->lp_mode = drm_property_create(drm_dev, DRM_MODE_PROP_BLOB, "lp_mode", 0);
 	if (!p->lp_mode)
+		return -ENOMEM;
+
+	p->all_modes = drm_property_create(drm_dev, DRM_MODE_PROP_BLOB, "all_modes", 0);
+	if (!p->all_modes)
 		return -ENOMEM;
 
 	p->is_partial = drm_property_create_bool(drm_dev, DRM_MODE_PROP_IMMUTABLE, "is_partial");
@@ -390,9 +457,19 @@ int gs_drm_connector_create_properties(struct drm_connector *connector)
 	if (ret)
 		return ret;
 
+	ret = gs_drm_connector_create_refresh_ctrl_properties(gs_connector);
+
 	p->frame_interval = drm_property_create_range(drm_dev, 0, "frame_interval", 0, UINT_MAX);
 	if (!p->frame_interval)
 		return -ENOMEM;
+
+	ret = gs_drm_connector_create_pwm_mode_property(gs_connector);
+	if (ret)
+		return ret;
+
+	ret = gs_drm_connector_create_panel_power_state_property(gs_connector);
+	if (ret)
+		return ret;
 
 	dev_dbg(dev, "%s-\n", __func__);
 	return ret;
@@ -409,6 +486,16 @@ void gs_drm_connector_update_gray_level_callback(struct drm_connector *connector
 	dev_dbg(gs_connector->kdev, "gs_drm_connector set gray_level to %d\n", gray_level);
 }
 EXPORT_SYMBOL_GPL(gs_drm_connector_update_gray_level_callback);
+
+/* MIPI datarate */
+
+int gs_drm_connector_get_safe_min_mipi_datarate(struct gs_drm_connector *gs_connector, bool is_lp)
+{
+	if (gs_connector->funcs && gs_connector->funcs->get_max_mipi_datarate)
+		return gs_connector->funcs->get_max_mipi_datarate(gs_connector, is_lp);
+	return -EINVAL;
+}
+EXPORT_SYMBOL_GPL(gs_drm_connector_get_safe_min_mipi_datarate);
 
 /* Component Model Functions */
 
@@ -427,7 +514,9 @@ int gs_connector_bind(struct device *dev, struct device *master, void *data)
 
 	/* Create properties */
 
-	gs_drm_connector_create_properties(&gs_connector->base);
+	ret = gs_drm_connector_create_properties(&gs_connector->base);
+	if (ret)
+		dev_err(dev, "Error creating properties for gs_drm_connector (ret = %d)\n", ret);
 
 	dev_dbg(dev, "%s-\n", __func__);
 	return ret;
@@ -452,6 +541,56 @@ gs_drm_connector_find_host_node(const struct gs_drm_connector *gs_connector, int
 	return remote;
 }
 
+static int _connector_add_mipi_dsi_device(struct gs_drm_connector *gs_connector,
+					  struct mipi_dsi_device_info *info)
+{
+	struct device *dev = gs_connector->kdev;
+	struct mipi_dsi_host *host = gs_connector->dsi_host_device;
+
+	if (info->node) {
+		gs_connector->panel_dsi_device = mipi_dsi_device_register_full(host, info);
+		dev_dbg(dev, "%s-\n", __func__);
+		return 0;
+	} else {
+		return -ENODEV;
+	}
+}
+
+static int connector_add_mipi_dsi_device_preferred(struct gs_drm_connector *gs_connector)
+{
+	struct mipi_dsi_device_info info = {
+		.node = NULL,
+		.channel = 1,
+	};
+	struct device *dev = gs_connector->kdev;
+	static const char propname[] = "google,preferred-panel";
+
+	dev_dbg(dev, "%s+ No preferred panel name\n", __func__);
+
+	info.node = of_parse_phandle(dev->of_node, "google,preferred-panel", 0);
+	if (info.node) {
+		const char *node_label = of_get_property(info.node, "label", NULL);
+
+		if (!node_label) {
+			dev_err(dev, "Preferred panel missing label property\n");
+			return -ENODEV;
+		}
+		if (of_property_read_u32(info.node, "channel", &info.channel)) {
+			dev_err(dev, "Preferred panel named %s has no channel property\n",
+				node_label);
+			return -ENODEV;
+		}
+		dev_dbg(dev, "Preferred panel found, label %s\n", node_label);
+		strscpy(info.type, node_label, sizeof(info.type));
+	} else {
+		dev_err(dev, "No preferred panel name and no preferred panel property %s\n",
+			propname);
+		return -ENODEV;
+	}
+
+	return _connector_add_mipi_dsi_device(gs_connector, &info);
+}
+
 static int connector_add_mipi_dsi_device(struct gs_drm_connector *gs_connector, const char *pname)
 {
 	struct mipi_dsi_device_info info = {
@@ -460,7 +599,6 @@ static int connector_add_mipi_dsi_device(struct gs_drm_connector *gs_connector, 
 	};
 	struct device_node *node;
 	struct device *dev = gs_connector->kdev;
-	struct mipi_dsi_host *host;
 	const char *node_label;
 	const char *p;
 	u32 cmp_len;
@@ -469,9 +607,6 @@ static int connector_add_mipi_dsi_device(struct gs_drm_connector *gs_connector, 
 	cmp_len = p ? min((ptrdiff_t)PANEL_DRV_LEN, p - pname) : strnlen(pname, PANEL_DRV_LEN);
 
 	dev_dbg(dev, "%s+ Preferred panel %s\n", __func__, pname);
-
-	/* Get mipi_dsi_host */
-	host = gs_connector->dsi_host_device;
 
 	/* Search for matching child node */
 	for_each_available_child_of_node(dev->of_node, node) {
@@ -491,67 +626,33 @@ static int connector_add_mipi_dsi_device(struct gs_drm_connector *gs_connector, 
 			continue;
 		found = !strncmp(node_label, pname, cmp_len);
 		if (found) {
-			/*TODO(tknelms): case for no pname provided */
 			strscpy(info.type, node_label, sizeof(info.type));
 			info.node = of_node_get(node);
 		}
 	}
 
-	if (info.node) {
-		mipi_dsi_device_register_full(host, &info);
-		dev_dbg(dev, "%s-\n", __func__);
-		return 0;
-	} else {
+	if (!info.node)
 		dev_err(dev, "Unable to find panel matching name %s\n", pname);
-		return -ENODEV;
-	}
+
+	return _connector_add_mipi_dsi_device(gs_connector, &info);
 }
 
-static const char *get_dsim_label(const struct gs_drm_connector *gs_connector)
-{
-	static const char *dsim_label;
-	struct device *dev = gs_connector->kdev;
-	struct device_node *parent_node =
-		gs_drm_connector_find_host_node(gs_connector, HOST_PORT, HOST_ENDPOINT);
-
-	if (IS_ERR_OR_NULL(parent_node)) {
-		dev_warn(dev, "Invalid parent_node %p\n", parent_node);
-		return NULL;
-	}
-
-	if (of_property_read_string(parent_node, "label", &dsim_label)) {
-		dev_warn(dev, "No label property found for dsim\n");
-		dsim_label = NULL;
-	}
-
-	of_node_put(parent_node);
-	return dsim_label;
-}
-
-/*
- * Parses the bootloader-provided name in the form "dsimX:preferred_panel",
- * compares "dsimX" with the label of the connector's parent DT entry.
- * Returns NULL if not a match, or "preferred_panel" if there is a match.
+/**
+ * strip_optional_panel_name_prefix() - Parses bootloader-provided panel name
+ * @name: name to strip leading dsim label from
+ *
+ * Strips optional "dsimX:" from panel name parameter (previous frameworks made
+ * use of "dsimX:panel_name.panel_id" format)
+ *
+ * Return: the panel name without any content prior to a delimiting colon
  */
-static const char *get_panel_name(struct gs_drm_connector *gs_connector, const char *name)
+static const char *strip_optional_panel_name_prefix(const char *name)
 {
 	/* if ":" not in name, return entire name */
 	const char *p = strchr(name, ':');
-	const char *dsim_label;
-	int len;
 
 	if (!p)
 		return name;
-
-	dsim_label = get_dsim_label(gs_connector);
-	if (dsim_label) {
-		len = p - name;
-		if ((len != strlen(dsim_label)) || (strncmp(name, dsim_label, len)))
-			return NULL;
-		if (name[DSIM_LABEL_LEN] != ':')
-			return NULL;
-	}
-
 	return (p + 1);
 }
 
@@ -598,17 +699,38 @@ static int parse_panel_name(struct gs_drm_connector *gs_connector)
 	const char *pref_panel_name;
 
 	if (gs_connector->panel_index == DISPLAY_PANEL_INDEX_SECONDARY)
-		pref_panel_name = get_panel_name(gs_connector, sec_panel_name);
+		pref_panel_name = strip_optional_panel_name_prefix(panel1_name);
 	else
-		pref_panel_name = get_panel_name(gs_connector, panel_name);
+		pref_panel_name = strip_optional_panel_name_prefix(panel0_name);
 
 	if (pref_panel_name && pref_panel_name[0]) {
 		gs_connector->panel_id = dsim_get_panel_id(pref_panel_name);
 
 		return connector_add_mipi_dsi_device(gs_connector, pref_panel_name);
-	}
+	} else {
+		/*
+		 * With no valid preferred name, presume invalid ID; panel
+		 * driver will check extinfo for id after first enable
+		 */
+		gs_connector->panel_id = INVALID_PANEL_ID;
 
-	return -ENODEV;
+		return connector_add_mipi_dsi_device_preferred(gs_connector);
+	}
+}
+
+/**
+ * read_panel_serial() - quick function for assigning serial number param ptr
+ * @gs_connector: Pointer to gs_connector
+ *
+ * The panel is responsible for either copying this string's contents or
+ * reading the serial number directly and storing it within gs_panel
+ */
+static void read_panel_serial(struct gs_drm_connector *gs_connector)
+{
+	if (gs_connector->panel_index == DISPLAY_PANEL_INDEX_SECONDARY)
+		gs_connector->panel_serial_param_ptr = panel1_serial;
+	else
+		gs_connector->panel_serial_param_ptr = panel0_serial;
 }
 
 /**
@@ -654,7 +776,7 @@ static int gs_drm_connector_find_host(struct gs_drm_connector *gs_connector, int
 	if (!remote)
 		return -ENODEV;
 
-	dev = gs_connector->base.kdev;
+	dev = gs_connector->kdev;
 	host = of_find_mipi_dsi_host_by_node(remote);
 	if (!host) {
 		ret = -EPROBE_DEFER;
@@ -693,6 +815,7 @@ static int gs_drm_connector_probe(struct platform_device *pdev)
 	ret = gs_drm_connector_parse_panel_index(gs_connector);
 	if (ret)
 		return ret;
+	read_panel_serial(gs_connector);
 
 	if (parse_panel_name(gs_connector))
 		dev_err(dev, "%s parse_panel_name failed\n", __func__);

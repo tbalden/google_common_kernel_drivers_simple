@@ -547,7 +547,8 @@ int mfc_iommu_map_firmware(struct mfc_core *core, struct mfc_special_buf *fw_buf
 	fw_buf->map_size = iommu_map_sg(core->domain, reserved_base,
 			fw_buf->sgt->sgl,
 			fw_buf->sgt->orig_nents,
-			IOMMU_READ|IOMMU_WRITE);
+			IOMMU_READ|IOMMU_WRITE,
+			GFP_KERNEL);
 	if (!fw_buf->map_size) {
 		mfc_core_err("Failed to map iova (err VA: %pad, PA: %pap)\n",
 				&reserved_base, &fw_buf->paddr);

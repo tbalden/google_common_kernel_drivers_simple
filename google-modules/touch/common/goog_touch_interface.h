@@ -9,6 +9,7 @@
 #define _GOOG_TOUCH_INTERFACE_
 
 #include <drm/drm_panel.h>
+#include <drm/drm_atomic_state_helper.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_connector.h>
 #include <linux/kfifo.h>
@@ -99,6 +100,9 @@
 #define MIN_DELAY_END_RESET	(1 * S_IN_NS)
 #define MAX_DELAY_END_RESET	(15 * S_IN_NS)
 
+/* Resample latency */
+#define RESAMPLE_LATENCY_DEFAULT (5 * NSEC_PER_MSEC)
+
 /*-----------------------------------------------------------------------------
  * enums.
  */
@@ -120,6 +124,7 @@ enum gti_cmd_type : u32 {
 	GTI_CMD_GET_GRIP_MODE,
 	GTI_CMD_GET_IRQ_MODE,
 	GTI_CMD_GET_PALM_MODE,
+	GTI_CMD_GET_PANEL_ID,
 	GTI_CMD_GET_SCAN_MODE,
 	GTI_CMD_GET_SCREEN_PROTECTOR_MODE,
 	GTI_CMD_GET_SENSING_MODE,
@@ -192,6 +197,7 @@ enum gti_irq_mode : u32 {
  *   GTI_MF_MODE_DYNAMIC: dynamic control for motion filter.
  *   GTI_MF_MODE_FILTER: only report touch if coord report changed.
  *   GTI_MF_MODE_AUTO: for development case.
+ *   GTI_MF_MODE_FW_CONTROL: touch firmware handles the motion filter.
  */
 enum gti_mf_mode : u32 {
 	GTI_MF_MODE_UNFILTER = 0,
@@ -199,6 +205,7 @@ enum gti_mf_mode : u32 {
 	GTI_MF_MODE_DYNAMIC = GTI_MF_MODE_DEFAULT,
 	GTI_MF_MODE_FILTER = 2,
 	GTI_MF_MODE_AUTO_REPORT = 3,
+	GTI_MF_MODE_FW_CONTROL = 4,
 };
 
 /**
@@ -406,6 +413,12 @@ enum gti_ical_state : u32 {
 	ICAL_STATE_NA = 0xFFFFFFFF,
 };
 
+enum gti_aod_mode : u8 {
+	AOD_MODE_DISABLED = 0,
+	AOD_MODE_LP,
+	AOD_MODE_MP,
+};
+
 /*-----------------------------------------------------------------------------
  * const char.
  */
@@ -493,6 +506,7 @@ struct gti_context_stylus_cmd {
 
 struct gti_continuous_report_cmd {
 	enum gti_continuous_report_setting setting;
+	bool support_fw_auto_control;
 };
 
 struct gti_debug_coord {
@@ -549,6 +563,10 @@ struct gti_irq_cmd {
 
 struct gti_palm_cmd {
 	enum gti_palm_setting setting;
+};
+
+struct gti_panel_id_cmd {
+	int setting;
 };
 
 struct gti_panel_speed_mode_cmd {
@@ -618,6 +636,7 @@ struct gti_sensor_data_cmd {
  * @sensing_cmd: command to set/set sensing mode.
  * @sensor_data_cmd: command to get sensor data.
  * @manual_sensor_data_cmd: command to get sensor data manually.
+ * @panel_id_cmd: command to get panel id.
  */
 struct gti_union_cmd_data {
 	struct gti_calibrate_cmd calibrate_cmd;
@@ -633,6 +652,7 @@ struct gti_union_cmd_data {
 	struct gti_heatmap_cmd heatmap_cmd;
 	struct gti_irq_cmd irq_cmd;
 	struct gti_palm_cmd palm_cmd;
+	struct gti_panel_id_cmd panel_id_cmd;
 	struct gti_panel_speed_mode_cmd panel_speed_mode_cmd;
 	struct gti_ping_cmd ping_cmd;
 	struct gti_report_rate_cmd report_rate_cmd;
@@ -684,6 +704,7 @@ struct gti_fw_status_data {
  * @get_irq_mode: vendor driver operation to get irq mode setting.
  * @get_mutual_sensor_data: vendor driver operation to get the mutual sensor data.
  * @get_palm_mode: vendor driver operation to get the palm mode setting.
+ * @get_panel_id: vendor driver operation to get panel id.
  * @get_scan_mode: vendor driver operation to get scan mode.
  * @get_screen_protector_mode: vendor driver operation to get screen protector mode.
  * @get_self_sensor_data: vendor driver operation to get the self sensor data.
@@ -721,6 +742,7 @@ struct gti_optional_configuration {
 	int (*get_irq_mode)(void *private_data, struct gti_irq_cmd *cmd);
 	int (*get_mutual_sensor_data)(void *private_data, struct gti_sensor_data_cmd *cmd);
 	int (*get_palm_mode)(void *private_data, struct gti_palm_cmd *cmd);
+	int (*get_panel_id)(void *private_data, struct gti_panel_id_cmd *cmd);
 	int (*get_scan_mode)(void *private_data, struct gti_scan_cmd *cmd);
 	int (*get_screen_protector_mode)(void *private_data,
 			struct gti_screen_protector_mode_cmd *cmd);
@@ -779,10 +801,33 @@ struct gti_pm {
 };
 
 /**
+ * struct pid_controller - A pid controller.
+ * u = (k1*e(i) + k2*e(i-1) + k3*e(i-2)) / div
+ *
+ * @e0: e(i).
+ * @e1: e(i-1).
+ * @e2: e(i-2).
+ * @k1: the coefficient of e(i).
+ * @k2: the coefficient of e(i-1).
+ * @k3: the coefficient of e(i-2).
+ * @div: for simulate a float value by integer.
+ */
+struct pid_controller {
+	s64 e0;
+	s64 e1;
+	s64 e2;
+	s64 k1;
+	s64 k2;
+	s64 k3;
+	s64 div;
+};
+
+/**
  * struct goog_touch_interface - Google touch interface data for Pixel.
  * @vendor_private_data: the private data pointer that used by touch vendor driver.
  * @vendor_dev: pointer to struct device that used by touch vendor driver.
  * @vendor_input_dev: pointer to struct inpu_dev that used by touch vendor driver.
+ * @vendor_spi_dev: pointer to struct spi_device that used by touch vendor driver.
  * @dev: pointer to struct device that used by google touch interface driver.
  * @options: optional configuration that could apply by vendor driver.
  * @input_lock: protect the input report between non-offload and offload.
@@ -800,6 +845,7 @@ struct gti_pm {
  * @event_wq: a work queue to run suspend/resume work.
  * @input_dev_mono_ktime: input timestamp used by input dev and input subsystem.
  * @input_timestamp: input timestamp from touch vendor driver.
+ * @resample_latency: resample latency in nanoseconds.
  * @mf_downtime: timestamp for motion filter control.
  * @vrr_enabled: variable touch report rate is enabled or not.
  * @report_rate_table_size: report rate table size from device tree.
@@ -825,7 +871,7 @@ struct gti_pm {
  * @pm_qos_req: struct that used by pm qos.
  * @fw_status: firmware status such as water_mode, noise_level, etc.
  * @context_changed: flags that indicate driver status changing.
- * @panel_is_lp_mode: display is in low power mode.
+ * @aod_mode: display is in LP/MP aod mode.
  * @offload_enabled: touch offload is enabled or not.
  * @v4l2_enabled: v4l2 is enabled or not.
  * @tbn_enabled: tbn is enabled or not.
@@ -843,6 +889,9 @@ struct gti_pm {
  * @lptw_triggered: LPTW is triggered or not.
  * @lptw_suppress_coords_enabled: enable flag for suppressing the coords after lptw.
  * @lptw_track_finger: flag for tracking the suppressed fingers.
+ * @late_sense_on_enabled: enable flag for late sense-on.
+ * @panel_map_from_tic: enable flag for readiing panel id from tic.
+ * @tbn_protection_enabled: enable flag for bus protection.
  * @lptw_track_min_x: minimum x of tracking area.
  * @lptw_track_max_x: maximum x of tracking area.
  * @lptw_track_min_y: minimum y of tracking area.
@@ -889,6 +938,7 @@ struct goog_touch_interface {
 	void *vendor_private_data;
 	struct device *vendor_dev;
 	struct input_dev *vendor_input_dev;
+	struct spi_device *vendor_spi_dev;
 	struct device *dev;
 	struct gti_optional_configuration options;
 	struct mutex input_lock;
@@ -904,9 +954,17 @@ struct goog_touch_interface {
 	struct proc_dir_entry *proc_show[GTI_PROC_NUM];
 	struct work_struct set_op_hz_work;
 	struct workqueue_struct *event_wq;
+	struct pid_controller pid;
 	ktime_t input_dev_mono_ktime;
 	ktime_t input_timestamp;
+	u64 sensing_timestamp;
+	u64 last_sensing_timestamp;
+	bool sensing_timestamp_changed;
 	ktime_t mf_downtime;
+	u32 default_report_rate;
+	u32 report_rate;
+	ktime_t frame_time;
+	ktime_t resample_latency;
 
 	bool vrr_enabled;
 	int report_rate_table_size;
@@ -935,7 +993,7 @@ struct goog_touch_interface {
 	struct gti_fw_status_data fw_status;
 	struct gti_context_changed context_changed;
 
-	bool panel_is_lp_mode;
+	enum gti_aod_mode aod_mode;
 	bool offload_enabled;
 	bool v4l2_enabled;
 	bool tbn_enabled;
@@ -952,7 +1010,11 @@ struct goog_touch_interface {
 	bool reset_after_selftest;
 	bool lptw_triggered;
 	bool lptw_suppress_coords_enabled;
+	bool timestamp_correction_enabled;
 	bool lptw_track_finger;
+	bool late_sense_on_enabled;
+	bool panel_map_from_tic;
+	bool tbn_protection_enabled;
 	u32 lptw_track_min_x;
 	u32 lptw_track_max_x;
 	u32 lptw_track_min_y;
@@ -1029,12 +1091,16 @@ struct goog_touch_interface {
  * Forward declarations.
  */
 inline bool goog_check_spi_dma_enabled(struct spi_device *spi_dev);
+inline bool goog_check_late_sense_on_enabled(struct goog_touch_interface *gti);
 inline ktime_t *goog_input_get_timestamp(struct goog_touch_interface *gti);
 inline void goog_input_lock(struct goog_touch_interface *gti);
 inline void goog_input_unlock(struct goog_touch_interface *gti);
 inline void goog_input_set_timestamp(
 		struct goog_touch_interface *gti,
 		struct input_dev *dev, ktime_t timestamp);
+inline void goog_input_set_sensing_timestamp(
+		struct goog_touch_interface *gti,
+		struct input_dev *dev, u64 timestamp);
 inline void goog_input_mt_slot(
 		struct goog_touch_interface *gti,
 		struct input_dev *dev, int slot);

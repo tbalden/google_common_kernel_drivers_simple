@@ -245,9 +245,7 @@ int max_m5_get_rc_switch_param(struct max_m5_data *m5_data, u16 *rc2_tempco, u16
 /* read saved value */
 ssize_t max_m5_gmsr_state_cstr(char *buf, int max);
 
-void max_m5_model_apply_aaf_fullsoc(struct max_m5_data *m5_data, const struct aafv_fg_config *cfg);
-
-bool max_m5_check_lock(struct max_m5_data *m5_data);
+void max_m5_model_apply_aafv_fullsoc(struct max_m5_data *m5_data, const struct aafv_fg_config *cfg);
 
 /** ------------------------------------------------------------------------ */
 

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch")
 load("//private/devices/google/common/kleaf:device_build.bzl", "device_build")
 load("//private/devices/google/gs201:constants.bzl", "GS201_DTBS", "GS201_MODULE_OUTS")
 load(":constants.bzl", "PANTAH_DTBOS")
@@ -8,6 +9,11 @@ package(
     default_visibility = [
         "//private/devices/google/gs201:__subpackages__",
     ],
+)
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
 )
 
 device_build(
@@ -40,7 +46,7 @@ device_build(
         "//private/google-modules/touch/sec",
         "//private/google-modules/touch/synaptics/syna_c10:syna_touch",
         "//private/google-modules/uwb/qorvo/dw3000/kernel:uwb.dw3000",
-        "//private/google-modules/wlan/bcm4389:bcmdhd4389",
+        "//private/google-modules/wlan/bcmdhd/bcm4389:bcmdhd4389",
     ],
     insmod_cfgs = glob(["insmod_cfg/*.cfg"]),
     kconfig_exts = ["Kconfig.ext.pantah"],

@@ -256,6 +256,8 @@ static ssize_t memory_votes_stats(struct device *dev,
 
 DECLARE_MEMORY_VOTES(memory_votes_a32, 1);
 DECLARE_MEMORY_VOTES(memory_votes_ff1, 2);
+DECLARE_MEMORY_VOTES(memory_votes_hf0, 3);
+DECLARE_MEMORY_VOTES(memory_votes_hf1, 4);
 
 /* Driver methods */
 
@@ -523,6 +525,14 @@ DECLARE_STAT("USF_W", usf_wakeup);
 DECLARE_STAT("AUD_W", audio_wakeup);
 DECLARE_STAT("LOG_W", logging_wakeup);
 DECLARE_STAT("WORD_W", hotword_wakeup);
+DECLARE_STAT("V_PF0", voltage_pf0);
+DECLARE_STAT("V_PF1", voltage_pf1);
+DECLARE_STAT("V_PF2", voltage_pf2);
+DECLARE_STAT("V_PF3", voltage_pf3);
+DECLARE_STAT("V_PF4", voltage_pf4);
+DECLARE_STAT("V_PF5", voltage_pf5);
+DECLARE_STAT("V_PF6", voltage_pf6);
+DECLARE_STAT("V_PF7", voltage_pf7);
 
 static struct attribute *aoc_stats_attrs[] = {
 	&dev_attr_a32_build_info.attr,
@@ -569,6 +579,16 @@ static struct attribute *aoc_stats_attrs[] = {
 	&dev_attr_memory_exception.attr,
 	&dev_attr_memory_votes_a32.attr,
 	&dev_attr_memory_votes_ff1.attr,
+	&dev_attr_memory_votes_hf0.attr,
+	&dev_attr_memory_votes_hf1.attr,
+	&dev_attr_voltage_pf0.attr,
+	&dev_attr_voltage_pf1.attr,
+	&dev_attr_voltage_pf2.attr,
+	&dev_attr_voltage_pf3.attr,
+	&dev_attr_voltage_pf4.attr,
+	&dev_attr_voltage_pf5.attr,
+	&dev_attr_voltage_pf6.attr,
+	&dev_attr_voltage_pf7.attr,
 	NULL
 };
 
@@ -732,4 +752,5 @@ static struct aoc_driver aoc_control_driver = {
 
 module_aoc_driver(aoc_control_driver);
 
+MODULE_DESCRIPTION("Google AOC control driver");
 MODULE_LICENSE("GPL v2");

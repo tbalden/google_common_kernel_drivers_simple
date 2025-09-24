@@ -17,6 +17,7 @@
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
 #include <linux/power_supply.h>
+#include <linux/spmi.h>
 #include <linux/usb/tcpm.h>
 
 #include "google_tcpci_shim.h"
@@ -446,6 +447,7 @@ static int pogo_transport_probe(struct platform_device *pdev)
 	int ret = 0;
 	struct device_node *data_np, *dn;
 	struct i2c_client *data_client;
+	struct spmi_device *sdev;
 	struct max77759_plat *chip;
 	char *pogo_psy_name;
 
@@ -456,17 +458,27 @@ static int pogo_transport_probe(struct platform_device *pdev)
 	}
 
 	data_client = of_find_i2c_device_by_node(data_np);
-	if (!data_client) {
-		dev_err(&pdev->dev, "Failed to find tcpci client\n");
-		ret = -EPROBE_DEFER;
-		goto free_np;
-	}
-
-	chip = i2c_get_clientdata(data_client);
-	if (!chip) {
-		dev_err(&pdev->dev, "Failed to find max77759_plat\n");
-		ret = -EPROBE_DEFER;
-		goto put_client;
+	if (data_client) {
+		chip = i2c_get_clientdata(data_client);
+		if (!chip) {
+			dev_err(&pdev->dev, "Failed to find max77759_plat\n");
+			ret = -EPROBE_DEFER;
+			goto put_client;
+		}
+	} else {
+		sdev = spmi_device_from_of(dev->of_node);
+		if (sdev) {
+			chip = spmi_device_get_drvdata(sdev);
+			if (!chip) {
+				dev_err(&pdev->dev, "Failed to find max77759_plat\n");
+				ret = -EPROBE_DEFER;
+				goto put_client;
+			}
+		} else {
+			dev_err(&pdev->dev, "Unable to find TCPCI device\n");
+			ret = -EPROBE_DEFER;
+			goto free_np;
+		}
 	}
 
 	pogo_transport = devm_kzalloc(&pdev->dev, sizeof(*pogo_transport), GFP_KERNEL);

@@ -161,7 +161,7 @@ struct gs_display_dsc {
 	bool enabled;
 	unsigned int dsc_count;
 
-	const struct drm_dsc_config *cfg;
+	struct drm_dsc_config *cfg;
 
 	unsigned int delay_reg_init_us;
 };

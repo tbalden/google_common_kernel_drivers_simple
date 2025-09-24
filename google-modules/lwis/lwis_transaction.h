@@ -49,8 +49,6 @@ struct lwis_transaction {
 	struct list_head completion_fence_list;
 	/* Precondition fence file pointer */
 	struct dma_fence *precondition_fence;
-	/* Whether fences should use LWIS Fence legacy API. */
-	bool legacy_lwis_fence;
 	/*
 	 * If the transaction has more entries to process than the transaction_process_limit
 	 * for the processing device, then this will save the number of entries that are

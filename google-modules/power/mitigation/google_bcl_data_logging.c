@@ -6,33 +6,20 @@
  *
  */
 
-#include <linux/threads.h>
-#include <linux/time.h>
-#if IS_ENABLED(CONFIG_REGULATOR_S2MPG14)
-#include <soc/google/odpm.h>
-#elif IS_ENABLED(CONFIG_REGULATOR_S2MPG12) || IS_ENABLED(CONFIG_REGULATOR_S2MPG10)
-#include <soc/google/odpm-whi.h>
-#endif
-#include <uapi/linux/sched/types.h>
+#include <linux/ktime.h>
 #include "bcl.h"
+#include "core_pmic/core_pmic_defs.h"
+#include "ifpmic/max77759/max77759_irq.h"
+#include "ifpmic/max77779/max77779_irq.h"
+#include "soc/soc_defs.h"
 
-void compute_mitigation_modules(struct bcl_device *bcl_dev,
-				struct bcl_mitigation_conf *mitigation_conf, u32 *odpm_lpf_value)
-{
-	int i;
-	for (i = 0; i < METER_CHANNEL_MAX; i++) {
-		if (odpm_lpf_value[i] >= mitigation_conf[i].threshold) {
-			atomic_or(BIT(mitigation_conf[i].module_id),
-					  &bcl_dev->mitigation_module_ids);
-		}
-	}
-}
-#if IS_ENABLED(CONFIG_SOC_ZUMAPRO)
 static void log_ifpmic_power(struct bcl_device *bcl_dev)
 {
 	int idx, ret;
 	int i = 0;
 
+	if (!IS_ENABLED(CONFIG_REGULATOR_S2MPG14))
+		return;
 	if (bcl_dev->ifpmic != MAX77779)
 		return;
 	ret = bcl_vimon_read(bcl_dev);
@@ -45,53 +32,22 @@ static void log_ifpmic_power(struct bcl_device *bcl_dev)
 	}
 	bcl_dev->br_stats->vimon_intf.count = i;
 }
-#endif
 
 static void data_logging_main_odpm_lpf_task(struct bcl_device *bcl_dev)
 {
-	struct odpm_info *info = bcl_dev->main_odpm;
-	if (!info)
-		return;
-
-#if IS_ENABLED(CONFIG_REGULATOR_S2MPG14)
-	/* select lpf power mode */
-	s2mpg1415_meter_set_lpf_mode(info->chip.hw_id, info->i2c, S2MPG1415_METER_POWER);
-	/* the acquisition time of lpf_data is around 1ms */
-	s2mpg1415_meter_read_lpf_data_reg(info->chip.hw_id, info->i2c,
-					  (u32 *)bcl_dev->br_stats->main_odpm_lpf.value);
-#elif IS_ENABLED(CONFIG_REGULATOR_S2MPG12) || IS_ENABLED(CONFIG_REGULATOR_S2MPG10)
-	/* select lpf power mode */
-	s2mpg1x_meter_set_lpf_mode(info->chip.hw_id, info->i2c, S2MPG1X_METER_POWER);
-	/* the acquisition time of lpf_data is around 1ms */
-	s2mpg1x_meter_read_lpf_data_reg(info->chip.hw_id, info->i2c,
-					  (u32 *)bcl_dev->br_stats->main_odpm_lpf.value);
-#endif
-	ktime_get_real_ts64((struct timespec64 *)&bcl_dev->br_stats->main_odpm_lpf.time);
-	compute_mitigation_modules(bcl_dev,
-				   bcl_dev->main_mitigation_conf,
+	core_pmic_main_meter_read_lpf_data(bcl_dev, bcl_dev->br_stats);
+	compute_mitigation_modules(bcl_dev, bcl_dev->main_mitigation_conf,
 				   bcl_dev->br_stats->main_odpm_lpf.value);
 }
 
 static void data_logging_sub_odpm_lpf_task(struct bcl_device *bcl_dev)
 {
-	struct odpm_info *info = bcl_dev->sub_odpm;
-	if (!info)
+	/* google_odpm integrated main and sub instant data in one reading
+	 * on anacapa.
+	 */
+	if (!IS_ENABLED(CONFIG_REGULATOR_S2MPG14))
 		return;
-
-#if IS_ENABLED(CONFIG_REGULATOR_S2MPG14)
-	/* select lpf power mode */
-	s2mpg1415_meter_set_lpf_mode(info->chip.hw_id, info->i2c, S2MPG1415_METER_POWER);
-	/* the acquisition time of lpf_data is around 1ms */
-	s2mpg1415_meter_read_lpf_data_reg(info->chip.hw_id, info->i2c,
-					  (u32 *)bcl_dev->br_stats->sub_odpm_lpf.value);
-#elif IS_ENABLED(CONFIG_REGULATOR_S2MPG12) || IS_ENABLED(CONFIG_REGULATOR_S2MPG10)
-	/* select lpf power mode */
-	s2mpg1x_meter_set_lpf_mode(info->chip.hw_id, info->i2c, S2MPG1X_METER_POWER);
-	/* the acquisition time of lpf_data is around 1ms */
-	s2mpg1x_meter_read_lpf_data_reg(info->chip.hw_id, info->i2c,
-					  (u32 *)bcl_dev->br_stats->sub_odpm_lpf.value);
-#endif
-	ktime_get_real_ts64((struct timespec64 *)&bcl_dev->br_stats->sub_odpm_lpf.time);
+	core_pmic_sub_meter_read_lpf_data(bcl_dev, bcl_dev->br_stats);
 	compute_mitigation_modules(bcl_dev,
 				   bcl_dev->sub_mitigation_conf,
 				   bcl_dev->br_stats->sub_odpm_lpf.value);
@@ -126,14 +82,12 @@ void google_bcl_upstream_state(struct bcl_zone *zone, enum MITIGATION_MODE state
 		sysfs_notify(&bcl_dev->mitigation_dev->kobj, "triggered_state", "uvlo2_triggered");
 	else if (idx == BATOILO1) {
 		sysfs_notify(&bcl_dev->mitigation_dev->kobj, "triggered_state", "oilo1_triggered");
-#if IS_ENABLED(CONFIG_SOC_ZUMAPRO)
 		if (state == LIGHT)
 			log_ifpmic_power(bcl_dev);
-#endif
 	}
 	else if (idx == BATOILO2)
 		sysfs_notify(&bcl_dev->mitigation_dev->kobj, "triggered_state", "oilo2_triggered");
-	else if (idx == SMPL_WARN)
+	else if (idx == PRE_UVLO)
 		sysfs_notify(&bcl_dev->mitigation_dev->kobj, "triggered_state", "smpl_triggered");
 }
 
@@ -149,7 +103,7 @@ void google_bcl_start_data_logging(struct bcl_device *bcl_dev, int idx)
 
 	google_bcl_write_irq_triggered_event(bcl_dev, idx);
 	bcl_dev->br_stats->triggered_state =
-			bcl_dev->zone[bcl_dev->br_stats->triggered_idx]->current_state;
+		bcl_dev->zone[bcl_dev->br_stats->triggered_idx]->current_state;
 	data_logging_main_odpm_lpf_task(bcl_dev);
 	data_logging_sub_odpm_lpf_task(bcl_dev);
 

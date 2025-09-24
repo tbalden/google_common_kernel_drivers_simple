@@ -1,12 +1,23 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "ddk_uapi_headers")
+# For the bazel BUILD rule that builds this module, refer to the value of
+# `//private/google-modules/soc/gs:gs_soc_module` in the corresponding
+#   private/device/google/*/device.bazelrc
+# Generally, it is at
+#   private/device/google/**/BUILD.bazel
+
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_uapi_headers")
 
 package(
     default_visibility = [
         "//private/devices/google:__subpackages__",
         "//private/google-modules:__subpackages__",
     ],
+)
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
 )
 
 # Force the user to define the generic gs_* flags
@@ -69,6 +80,9 @@ filegroup(
     ] + [
         # List of headers needed by external modules
         "drivers/dma-buf/heaps/samsung/samsung-dma-heap.h",
+        "drivers/soc/google/vh/include/pixel_em.h",
+        "drivers/soc/google/vh/include/sched.h",
+        "drivers/usb/dwc3/google-role-sw.h",
         "drivers/usb/host/xhci-exynos.h",
         "drivers/usb/host/xhci-goog-dma.h",
         "drivers/usb/typec/tcpm/google/google_tcpci_shim.h",
@@ -82,6 +96,20 @@ filegroup(
         # keep sorted
         "//private/devices/google:__subpackages__",
         "//private/google-modules:__subpackages__",
+    ],
+)
+
+ddk_headers(
+    name = "headers",
+    hdrs = [":gs_soc_headers"],
+    includes = [
+        "drivers/dma-buf/heaps",
+        "drivers/soc/google/vh/include",
+        "drivers/usb/dwc3",
+        "drivers/usb/host",
+        "drivers/usb/typec/tcpm/google",
+        "include",
+        "include/uapi",
     ],
 )
 

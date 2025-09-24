@@ -236,11 +236,11 @@ int lwis_device_event_emit(struct lwis_device *lwis_dev, int64_t event_id, void 
  * The difference to lwis_device_event_emit is
  * 1. Directly assign event count to lwis_dev
  * 2. Won't have subscriber
- * 3. No payload to clients, only deliver event id and event count
- * 4. Not supported chain transaction
+ * 3. Not supported chain transaction
  */
 void lwis_device_external_event_emit(struct lwis_device *lwis_dev, int64_t event_id,
-				     int64_t event_counter, int64_t timestamp);
+				     int64_t event_counter, int64_t timestamp, void *payload,
+				     size_t payload_size);
 
 /*
  * lwis_device_error_event_emit: Emits an error event for all clients.

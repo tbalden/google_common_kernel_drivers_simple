@@ -1097,7 +1097,7 @@ static int st33spi_probe(struct spi_device *spi)
 		__register_chrdev(0, 0, N_SPI_MINORS, "spi", &st33spi_fops);
 	dev_info(&spi->dev, "Loading st33spi driver, major: %d\n", st33spi_major);
 
-	st33spi_class = class_create(THIS_MODULE, "st33spi");
+	st33spi_class = class_create("st33spi");
 	if (IS_ERR(st33spi_class)) {
 		unregister_chrdev(st33spi_major, "st33spi");
 		return PTR_ERR(st33spi_class);
@@ -1255,7 +1255,7 @@ static int __init st33spi_init(void)
 		__register_chrdev(0, 0, N_SPI_MINORS, "spi", &st33spi_fops);
 	pr_info("Loading st33spi driver, major: %d\n", st33spi_major);
 
-	st33spi_class = class_create(THIS_MODULE, "st33spi");
+	st33spi_class = class_create("st33spi");
 	if (IS_ERR(st33spi_class)) {
 		unregister_chrdev(st33spi_major,
 				  st33spi_spi_driver.driver.name);

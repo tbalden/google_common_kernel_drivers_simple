@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_module", "kernel_module_group")
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
+)
 
 filegroup(
     name = "sec.kconfig",
@@ -13,30 +18,41 @@ filegroup(
     ],
 )
 
-kernel_module(
-    name = "sec",
+ddk_module(
+    name = "sec_touch",
     srcs = glob([
-        "**/*.c",
         "**/*.h",
     ]) + [
-        "Kbuild",
-        "//private/google-modules/display/common:headers",
-        "//private/google-modules/display/samsung:headers",
-        "//private/google-modules/display/samsung/include:headers",
-        "//private/google-modules/soc/gs:gs_soc_headers",
-        "//private/google-modules/touch/common:headers",
+        "sec_cmd.c",
+        "sec_ts.c",
+        "sec_ts_fn.c",
+        "sec_ts_fw.c",
+        "sec_ts_only_vendor.c",
     ],
-    outs = [
-        "sec_touch.ko",
-    ],
+    out = "sec_touch.ko",
     kernel_build = "//private/devices/google/common:kernel",
-    visibility = [
-        "//private/devices/google:__subpackages__",
-        "//private/google-modules/soc/gs:__pkg__",
+    local_defines = [
+        "DYNAMIC_DEBUG_MODULE",
     ],
     deps = [
-        "//private/google-modules/display/common/gs_drm",
-        "//private/google-modules/display/samsung:display.samsung",
-        "//private/google-modules/touch/common:touch.common",
+        "//common:all_headers_aarch64",
+        "//private/google-modules/display/common:ddk_headers",
+        "//private/google-modules/display/common/gs_drm:gs-drm-connector",
+        "//private/google-modules/display/samsung:exynos-drm",
+        "//private/google-modules/display/samsung:headers",
+        "//private/google-modules/touch/common:ddk_headers",
+        "//private/google-modules/touch/common:heatmap",
+        "//private/google-modules/touch/common:touch_bus_negotiator",
+        "//private/google-modules/touch/common:touch_offload",
+    ],
+)
+
+kernel_module_group(
+    name = "sec",
+    srcs = [
+        ":sec_touch",
+    ],
+    visibility = [
+        "//private/devices/google:__subpackages__",
     ],
 )

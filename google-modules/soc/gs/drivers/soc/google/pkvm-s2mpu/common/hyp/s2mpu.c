@@ -52,10 +52,13 @@
 #define SET_CONTROL_REGS(dev)				__set_control_regs(dev)
 #endif
 
-struct s2mpu_drv_data {
-	u32 version;
-	u32 context_cfg_valid_vid;
-};
+#define for_each_s2mpu(s2mpu) \
+	for ((s2mpu) = kvm_hyp_s2mpus; \
+	     (s2mpu) != &kvm_hyp_s2mpus[kvm_hyp_s2mpu_count]; \
+	     (s2mpu)++)
+
+struct pkvm_iommu *kvm_hyp_s2mpus;
+size_t __ro_after_init kvm_hyp_s2mpu_count;
 
 static const struct s2mpu_mpt_ops *mpt_ops;
 static const struct pkvm_module_ops *mod_ops;
@@ -64,8 +67,11 @@ static const struct pkvm_module_ops *mod_ops;
 #define CALL_FROM_OPS(fn, ...)		mod_ops->fn(__VA_ARGS__)
 
 #define __pkvm_hyp_donate_host(x, y)	CALL_FROM_OPS(hyp_donate_host, x, y)
-#define __pkvm_host_donate_hyp(x, y)	CALL_FROM_OPS(host_donate_hyp, x, y)
-
+#define __pkvm_host_donate_hyp(x, y)	CALL_FROM_OPS(host_donate_hyp, x, y, false)
+#define ___pkvm_host_donate_hyp(x, y, z) \
+					CALL_FROM_OPS(host_donate_hyp, x, y, z)
+#define iommu_snapshot_host_stage2(x)	CALL_FROM_OPS(iommu_snapshot_host_stage2, x)
+#define kvm_iommu_init_device(x)	CALL_FROM_OPS(iommu_init_device, x)
 #ifdef kern_hyp_va
 #undef kern_hyp_va
 #endif
@@ -75,6 +81,11 @@ static const struct pkvm_module_ops *mod_ops;
 #undef __hyp_pa
 #endif
 #define __hyp_pa(x)			CALL_FROM_OPS(hyp_pa, x)
+
+#ifdef hyp_phys_to_virt
+#undef hyp_phys_to_virt
+#endif
+#define hyp_phys_to_virt(x)		CALL_FROM_OPS(hyp_va, x)
 
 void *memset(void *dst, int c, size_t count)
 {
@@ -88,8 +99,19 @@ void *memcpy(void *dst, const void *src, size_t count)
 
 static struct mpt host_mpt;
 
-const struct pkvm_iommu_ops pkvm_s2mpu_ops;
-const struct pkvm_iommu_ops pkvm_sysmmu_sync_ops;
+static struct pkvm_iommu *to_s2mpu(struct kvm_hyp_iommu *iommu)
+{
+	return container_of(iommu, struct pkvm_iommu, iommu);
+}
+
+static struct kvm_hyp_iommu *s2mpu_id_to_iommu(pkvm_handle_t s2mpu_id)
+{
+	if (s2mpu_id >= kvm_hyp_s2mpu_count)
+		return NULL;
+	s2mpu_id = array_index_nospec(s2mpu_id, kvm_hyp_s2mpu_count);
+
+	return &kvm_hyp_s2mpus[s2mpu_id].iommu;
+}
 
 static inline enum mpt_prot prot_to_mpt(enum kvm_pgtable_prot prot)
 {
@@ -99,14 +121,14 @@ static inline enum mpt_prot prot_to_mpt(enum kvm_pgtable_prot prot)
 
 static bool is_version(struct pkvm_iommu *dev, u32 version)
 {
-	struct s2mpu_drv_data *data = (struct s2mpu_drv_data *)dev->data;
+	struct s2mpu_drv_data *data = &dev->data;
 
 	return (data->version & VERSION_CHECK_MASK) == version;
 }
 
 static u32 __context_cfg_valid_vid(struct pkvm_iommu *dev, u32 vid_bmap)
 {
-	struct s2mpu_drv_data *data = (struct s2mpu_drv_data *)dev->data;
+	struct s2mpu_drv_data *data = &dev->data;
 	u8 ctx_vid[NR_CTX_IDS] = { 0 };
 	unsigned int vid, ctx = 0;
 	unsigned int num_ctx;
@@ -163,7 +185,7 @@ static int __maybe_unused __initialize_ctx(struct pkvm_iommu *dev)
 
 static int __maybe_unused __initialize(struct pkvm_iommu *dev)
 {
-	struct s2mpu_drv_data *data = (struct s2mpu_drv_data *)dev->data;
+	struct s2mpu_drv_data *data = &dev->data;
 
 	if (!data->version)
 		data->version = readl_relaxed(dev->va + REG_NS_VERSION);
@@ -446,8 +468,9 @@ static void s2mpu_host_stage2_idmap_complete(struct pkvm_iommu *dev)
 	__mpt_idmap_complete(dev, &host_mpt);
 }
 
-static int s2mpu_resume(struct pkvm_iommu *dev)
+static int s2mpu_resume(struct kvm_hyp_iommu *iommu)
 {
+	struct pkvm_iommu *dev = to_s2mpu(iommu);
 	/*
 	 * Initialize the S2MPU with the host stage-2 MPT. It is paramount
 	 * that the S2MPU reset state is enabled and blocking all traffic,
@@ -460,8 +483,9 @@ static int s2mpu_resume(struct pkvm_iommu *dev)
 	return initialize_with_mpt(dev, &host_mpt);
 }
 
-static int s2mpu_suspend(struct pkvm_iommu *dev)
+static int s2mpu_suspend(struct kvm_hyp_iommu *iommu)
 {
+	struct pkvm_iommu *dev = to_s2mpu(iommu);
 	/*
 	 * Stop updating the S2MPU when the host informs us about the intention
 	 * to suspend it. Writes to powered-down MMIO registers would trigger
@@ -547,7 +571,35 @@ static bool s2mpu_host_dabt_handler(struct pkvm_iommu *dev,
 	return true;
 }
 
-static int s2mpu_init(void *data, size_t size)
+static bool s2mpu_drv_host_dabt_handler(struct kvm_cpu_context *host_ctxt, u64 esr, u64 addr)
+{
+	struct pkvm_iommu *dev;
+
+	for_each_s2mpu(dev) {
+		if (addr < dev->pa || addr >= dev->pa + dev->size)
+			continue;
+		return s2mpu_host_dabt_handler(dev, host_ctxt, esr, addr - dev->pa);
+	}
+	return false;
+}
+
+int s2mpu_register_dev(struct pkvm_iommu *dev)
+{
+	int ret;
+
+	if (dev->size != S2MPU_MMIO_SIZE)
+		return -EINVAL;
+
+	ret = ___pkvm_host_donate_hyp(dev->pa >> PAGE_SHIFT,
+				      dev->size >> PAGE_SHIFT,
+				      true);
+	if (ret)
+		return ret;
+	dev->va = hyp_phys_to_virt(dev->pa);
+	return kvm_iommu_init_device(&dev->iommu);
+}
+
+static int s2mpu_init(unsigned long init_arg)
 {
 	struct mpt in_mpt;
 	u32 *smpt;
@@ -555,9 +607,9 @@ static int s2mpu_init(void *data, size_t size)
 	unsigned int gb;
 	int ret = 0;
 	int smpt_nr_pages, smpt_size;
-
-	if (size != sizeof(in_mpt))
-		return -EINVAL;
+	void *data = kern_hyp_va(init_arg);
+	struct pkvm_iommu *dev;
+	size_t s2mpu_arr_size = PAGE_ALIGN(sizeof(*kvm_hyp_s2mpus) * kvm_hyp_s2mpu_count);
 
 	/* The host can concurrently modify 'data'. Copy it to avoid TOCTOU. */
 	memcpy(&in_mpt, data, sizeof(in_mpt));
@@ -602,59 +654,87 @@ static int s2mpu_init(void *data, size_t size)
 						       smpt_nr_pages));
 		}
 		memset(&host_mpt, 0, sizeof(host_mpt));
+		return ret;
 	}
 
+	kvm_hyp_s2mpus = (struct pkvm_iommu *)kern_hyp_va(kvm_hyp_s2mpus);
+
+	ret = __pkvm_host_donate_hyp(__hyp_pa(kvm_hyp_s2mpus) >> PAGE_SHIFT,
+				     s2mpu_arr_size >> PAGE_SHIFT);
+	if (ret)
+		return ret;
+
+	for_each_s2mpu(dev) {
+		ret = s2mpu_register_dev(dev);
+		if (ret)
+			goto out_unregister;
+	}
+
+	return iommu_snapshot_host_stage2(NULL);
+
+out_unregister:
+	for_each_s2mpu(dev) {
+		if (dev->va)
+			WARN_ON(__pkvm_hyp_donate_host(dev->pa >> PAGE_SHIFT,
+				dev->size >> PAGE_SHIFT));
+	}
+	WARN_ON(__pkvm_hyp_donate_host(__hyp_pa(kvm_hyp_s2mpus) >> PAGE_SHIFT,
+				       s2mpu_arr_size >> PAGE_SHIFT));
 	return ret;
 }
 
-static int s2mpu_validate(struct pkvm_iommu *dev)
+static int s2mpu_alloc_domain(struct kvm_hyp_iommu_domain *domain, u32 type)
 {
-	if (dev->size != S2MPU_MMIO_SIZE)
-		return -EINVAL;
-
+	WARN_ON(1);
 	return 0;
 }
 
-static int s2mpu_validate_child(struct pkvm_iommu *dev, struct pkvm_iommu *child)
+static void s2mpu_free_domain(struct kvm_hyp_iommu_domain *domain)
 {
-	if (child->ops != &pkvm_sysmmu_sync_ops)
-		return -EINVAL;
+	WARN_ON(1);
+}
 
+static int s2mpu_attach_dev(struct kvm_hyp_iommu *iommu, struct kvm_hyp_iommu_domain *domain,
+			    u32 sid, u32 pasid, u32 pasid_bits)
+{
+	WARN_ON(1);
 	return 0;
 }
 
-static int sysmmu_sync_validate(struct pkvm_iommu *dev)
+static int s2mpu_detach_dev(struct kvm_hyp_iommu *iommu, struct kvm_hyp_iommu_domain *domain,
+			    u32 sid, u32 pasid)
 {
-	if (dev->size != SYSMMU_SYNC_S2_MMIO_SIZE)
-		return -EINVAL;
-
-	if (!dev->parent || dev->parent->ops != &pkvm_s2mpu_ops)
-		return -EINVAL;
-
+	WARN_ON(1);
 	return 0;
 }
 
-const struct pkvm_iommu_ops pkvm_s2mpu_ops = (struct pkvm_iommu_ops){
-	.init = s2mpu_init,
-	.validate = s2mpu_validate,
-	.validate_child = s2mpu_validate_child,
-	.resume = s2mpu_resume,
-	.suspend = s2mpu_suspend,
-	.host_stage2_idmap_prepare = s2mpu_host_stage2_idmap_prepare,
-	.host_stage2_idmap_apply = s2mpu_host_stage2_idmap_apply,
-	.host_stage2_idmap_complete = s2mpu_host_stage2_idmap_complete,
-	.host_dabt_handler = s2mpu_host_dabt_handler,
-	.data_size = sizeof(struct s2mpu_drv_data),
-};
+static void s2mpu_host_stage2_idmap(struct kvm_hyp_iommu_domain *domain,
+				    phys_addr_t start, phys_addr_t end, int prot)
+{
+	struct pkvm_iommu *dev;
 
-const struct pkvm_iommu_ops pkvm_sysmmu_sync_ops = (struct pkvm_iommu_ops){
-	.validate = sysmmu_sync_validate,
-};
-struct pkvm_iommu_driver pkvm_s2mpu_driver = (struct pkvm_iommu_driver){
-	.ops = &pkvm_s2mpu_ops,
-};
-struct pkvm_iommu_driver pkvm_sysmmu_sync_driver = (struct pkvm_iommu_driver){
-	.ops = &pkvm_sysmmu_sync_ops,
+	s2mpu_host_stage2_idmap_prepare(start, end, prot);
+	for_each_s2mpu(dev) {
+		if (!dev->iommu.power_is_off)
+			s2mpu_host_stage2_idmap_apply(dev, start, end);
+	}
+	for_each_s2mpu(dev) {
+		if (!dev->iommu.power_is_off)
+			s2mpu_host_stage2_idmap_complete(dev);
+	}
+}
+
+struct kvm_iommu_ops s2mpu_hyp_ops = {
+	.init				= s2mpu_init,
+	.get_iommu_by_id		= s2mpu_id_to_iommu,
+	.alloc_domain			= s2mpu_alloc_domain,
+	.free_domain			= s2mpu_free_domain,
+	.attach_dev			= s2mpu_attach_dev,
+	.detach_dev			= s2mpu_detach_dev,
+	.dabt_handler			= s2mpu_drv_host_dabt_handler,
+	.suspend			= s2mpu_suspend,
+	.resume				= s2mpu_resume,
+	.host_stage2_idmap		= s2mpu_host_stage2_idmap,
 };
 
 /* Validate that module ops used within this driver are not null. */

@@ -60,25 +60,6 @@
 					google,aacp-health-over-cliff = <1>;
 					google,aacp-opt-out-cut-off-cycles = <400>;
 					google,aacp-health-over-cutoff = <2>;
-
-					google,aact-config = <1>;
-					google,chg-aact-ecc = <0 400>;
-					google,aact-cv-limits = <4200000 4300000 4450000>;
-					google,aact-temp-limits = <0 100 200 420 460 480 550>;
-					google,aact-cc-limits = <
-						 30  10   0
-						 50  30  30
-						100  70  50
-						 80  50  50
-						 50  50   0
-						 30   0   0
-					>;
-
-					/* support aact multiple-profiles */
-					google,aact-support-multiple-profiles;
-					google,aact-cv-limits-1 = <4450000>;
-					google,aact-temp-limits-1 = <0 100 200 420 460 480 550>;
-					google,aact-cc-limits-1 = <30 50 100 80 50 30>;
 				};
 			};
 			google_bms {

@@ -12,6 +12,7 @@
 #define pr_fmt(fmt) "aoc: " fmt
 
 #include "aoc.h"
+#include "aoc-interface.h"
 
 #include <linux/atomic.h>
 #include <linux/dma-map-ops.h>
@@ -30,7 +31,9 @@
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/platform_data/sscoredump.h>
+#include "linux/pm_domain.h"
 #include <linux/pm_runtime.h>
+#include <linux/pm_wakeup.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -42,10 +45,14 @@
 #include <soc/google/acpm_ipc_ctrl.h>
 #include <soc/google/debug-snapshot.h>
 #include <soc/google/exynos-cpupm.h>
-#include <soc/google/exynos-pmu-if.h>
 
-#include <linux/gsa/gsa_aoc.h>
 #include "ion_physical_heap.h"
+
+#if IS_ENABLED(CONFIG_GSA)
+#include <linux/gsa/gsa_aoc.h>
+#else
+#include "aoc-gsa.h"
+#endif
 
 #include "aoc_firmware.h"
 #include "aoc_ramdump_regions.h"
@@ -61,6 +68,10 @@
 #define RESET_WAIT_TIMES_NUM 3
 #define RESET_WAIT_TIME_MS 3000
 #define RESET_WAIT_TIME_INCREMENT_MS  2048
+
+#define AOC_UNRESPONSIVE_TIMEOUT 100
+
+#define AOC_MONITOR_ONLINE_TIMEOUT_S 5
 
 DEFINE_MUTEX(aoc_service_lock);
 
@@ -108,14 +119,34 @@ static bool aoc_disable_restart = false;
 module_param(aoc_disable_restart, bool, 0644);
 MODULE_PARM_DESC(aoc_disable_restart, "Prevent AoC from restarting after crashing.");
 
+static bool aoc_panic_on_monitor_timeout;
+module_param(aoc_panic_on_monitor_timeout, bool, 0644);
+MODULE_PARM_DESC(aoc_panic_on_monitor_timeout, "Enable kernel panic when aoc init times out.");
+
 static bool aoc_panic_on_req_timeout = true;
 module_param(aoc_panic_on_req_timeout, bool, 0644);
 MODULE_PARM_DESC(aoc_panic_on_req_timeout, "Enable kernel panic when aoc_req times out.");
+
+static bool aoc_panic_on_coredump_timeout;
+module_param(aoc_panic_on_coredump_timeout, bool, 0644);
+MODULE_PARM_DESC(aoc_panic_on_req_timeout, "Enable kernel panic when coredump times out.");
+
+static bool aoc_enable_gsa_boot;
+module_param(aoc_enable_gsa_boot, bool, 0644);
+MODULE_PARM_DESC(aoc_enable_gsa_boot, "Enable AOC secure boot.");
+
+static int aoc_monitor_online_timeout = AOC_MONITOR_ONLINE_TIMEOUT_S;
+module_param(aoc_monitor_online_timeout, int, 0644);
+MODULE_PARM_DESC(aoc_monitor_online_timeout, "Configure timeout to wait for AOC to come online.");
 
 static struct aoc_module_parameters aoc_module_params = {
 	.aoc_autoload_firmware = &aoc_autoload_firmware,
 	.aoc_disable_restart = &aoc_disable_restart,
 	.aoc_panic_on_req_timeout = &aoc_panic_on_req_timeout,
+	.aoc_enable_gsa_boot = &aoc_enable_gsa_boot,
+	.aoc_panic_on_coredump_timeout = &aoc_panic_on_coredump_timeout,
+	.aoc_monitor_online_timeout = &aoc_monitor_online_timeout,
+	.aoc_panic_on_monitor_timeout = &aoc_panic_on_monitor_timeout,
 };
 
 static int aoc_core_suspend(struct device *dev);
@@ -225,7 +256,8 @@ static bool has_name_matching_driver(const char *service_name)
 				driver_matches_service_by_name) != 0;
 }
 
-static struct aoc_service_dev *service_dev_by_name(struct aoc_prvdata *prv,const char *service_name)
+static struct aoc_service_dev *service_dev_by_name(struct aoc_prvdata *prv,
+						   const char *service_name)
 {
 	int services, i;
 	const char *name;
@@ -373,6 +405,13 @@ static void aoc_mbox_rx_callback(struct mbox_client *cl, void *mssg)
 {
 	struct mbox_slot *slot = container_of(cl, struct mbox_slot, client);
 	struct aoc_prvdata *prvdata = slot->prvdata;
+	struct device *dev = prvdata->dev;
+
+	if (prvdata->aoc_coredump_mbox == slot->index) {
+		dev_err(dev, "AOC SSR requested by mailbox\n");
+		trigger_aoc_ssr(false, "AOC watchdog received by mailbox");
+		return;
+	}
 
 	switch (aoc_state) {
 	case AOC_STATE_FIRMWARE_LOADED:
@@ -395,6 +434,12 @@ static void aoc_mbox_tx_prepare(struct mbox_client *cl, void *mssg)
 
 static void aoc_mbox_tx_done(struct mbox_client *cl, void *mssg, int r)
 {
+	struct mbox_slot *slot = container_of(cl, struct mbox_slot, client);
+	struct aoc_prvdata *prvdata = slot->prvdata;
+	struct device *dev = prvdata->dev;
+
+	if (prvdata->aoc_log_mbox_tx_done)
+		dev_info(dev, "aoc_mbox_tx_done called\n");
 }
 
 extern int gs_chipid_get_ap_hw_tune_array(const u8 **array);
@@ -475,9 +520,10 @@ static u32 aoc_board_config_parse(struct device_node *node, u32 *board_id, u32 *
 }
 
 static int aoc_fw_authenticate(struct aoc_prvdata *prvdata,
-			       const struct firmware *fw) {
+			       const struct firmware *fw)
+{
 
-	int rc;
+	int rc = 0;
 	dma_addr_t header_dma_addr;
 	void *header_vaddr;
 
@@ -522,9 +568,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
 	u32 rand_seed = get_random_u32();
-	u32 chip_revision = gs_chipid_get_revision();
-	u32 chip_type = gs_chipid_get_type();
-	u32 chip_product_id = gs_chipid_get_product_id();
+	u32 chip_revision = aoc_chip_get_revision();
+	u32 chip_type = aoc_chip_get_type();
+	u32 chip_product_id = aoc_chip_get_product_id();
 	u32 dt_gnss_type = dt_property(prvdata->dev->of_node, "gnss-type");
 	u32 gnss_type = dt_gnss_type == DT_PROPERTY_NOT_FOUND ? 0 : dt_gnss_type;
 	u32 dt_wifi_chip = dt_property(prvdata->dev->of_node, "wifi-chip");
@@ -534,7 +580,8 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
 	phys_addr_t capture_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_capture_heap_base);
 	unsigned int i;
-	bool fw_signed, gsa_enabled;
+	bool fw_signed = false, gsa_enabled = false;
+	int rc;
 
 	struct aoc_fw_data fw_data[] = {
 		{ .key = kAOCBoardID, .value = board_id },
@@ -565,6 +612,8 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 fw_data_entries = ARRAY_SIZE(fw_data);
 	u32 ipc_offset;
 
+	cancel_delayed_work_sync(&prvdata->monitor_work);
+
 	if ((dt_prevent_aoc_load) && (!first_load_prevented)) {
 		dev_err(dev, "DTS settings prevented AoC firmware from being loaded\n");
 		first_load_prevented = true;
@@ -577,6 +626,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		dev_err(dev, "Failed to load AoC firmware image\n");
 		return;
 	}
+
+	/* Enable or re-enable sensor power before loading AoC firmware. */
+	configure_sensor_power(prvdata, true);
 
 	if (prvdata->force_release_aoc) {
 		dev_info(dev, "Force Reload Trigger: Free current loaded\n");
@@ -601,6 +653,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		dev_err(dev, "firmware validation failed\n");
 		goto free_fw;
 	}
+
+	if (_aoc_fw_has_legacy_auth_header(fw))
+		dev_info(dev, "AOC image has legacy auth header\n");
 
 	ipc_offset = _aoc_fw_ipc_offset(fw);
 	version = _aoc_fw_version(fw);
@@ -641,8 +696,6 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 
 	dev_info(dev, "Loading signed aoc image\n");
 
-	prvdata->protected_by_gsa = fw_signed;
-
 	aoc_control = aoc_dram_translate(prvdata, ipc_offset);
 
 	{
@@ -652,11 +705,20 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		}
 	}
 
-	gsa_enabled = of_property_read_bool(prvdata->dev->of_node, "gsa-enabled");
+	rc = allocate_mailbox_channels(prvdata);
+	if (rc) {
+		dev_err(dev, "failed to allocate mailbox channels %d\n", rc);
+		goto err_mbox;
+	}
+
+	gsa_enabled = of_property_read_bool(prvdata->dev->of_node, "gsa-enabled")
+					|| *(aoc_module_params.aoc_enable_gsa_boot);
 
 	if (gsa_enabled) {
 		int rc;
 
+		dev_info(dev, "AOC secure booting enabled\n");
+		prvdata->protected_by_gsa = true;
 		aoc_configure_iommu_fault_handler(prvdata);
 		rc = aoc_fw_authenticate(prvdata, fw);
 		if (rc) {
@@ -686,15 +748,17 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 			goto free_fw;
 		}
 	} else {
-		aoc_release_from_reset(prvdata);
+		if (!aoc_release_from_reset(prvdata)) {
+			dev_err(dev,
+				"Release from reset did not return the expected status\n");
+		}
 	}
 
 	configure_crash_interrupts(prvdata, true);
 
-	/* Monitor if there is callback from aoc after 5sec */
-	cancel_delayed_work_sync(&prvdata->monitor_work);
+	/* Monitor if there is callback from aoc after 10sec */
 	schedule_delayed_work(&prvdata->monitor_work,
-			msecs_to_jiffies(5 * 1000));
+		msecs_to_jiffies(*(aoc_module_params.aoc_monitor_online_timeout) * 1000));
 
 	msleep(2000);
 	dev_info(dev, "re-enabling low power mode\n");
@@ -703,10 +767,15 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	release_firmware(fw);
 	return;
 
+err_mbox:
+	free_mailbox_channels(prvdata);
 free_fw:
 	/* Change aoc_state to offline due to abnormal firmware */
 	aoc_state = AOC_STATE_OFFLINE;
 	release_firmware(fw);
+
+	/* Disable sensor power if failed to load AoC firmware. */
+	configure_sensor_power(prvdata, false);
 }
 
 phys_addr_t aoc_service_ring_base_phys_addr(struct aoc_service_dev *dev, aoc_direction dir,
@@ -727,7 +796,7 @@ phys_addr_t aoc_service_ring_base_phys_addr(struct aoc_service_dev *dev, aoc_dir
 
 	ring_base = aoc_service_ring_base(service, prvdata->ipc_base, dir);
 
-	pr_debug("aoc DRAM starts at (virt): %pK, (phys):%llx, ring base (virt): %pK",
+	pr_err("aoc DRAM starts at (virt): %pK, (phys):%llx, ring base (virt): %pK",
 		 aoc_dram_virt_mapping, prvdata->dram_resource.start, ring_base);
 
 	if (out_size)
@@ -779,8 +848,6 @@ static bool write_reset_trampoline(const struct firmware *fw)
 	bl_size = _aoc_fw_bl_size(fw);
 	bootloader = _aoc_fw_bl(fw);
 
-	pr_notice("writing reset trampoline to addr %#x\n",
-		bootloader[bl_size / sizeof(u32) - 1]);
 	memcpy_toio(reset, bootloader, bl_size);
 
 	return true;
@@ -967,15 +1034,59 @@ static ssize_t firmware_store(struct device *dev, struct device_attribute *attr,
 
 	/* Strip whitespace (including \n) */
 	trimmed = strim(buffer);
-
 	strscpy(prvdata->firmware_name, trimmed,
 		sizeof(prvdata->firmware_name));
-	start_firmware_load(dev);
 
+	/* Disable sensor power before reloading AoC firmware if it was online. */
+	if (aoc_state == AOC_STATE_ONLINE)
+		configure_sensor_power(prvdata, false);
+
+	start_firmware_load(dev);
 	return count;
+
 }
 
 static DEVICE_ATTR_RW(firmware);
+
+static long sysfs_address = 0x0;
+
+static ssize_t address_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	u32 pc_register_value;
+	void __iomem *pc_register =
+		aoc_sram_translate(sysfs_address);
+
+	pc_register_value = ioread32(pc_register);
+	return scnprintf(buf, PAGE_SIZE, "%d", pc_register_value);
+}
+
+
+static ssize_t address_store(struct device *dev, struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	char buffer[MAX_FIRMWARE_LENGTH];
+	char *trimmed = NULL;
+	int rc;
+
+	if (strscpy(buffer, buf, sizeof(buffer)) <= 0)
+		return -E2BIG;
+
+
+	/* Strip whitespace (including \n) */
+	trimmed = strim(buffer);
+
+	rc = kstrtol(trimmed, 0, &sysfs_address);
+	if (rc != 0) {
+		dev_err(dev, "Error in converting address string to long");
+		return count;
+	}
+	return count;
+
+}
+
+static DEVICE_ATTR_RW(address);
+
 
 static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 			   const char *buf, size_t count)
@@ -996,6 +1107,7 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	} else {
 		trigger_aoc_ssr(true, reason_str);
 	}
+
 	return count;
 }
 
@@ -1070,6 +1182,7 @@ static struct attribute *aoc_attrs[] = {
 	&dev_attr_force_reload.attr,
 	&dev_attr_dmic_power_enable.attr,
 	&dev_attr_notify_timeout_aoc_status.attr,
+	&dev_attr_address.attr,
 	NULL
 };
 
@@ -1175,7 +1288,7 @@ static int aoc_wakeup_queues(struct device *dev, void *ctx)
 	 */
 	the_dev->dead = true;
 
-	// Allow any pending reads and writes to finish before removing devices
+	/* Allow any pending reads and writes to finish before removing devices */
 	wake_up(&the_dev->read_queue);
 	wake_up(&the_dev->write_queue);
 
@@ -1231,6 +1344,7 @@ static struct aoc_service_dev *create_service_device(struct aoc_prvdata *prvdata
 	dev->service = s;
 	dev->ipc_base = prvdata->ipc_base;
 	dev->dead = false;
+	dev->irq = -1;
 
 	if (aoc_service_is_queue(s))
 		dev->wake_capable = true;
@@ -1273,11 +1387,6 @@ static void aoc_configure_iommu(struct aoc_prvdata *p, const struct firmware *fw
 	struct device *dev = p->dev;
 	u16 iommu_offset, iommu_size;
 
-	if (p->iommu_configured && p->iommu_config_persistent) {
-		dev_info(dev, "IOMMU already configured skipping\n");
-		return;
-	}
-
 	aoc_configure_iommu_fault_handler(p);
 
 	iommu_offset = _aoc_fw_iommu_offset(fw);
@@ -1300,7 +1409,7 @@ static void aoc_configure_iommu(struct aoc_prvdata *p, const struct firmware *fw
 		rc = iommu_map(domain, IOMMU_VADDR(iommu[i].value),
 						IOMMU_PADDR(iommu[i].value),
 						IOMMU_SIZE(iommu[i].value),
-						IOMMU_READ | IOMMU_WRITE);
+						IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
 		if (rc < 0) {
 			dev_err(
 				dev,
@@ -1316,8 +1425,6 @@ static void aoc_configure_iommu(struct aoc_prvdata *p, const struct firmware *fw
 			return;
 		}
 	}
-
-	p->iommu_configured = true;
 }
 
 static void aoc_clear_iommu(struct aoc_prvdata *p)
@@ -1327,7 +1434,9 @@ static void aoc_clear_iommu(struct aoc_prvdata *p)
 	size_t i, cnt;
 	struct device *dev = p->dev;
 
-	if (p->iommu != NULL) {
+	iommu_unregister_device_fault_handler(p->dev);
+
+	if (p->iommu != NULL && p->domain) {
 		cnt = p->iommu_size / sizeof(struct iommu_entry);
 		for (i = 0; i < cnt; i++) {
 			rc = iommu_unmap(domain, IOMMU_VADDR(p->iommu[i].value),
@@ -1345,6 +1454,10 @@ static void aoc_monitor_online(struct work_struct *work)
 	bool skip_reset = of_property_read_bool(prvdata->dev->of_node, "skip-monitor-online-reset");
 
 	if (aoc_state == AOC_STATE_FIRMWARE_LOADED) {
+
+		if (aoc_panic_on_monitor_timeout)
+			panic("AOC init monitor timed out");
+
 		dev_err(prvdata->dev, "aoc init no respond, try restart\n");
 
 		if (skip_reset)
@@ -1432,6 +1545,8 @@ static void aoc_did_become_online(struct work_struct *work)
 	if (!IS_ENABLED(CONFIG_SOC_GS101) && !IS_ENABLED(CONFIG_SOC_GS201))
 		if ((!prvdata->audio_offload_heap_base) && (!aoc_set_dma_buf_as_ring(prvdata)))
 			dev_err(dev, "failed to set the dma-buf heap as ring buffer\n");
+
+	platform_specific_aoc_online();
 
 err:
 	mutex_unlock(&aoc_service_lock);
@@ -1540,42 +1655,62 @@ static void aoc_parse_dmic_power(struct aoc_prvdata *prvdata, struct device_node
 	}
 }
 
-void reset_sensor_power(struct aoc_prvdata *prvdata, bool is_init)
+void configure_sensor_power(struct aoc_prvdata *prvdata, bool enable)
 {
+	/* b/195506891: It needs at least 100 ms for gyro reset. */
+	const unsigned int reset_interval_ms = 105;
 	const int max_retry = 5;
-	int count;
-	bool success;
+	int count = 0;
+	bool success = false;
+	static struct timespec64 sensor_power_off_time = { .tv_sec = 0, .tv_nsec = 0 };
 
-	if (prvdata->sensor_power_count == 0) {
+	if (prvdata->sensor_power_count == 0)
 		return;
-	}
 
-	if (!is_init) {
-		count = 0;
-		success = false;
+	if (enable) {
+		int64_t delta_ms;
+		struct timespec64 now;
+
+		/* Complement necessary power down interval. Use mdelay to have AoC restart ASAP. */
+		ktime_get_real_ts64(&now);
+		delta_ms = (now.tv_sec - sensor_power_off_time.tv_sec) * MSEC_PER_SEC +
+		    (now.tv_nsec - sensor_power_off_time.tv_nsec) / NSEC_PER_MSEC;
+		if (delta_ms < 0) {
+			dev_warn(prvdata->dev, "unexpected delta_ms (%lld).\n", delta_ms);
+			mdelay(reset_interval_ms);
+		} else if (delta_ms < reset_interval_ms) {
+			mdelay(reset_interval_ms - delta_ms);
+		}
+
+		/* Enable sensor power. */
+		while (!success && count < max_retry) {
+			success = configure_sensor_regulator(prvdata, true);
+			count++;
+		}
+		if (success) {
+			dev_info(prvdata->dev, "sensor power is enabled.\n");
+		} else {
+			dev_err(prvdata->dev,
+				"failed to enable sensor power after %d retry.\n", max_retry);
+		}
+	} else {
+		/* Disable sensor power. */
 		while (!success && count < max_retry) {
 			success = configure_sensor_regulator(prvdata, false);
 			count++;
 		}
-		if (!success) {
-			pr_err("failed to disable sensor power after %d retry.", max_retry);
+		if (success) {
+			dev_info(prvdata->dev, "sensor power is disabled.\n");
 		} else {
-			pr_info("sensor power is disabled.");
+			/* If the power if already off, it cannot be disabled again, so do not
+			 * return here.
+			 */
+			dev_err(prvdata->dev,
+				"failed to disable sensor power after %d retry.\n", max_retry);
 		}
 
-		msleep(150);
-	}
-
-	count = 0;
-	success = false;
-	while (!success && count < max_retry) {
-		success = configure_sensor_regulator(prvdata, true);
-		count++;
-	}
-	if (!success) {
-		pr_err("failed to enable sensor power after %d retry.", max_retry);
-	} else {
-		pr_info("sensor power is enabled.");
+		/* Save the power off time to make sure the power off interval will be enough. */
+		ktime_get_real_ts64(&sensor_power_off_time);
 	}
 }
 
@@ -1616,10 +1751,13 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 		}
 	}
 
-	if(prvdata->protected_by_gsa) {
+	if (prvdata->protected_by_gsa) {
 		/* TODO(b/275463650): GSA_AOC_SHUTDOWN needs to be 4, but the current
 		 * header defines as 2.  Change this to enum when the header is updated.
 		 */
+
+		dev_info(prvdata->dev, "Sending GSA command to take AOC offline\n");
+
 		rc = gsa_send_aoc_cmd(prvdata->gsa_dev, 4);
 		/* rc is the new state of AOC unless it's negative,
 		 * in which case it's an error code
@@ -1637,7 +1775,13 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 		rc = gsa_unload_aoc_fw_image(prvdata->gsa_dev);
 		if (rc)
 			dev_err(prvdata->dev, "GSA unload firmware failed: %d\n", rc);
+	} else {
+		aoc_clear_iommu(prvdata);
 	}
+
+	platform_specific_aoc_offline();
+
+	free_mailbox_channels(prvdata);
 }
 
 static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
@@ -1709,14 +1853,16 @@ void aoc_remove_map_handler(struct aoc_service_dev *dev)
 }
 EXPORT_SYMBOL_GPL(aoc_remove_map_handler);
 
-void trigger_aoc_ssr(bool ap_triggered_reset, char *reset_reason) {
+void trigger_aoc_ssr(bool ap_triggered_reset, char *reset_reason)
+{
 	struct aoc_prvdata *prvdata = platform_get_drvdata(aoc_platform_device);
 	if (!mutex_trylock(&aoc_service_lock)) {
 		return;
 	} else {
 		bool aoc_in_ssr = aoc_state == AOC_STATE_SSR;
 		mutex_unlock(&aoc_service_lock);
-		if (aoc_in_ssr) {
+		if (aoc_in_ssr || work_busy(&prvdata->watchdog_work)
+			|| work_pending(&prvdata->watchdog_work)) {
 			dev_err(prvdata->dev, "Reset request rejected, AOC already in SSR\n");
 		} else {
 			configure_crash_interrupts(prvdata, false);
@@ -1751,6 +1897,64 @@ static void prepend_fw_builder_to_crash_string(struct aoc_prvdata *prvdata, char
 	crash_info[prefix_size - 1] = ' ';
 }
 
+static struct aoc_section_header *get_ramdump_section(struct aoc_prvdata *prvdata, int section_idx)
+{
+	struct aoc_ramdump_header *ramdump_header =
+		(struct aoc_ramdump_header *)((unsigned long)prvdata->dram_virt +
+					      RAMDUMP_HEADER_OFFSET);
+
+	if (ramdump_header->version >= 5)
+		return &((struct aoc_ramdump_header_v2 *)ramdump_header)->sections[section_idx];
+
+	if (section_idx > RAMDUMP_SECTION_CRASH_INFO_INDEX) {
+		dev_err(prvdata->dev, "AOC ramdump version %d does not support section id %d",
+			ramdump_header->version, section_idx);
+		return NULL;
+	}
+
+	return &ramdump_header->sections[section_idx];
+}
+
+static int get_ramdump_breadcrumb(struct aoc_prvdata *prvdata, int breadcrumb_idx)
+{
+	struct aoc_ramdump_header *ramdump_header =
+		(struct aoc_ramdump_header *)((unsigned long)prvdata->dram_virt +
+					      RAMDUMP_HEADER_OFFSET);
+
+	if (ramdump_header->version >= 5) {
+		return ((struct aoc_ramdump_header_v2 *)
+			ramdump_header)->breadcrumbs[breadcrumb_idx];
+	} else {
+		return ramdump_header->breadcrumbs[breadcrumb_idx];
+	}
+}
+
+static bool is_aoc_unresponsive(struct aoc_prvdata *prvdata)
+{
+	struct CMD_SYS_VERSION_GET version_get = { 0 };
+	int ret;
+
+	/* Send a sample command and verify AOC responds */
+	AocCmdHdrSet(&version_get.parent.parent, CMD_SYS_VERSION_GET_ID,
+		     sizeof(version_get));
+
+	version_get.parent.core = 0;
+
+	ret = aoc_service_write_timeout(prvdata->services[0],
+		(void *) &version_get, sizeof(version_get),
+		AOC_UNRESPONSIVE_TIMEOUT);
+	if (ret != sizeof(version_get))
+		return true;
+
+	ret = aoc_service_read_timeout(prvdata->services[0],
+		(void *) &version_get, sizeof(version_get),
+		AOC_UNRESPONSIVE_TIMEOUT);
+	if (ret != sizeof(version_get))
+		return true;
+
+	return false;
+}
+
 static void aoc_watchdog(struct work_struct *work)
 {
 	struct aoc_prvdata *prvdata =
@@ -1759,8 +1963,6 @@ static void aoc_watchdog(struct work_struct *work)
 	struct aoc_ramdump_header *ramdump_header =
 		(struct aoc_ramdump_header *)((unsigned long)prvdata->dram_virt +
 					      RAMDUMP_HEADER_OFFSET);
-	struct wakeup_source *ws =
-		wakeup_source_register(prvdata->dev, dev_name(prvdata->dev));
 	unsigned long ramdump_timeout;
 	unsigned long carveout_paddr_from_aoc;
 	unsigned long carveout_vaddr_from_aoc;
@@ -1774,7 +1976,7 @@ static void aoc_watchdog(struct work_struct *work)
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
-	bool ap_triggered_reset, valid_magic;
+	bool ap_triggered_reset, valid_magic, aoc_unresponsive;
 	struct aoc_section_header *crash_info_section;
 
 	/* If we're already in SSR state, do nothing. */
@@ -1783,6 +1985,16 @@ static void aoc_watchdog(struct work_struct *work)
 		mutex_unlock(&aoc_service_lock);
 		return;
 	} else {
+		dev_info(prvdata->dev, "starting watchdog work\n");
+
+		prvdata->aoc_log_mbox_tx_done = true;
+		if (prvdata->ap_triggered_reset && aoc_state == AOC_STATE_ONLINE) {
+			dev_info(prvdata->dev, "Verifying if AOC is responsive...\n");
+			aoc_unresponsive = is_aoc_unresponsive(prvdata);
+			dev_info(prvdata->dev, "AOC is %s\n",
+				aoc_unresponsive ? "unresponsive" : "responsive");
+		}
+
 		aoc_state = AOC_STATE_SSR;
 		mutex_unlock(&aoc_service_lock);
 	}
@@ -1818,9 +2030,9 @@ static void aoc_watchdog(struct work_struct *work)
 	sscd_info.name = "aoc";
 	sscd_info.seg_count = 0;
 
-	dev_err(prvdata->dev, "aoc watchdog triggered, generating coredump\n");
-	dev_err(prvdata->dev, "holding %s wakelock for 10 sec\n", ws->name);
-	pm_wakeup_ws_event(ws, 10000, true);
+	dev_err(prvdata->dev, "generating coredump\n");
+	dev_err(prvdata->dev, "holding %s wakelock for 10 sec\n", prvdata->wakelock->name);
+	pm_wakeup_ws_event(prvdata->wakelock, 10000, true);
 
 	if (!sscd_pdata.sscd_report) {
 		dev_err(prvdata->dev, "aoc coredump failed: no sscd driver\n");
@@ -1841,13 +2053,16 @@ static void aoc_watchdog(struct work_struct *work)
 		msleep(100);
 	}
 
-	crash_info_section = &ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX];
-	if (crash_info_section->type != SECTION_TYPE_CRASH_INFO)
+	crash_info_section = get_ramdump_section(prvdata, RAMDUMP_SECTION_CRASH_INFO_INDEX);
+	if (crash_info_section != NULL && crash_info_section->type != SECTION_TYPE_CRASH_INFO)
 		crash_info_section = NULL;
 
 	if (!(ramdump_header->valid == 1) || !valid_magic) {
-		if (!(ramdump_header->valid == 1))
+		if (!(ramdump_header->valid == 1)) {
 			dev_info(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
+			if (aoc_panic_on_coredump_timeout)
+				panic("AOC coredump timed out");
+		}
 		if (!valid_magic)
 			dev_info(prvdata->dev, "aoc coredump has invalid magic\n");
 
@@ -1860,12 +2075,14 @@ static void aoc_watchdog(struct work_struct *work)
 			snprintf(crash_info, sizeof(crash_info),
 				"AoC watchdog : %s (incomplete %u:%u)",
 				crash_reason_valid ? crash_reason : "unknown reason",
-				ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
+				get_ramdump_breadcrumb(prvdata, 0),
+				get_ramdump_breadcrumb(prvdata, 1));
 		} else {
 			dev_err(prvdata->dev, "could not find crash info section in aoc coredump header");
 			snprintf(crash_info, sizeof(crash_info),
 				"AoC watchdog : unknown reason (incomplete %u:%u)",
-				ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
+				get_ramdump_breadcrumb(prvdata, 0),
+				get_ramdump_breadcrumb(prvdata, 1));
 		}
 	}
 
@@ -1908,8 +2125,14 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (ap_triggered_reset) {
-		/* Prefer the user specified reason */
-		scnprintf(crash_info, sizeof(crash_info), "AP Reset: %s", prvdata->ap_reset_reason);
+		if (aoc_unresponsive) {
+			scnprintf(crash_info, sizeof(crash_info),
+				"[AOC unresponsive] AP Reset: %s", prvdata->ap_reset_reason);
+		} else {
+			/* Prefer the user specified reason */
+			scnprintf(crash_info, sizeof(crash_info), "AP Reset: %s",
+				prvdata->ap_reset_reason);
+		}
 	}
 
 	if (crash_info[0] == 0)
@@ -1962,18 +2185,34 @@ err_coredump:
 	/* make sure there is no AoC startup work active */
 	cancel_work_sync(&prvdata->online_work);
 
+	/* Disable sensor power earlier because it needs a minimum interval before re-enabling. */
+	configure_sensor_power(prvdata, false);
+
 	mutex_lock(&aoc_service_lock);
-	aoc_take_offline(prvdata);
-	restart_rc = aoc_watchdog_restart(prvdata, &aoc_module_params);
-	if (restart_rc == AOC_RESTART_DISABLED_RC) {
+
+	prvdata->aoc_log_mbox_tx_done = false;
+
+	if (*(aoc_module_params.aoc_disable_restart)) {
 		dev_info(prvdata->dev, "aoc subsystem restart is disabled\n");
-	} else if (restart_rc) {
-		dev_info(prvdata->dev, "aoc subsystem restart failed: rc = %d\n", restart_rc);
-	} else {
-		dev_info(prvdata->dev, "aoc subsystem restart succeeded\n");
+		mutex_unlock(&aoc_service_lock);
+		return;
 	}
 
+	aoc_take_offline(prvdata);
+	restart_rc = aoc_watchdog_restart(prvdata, &aoc_module_params);
 	mutex_unlock(&aoc_service_lock);
+
+	if (restart_rc) {
+		dev_info(prvdata->dev,
+			"aoc subsystem restart failed: rc = %d\n", restart_rc);
+		return;
+	}
+
+	dev_info(prvdata->dev, "aoc subsystem restart succeeded\n");
+
+	restart_rc = start_firmware_load(prvdata->dev);
+	if (restart_rc != 0)
+		dev_err(prvdata->dev, "failed to start firmware load: %d\n", restart_rc);
 }
 
 void aoc_trigger_watchdog(const char *reason)
@@ -2153,7 +2392,7 @@ static const struct file_operations aoc_fops = {
 	.owner = THIS_MODULE,
 };
 
-static char *aoc_devnode(struct device *dev, umode_t *mode)
+static char *aoc_devnode(const struct device *dev, umode_t *mode)
 {
 	if (!mode || !dev)
 		return NULL;
@@ -2184,7 +2423,7 @@ static int init_chardev(struct aoc_prvdata *prvdata)
 
 	aoc_major = MAJOR(prvdata->aoc_devt);
 
-	prvdata->_class = class_create(THIS_MODULE, AOC_CHARDEV_NAME);
+	prvdata->_class = class_create(AOC_CHARDEV_NAME);
 	if (!prvdata->_class) {
 		pr_err("failed to create aoc_class\n");
 		rc = -ENXIO;
@@ -2234,12 +2473,8 @@ static void aoc_cleanup_resources(struct platform_device *pdev)
 
 	if (prvdata) {
 		aoc_take_offline(prvdata);
-		free_mailbox_channels(prvdata);
-
-		if (prvdata->domain) {
-			aoc_clear_iommu(prvdata);
+		if (prvdata->domain)
 			prvdata->domain = NULL;
-		}
 	}
 
 }
@@ -2287,10 +2522,18 @@ static int aoc_core_suspend(struct device *dev)
 	for (i = 0; i < total_services; i++) {
 		struct aoc_service_dev *s = service_dev_at_index(prvdata, i);
 
-		if (s && s->wake_capable)
+		if (!s)
+			continue;
+
+		if (s->wake_capable)
 			s->suspend_rx_count = aoc_service_slots_available_to_read(s->service,
 										  AOC_UP);
+
+		if (s->irq != -1 && device_may_wakeup(&s->dev))
+			enable_irq_wake(s->irq);
 	}
+
+	platform_specific_aoc_core_suspend();
 
 exit:
 	atomic_dec(&prvdata->aoc_process_active);
@@ -2309,15 +2552,22 @@ static int aoc_core_resume(struct device *dev)
 
 	for (i = 0; i < total_services; i++) {
 		struct aoc_service_dev *s = service_dev_at_index(prvdata, i);
+		if (!s)
+			continue;
 
-		if (s && s->wake_capable) {
+		if (s->wake_capable) {
 			size_t available = aoc_service_slots_available_to_read(s->service, AOC_UP);
 
 			if (available != s->suspend_rx_count)
 				dev_notice(dev, "Service \"%s\" has %zu messages to read on wake\n",
 					   dev_name(&s->dev), available);
 		}
+
+		if (s->irq != -1 && device_may_wakeup(&s->dev))
+			disable_irq_wake(s->irq);
 	}
+
+	platform_specific_aoc_core_resume();
 
 exit:
 	atomic_dec(&prvdata->aoc_process_active);
@@ -2487,38 +2737,6 @@ static int platform_probe_parse_dt(struct device *dev, struct device_node *aoc_n
 {
 	struct aoc_prvdata *prvdata = platform_get_drvdata(aoc_platform_device);
 
-	prvdata->aoc_pcu_base = dt_property(aoc_node, "pcu-base");
-	if (prvdata->aoc_pcu_base == DT_PROPERTY_NOT_FOUND) {
-		dev_err(dev, "AOC DT missing property pcu-base");
-		return -EINVAL;
-	}
-	prvdata->aoc_gpio_base = dt_property(aoc_node, "gpio-base");
-	if (prvdata->aoc_gpio_base == DT_PROPERTY_NOT_FOUND) {
-		dev_err(dev, "AOC DT missing property gpio-base");
-		return -EINVAL;
-	}
-	prvdata->aoc_pcu_db_set_offset = dt_property(aoc_node, "pcu-db-set-offset");
-	if (prvdata->aoc_pcu_db_set_offset == DT_PROPERTY_NOT_FOUND) {
-		dev_err(dev, "AOC DT missing property pcu-db-set-offset");
-		return -EINVAL;
-	}
-	prvdata->aoc_pcu_db_clr_offset = dt_property(aoc_node, "pcu-db-clr-offset");
-	if (prvdata->aoc_pcu_db_clr_offset == DT_PROPERTY_NOT_FOUND) {
-		dev_err(dev, "AOC DT missing property pcu-db-clr-offset");
-		return -EINVAL;
-	}
-	prvdata->aoc_cp_aperture_start_offset = dt_property(aoc_node,
-								"cp-aperture-start-offset");
-	if (prvdata->aoc_cp_aperture_start_offset == DT_PROPERTY_NOT_FOUND) {
-		dev_err(dev, "AOC DT missing property cp-aperture-start-offset");
-		return -EINVAL;
-	}
-	prvdata->aoc_cp_aperture_end_offset = dt_property(aoc_node,
-								"cp-aperture-end-offset");
-	if (prvdata->aoc_cp_aperture_end_offset == DT_PROPERTY_NOT_FOUND) {
-		dev_err(dev, "AOC DT missing property cp-aperture-end-offset");
-		return -EINVAL;
-	}
 	prvdata->aoc_clock_divider = dt_property(aoc_node, "clock-divider");
 	if (prvdata->aoc_clock_divider == DT_PROPERTY_NOT_FOUND) {
 		dev_err(dev, "AOC DT missing property clock-divider");
@@ -2529,8 +2747,7 @@ static int platform_probe_parse_dt(struct device *dev, struct device_node *aoc_n
 		dev_err(dev, "AOC DT missing property mbox-channels");
 		return -EINVAL;
 	}
-	prvdata->iommu_config_persistent = of_property_read_bool(aoc_node,
-									"iommu-config-persistent");
+	prvdata->aoc_coredump_mbox = dt_property(aoc_node, "aoc-coredump-mbox");
 
 	return 0;
 }
@@ -2542,8 +2759,9 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	struct device_node *aoc_node, *mem_node, *iommu_node;
 	struct resource *rsrc;
 	int ret;
-	int rc;
+	int rc = 0;
 	int i;
+	bool gsa_enabled;
 
 	if (aoc_platform_device != NULL) {
 		dev_err(dev,
@@ -2584,8 +2802,10 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	prvdata->last_reset_time_ns = ktime_get_real_ns();
 	prvdata->reset_wait_time_index = 0;
 
+	gsa_enabled = of_property_read_bool(prvdata->dev->of_node, "gsa-enabled")
+					|| *(aoc_module_params.aoc_enable_gsa_boot);
 	rc = find_gsa_device(prvdata);
-	if (rc) {
+	if (rc && gsa_enabled) {
 		dev_err(dev, "Failed to initialize gsa device: %d\n", rc);
 		rc = -EINVAL;
 		goto err_failed_prvdata_alloc;
@@ -2632,15 +2852,8 @@ static int aoc_platform_probe(struct platform_device *pdev)
 		prvdata->mbox_channels[i].index = i;
 	}
 
-
 	strscpy(prvdata->firmware_name, default_firmware,
 		sizeof(prvdata->firmware_name));
-
-	rc = allocate_mailbox_channels(prvdata);
-	if (rc) {
-		dev_err(dev, "failed to allocate mailbox channels %d\n", rc);
-		goto err_mem_resources;
-	}
 
 	init_waitqueue_head(&prvdata->aoc_reset_wait_queue);
 	INIT_WORK(&prvdata->watchdog_work, aoc_watchdog);
@@ -2694,18 +2907,18 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	prvdata->sram_size = resource_size(aoc_sram_resource);
 
 	prvdata->dram_virt = aoc_dram_virt_mapping;
-
 	if (IS_ERR(aoc_sram_virt_mapping) || IS_ERR(aoc_dram_virt_mapping)) {
 		rc = -ENOMEM;
 		goto err_sram_dram_map;
 	}
 
-	pm_runtime_set_active(dev);
+	// TODO(alexiacobucci): figure out if this is needed in newer SOCs
+	// pm_runtime_set_active(dev);
 	/* Leave AoC in suspended state. Otherwise, AoC IOMMU is set to active which results in the
 	 * IOMMU driver trying to access IOMMU SFRs during device suspend/resume operations. The
 	 * latter is problematic if AoC is in monitor mode and BLK_AOC is off. */
 
-	pm_runtime_set_suspended(dev);
+	// pm_runtime_set_suspended(dev);
 
 	prvdata->domain = iommu_get_domain_for_dev(dev);
 	if (!prvdata->domain) {
@@ -2745,8 +2958,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 		}
 	}
 
-	reset_sensor_power(prvdata, true);
-
 	aoc_parse_dmic_power(prvdata, aoc_node);
 	configure_dmic_regulator(prvdata, true);
 
@@ -2754,12 +2965,13 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	aoc_control = aoc_dram_translate(prvdata, 6 * SZ_1M);
 
 	INIT_WORK(&prvdata->online_work, aoc_did_become_online);
-
 	INIT_DELAYED_WORK(&prvdata->monitor_work, aoc_monitor_online);
 
-	aoc_configure_hardware(prvdata);
-
 	rc = platform_specific_probe(pdev, prvdata);
+	if (rc != 0) {
+		dev_err(dev, "Error %d in platform specific probe", rc);
+		goto err_platform_specific_probe;
+	}
 
 	if (aoc_autoload_firmware) {
 		ret = start_firmware_load(dev);
@@ -2769,17 +2981,18 @@ static int aoc_platform_probe(struct platform_device *pdev)
 
 	ret = sysfs_create_groups(&dev->kobj, aoc_groups);
 
+	prvdata->wakelock = wakeup_source_register(prvdata->dev, dev_name(prvdata->dev));
+
 	pr_debug("platform_probe matched\n");
 
 	return 0;
 
-/* err_acmp_reset: */
 err_find_iommu:
 err_sram_dram_map:
-
 err_watchdog_iommu_irq:
 err_watchdog_irq:
 err_mem_resources:
+err_platform_specific_probe:
 	aoc_cleanup_resources(pdev);
 err_memnode:
 	deinit_chardev(prvdata);
@@ -2798,7 +3011,12 @@ static int aoc_platform_remove(struct platform_device *pdev)
 
 	pr_debug("platform_remove\n");
 
+	dev_pm_domain_detach(&pdev->dev, true);
+
 	prvdata = platform_get_drvdata(pdev);
+
+	platform_specific_remove(pdev, prvdata);
+
 	acpm_ipc_release_channel(pdev->dev.of_node, prvdata->acpm_async_id);
 	for (i = 0; i < prvdata->sensor_power_count; i++) {
 		if (prvdata->sensor_regulator[i]) {
@@ -2869,5 +3087,6 @@ static void __exit aoc_exit(void)
 module_init(aoc_init);
 module_exit(aoc_exit);
 
+MODULE_DESCRIPTION("Google AOC platform driver");
 MODULE_LICENSE("GPL v2");
 MODULE_IMPORT_NS(DMA_BUF);

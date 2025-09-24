@@ -28,9 +28,6 @@
 #define BHI_CAP_FCN_COUNT		3
 #define BHI_CAP_FILTER_VALUE_COUNT	2
 
-#define DEFAULT_FORCE_FCR_UPDATE_CYCLE	10
-#define DEFAULT_FCN_FCR_DELTA_THESHOLD	10
-
 enum maxfg_reg_tags {
 	MAXFG_TAG_avgc,
 	MAXFG_TAG_cnfg,
@@ -99,11 +96,6 @@ enum max17x0x_reg_types {
 	GBMS_ATOM_TYPE_SET = 3,
 };
 
-enum maxfg_bypass_chargelimit_mode {
-	MSXFG_BYPASS_FULLCHARGE_CYCLE_DELTA = 1,
-	MSXFG_BYPASS_FULLCHARGE_FCN_DELTA = 2,
-};
-
 #define MAX_HIST_FULLCAP	0x3FF
 
 #pragma pack(1)
@@ -145,16 +137,6 @@ struct aafv_fg_config {
 	u32 voffset;
 	u32 fullsoc;
 	u32 fus;
-};
-
-struct maxfg_bypss_charglimt {
-	enum maxfg_bypass_chargelimit_mode mode;
-	int last_fullcharge;
-	int fcn_fcr_delta;
-	/* threshold value to trigger full charge, cycle based */
-	int threshold_cycle_delta;
-	/* threshold value to trigger force_fcr_update (10x scaled percentage) */
-	int threshold_fcn_delta;
 };
 
 #define ESTIMATE_DONE		2
@@ -351,7 +333,7 @@ static inline int maxfg_regmap_write(const struct maxfg_regmap *map,
 	if (rtn)
 		pr_err("Failed to write %s\n", name);
 
-#ifdef CONFIG_MAX1720X_REGLOG_LOG
+#if IS_ENABLED(CONFIG_MAX1720X_REGLOG_LOG)
 	max17x0x_reglog_log(map->reglog, reg, data, rtn);
 #endif
 	return rtn;
@@ -490,25 +472,19 @@ void maxfg_dynrel_log_rel(struct logbuffer *mon, struct device *dev, u16 fstat,
 			     const struct maxfg_dynrel_state *dr_state);
 
 int maxfg_aafv_scan_inputs(const char *inputs, const int input_sz,
-			   struct aafv_fg_config* cfg, const int cfg_max);
+			   struct aafv_fg_config *cfg, const int cfg_max);
 int maxfg_aafv_apply(struct maxfg_regmap *regmap, int aafv,
 		     const struct aafv_fg_config *cfgs, const int cfg_max,
 		     int fus_clear, int fus_shift, int *aafv_cur_index);
 int maxfg_aafv_restore_fus(struct maxfg_regmap *regmap, int fus_clear, int fus_shift, u16 fus);
-int maxfg_aafv_init(struct device_node *node, const char * prop,
+int maxfg_aafv_init(struct device_node *node, const char *prop,
 		    struct aafv_fg_config *config, int *config_limits);
 ssize_t maxfg_aafv_config_store(struct device *dev, const int batt_id,
 				const char *buf, size_t count,
 				struct aafv_fg_config *aafv_cfgs, int *aafv_config_limits);
 ssize_t maxfg_aafv_config_show(struct aafv_fg_config *cfgs, const int config_limits,
 			       const int batt_id, char *buf);
-int maxfg_reset_max_min(struct maxfg_regmap *regmap);
 
-int maxfg_init_bypass_charge_limit(struct maxfg_regmap *regmap, struct device_node *node,
-				   struct maxfg_bypss_charglimt *limit);
-int maxfg_update_bypass_charge_limit(struct maxfg_regmap *regmap,
-				     struct maxfg_bypss_charglimt *limit, int cycle);
-bool maxfg_need_force_fullcharge(struct maxfg_regmap *regmap, struct maxfg_bypss_charglimt *limit,
-				 int cycle);
+
 
 #endif  // MAXFG_COMMON_H_

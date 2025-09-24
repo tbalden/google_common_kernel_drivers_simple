@@ -21,6 +21,8 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 
+#include <soc/google/google-cdd.h>
+
 #include "aoc_alsa.h"
 #include "aoc_alsa_drv.h"
 #include "aoc_alsa_path.h"
@@ -36,9 +38,14 @@ struct be_path_cache port_array[PORT_MAX] = {
 };
 
 static const struct snd_soc_dai_ops be_dai_ops;
-static struct mutex path_mutex;
 
 static int aoc_compress_new(struct snd_soc_pcm_runtime *rtd, int num);
+
+static const struct snd_soc_dai_ops aoc_ep7_dai_ops = {
+	.compress_new = aoc_compress_new,
+};
+
+static struct mutex path_mutex;
 
 static const uint32_t rx_ep_list[] = {
 	IDX_EP2_RX,           /* low-latency-playback */
@@ -182,7 +189,7 @@ static struct snd_soc_dai_driver aoc_dai_drv[] = {
 			.channels_min = 1,
 			.channels_max = 2,
 		},
-		.compress_new = aoc_compress_new,
+		.ops = &aoc_ep7_dai_ops,
 		.name = "EP7 PB",
 		.id = IDX_EP7_RX,
 	},
@@ -956,6 +963,65 @@ static int aoc_capture_eps_trigger(struct aoc_chip *chip, int hw_id, bool on)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
+static uint32_t port_mapping[PORT_MAX] = {
+	[PORT_I2S_0_RX] = CCD_AUDIO_I2S,
+	[PORT_I2S_0_TX] = CCD_AUDIO_I2S,
+	[PORT_I2S_1_RX] = CCD_AUDIO_I2S,
+	[PORT_I2S_1_TX] = CCD_AUDIO_I2S,
+	[PORT_I2S_2_RX] = CCD_AUDIO_I2S,
+	[PORT_I2S_2_TX] = CCD_AUDIO_I2S,
+	[PORT_TDM_0_RX] = CCD_AUDIO_TDM_0,
+	[PORT_TDM_0_TX] = CCD_AUDIO_TDM_0,
+	[PORT_TDM_1_RX] = CCD_AUDIO_TDM_1,
+	[PORT_TDM_1_TX] = CCD_AUDIO_TDM_1,
+	[PORT_INTERNAL_MIC] = CCD_AUDIO_MIC,
+	[PORT_BT_RX] = CCD_AUDIO_BT,
+	[PORT_BT_TX] = CCD_AUDIO_BT,
+	[PORT_USB_RX] = CCD_AUDIO_USB,
+	[PORT_USB_TX] = CCD_AUDIO_USB,
+	[PORT_INCALL_RX] = CCD_AUDIO_INCALL,
+	[PORT_INCALL_TX] = CCD_AUDIO_INCALL,
+	[PORT_HAPTIC_RX] = CCD_AUDIO_HAPTIC,
+	[PORT_ERASER_TX] = CCD_AUDIO_ERASER,
+	[PORT_INTERNAL_MIC_US] = CCD_AUDIO_MIC,
+	[PORT_DP_DMA_RX] = CCD_AUDIO_DP,
+};
+
+void update_google_cdd_audio_stat_ext(struct aoc_chip *chip, uint32_t device, bool en)
+{
+	uint32_t audio_stat;
+
+	if (chip == NULL)
+		return;
+
+	audio_stat = chip->audio_stat;
+
+	if (en)
+		audio_stat |= device;
+	else
+		audio_stat &= ~device;
+
+	if (audio_stat == chip->audio_stat)
+		return;
+
+	pr_debug("%s: audio_stat update 0x%x ==> 0x%x\n", __func__, chip->audio_stat, audio_stat);
+	google_cdd_set_system_dev_stat(CDD_SYSTEM_DEVICE_AUDIO, audio_stat);
+	chip->audio_stat = audio_stat;
+}
+
+static void update_google_cdd_audio_stat(struct aoc_chip *chip, uint32_t hw_idx, bool en)
+{
+	if (hw_idx >= PORT_MAX)
+		return;
+
+	update_google_cdd_audio_stat_ext(chip, port_mapping[hw_idx], en);
+}
+#else
+inline void update_google_cdd_audio_stat_ext(struct aoc_chip *chip, uint32_t ccd_idx, bool en) {}
+static inline void update_google_cdd_audio_stat(struct aoc_chip *c, uint32_t idx, bool en) {}
+#endif
+
 static int be_prepare(struct snd_pcm_substream *stream, struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = stream->private_data;
@@ -989,6 +1055,7 @@ static int be_prepare(struct snd_pcm_substream *stream, struct snd_soc_dai *dai)
 		break;
 	}
 	port_array[hw_idx].on = true;
+	update_google_cdd_audio_stat(chip, hw_idx, true);
 	mutex_unlock(&path_mutex);
 	return 0;
 }
@@ -1025,6 +1092,7 @@ static void be_shutdown(struct snd_pcm_substream *stream,
 		break;
 	}
 	port_array[hw_idx].on = false;
+	update_google_cdd_audio_stat(chip, hw_idx, false);
 	mutex_unlock(&path_mutex);
 }
 
@@ -1248,9 +1316,13 @@ static int aoc_path_put(uint32_t ep_id, uint32_t hw_id,
 		hw_idx, enable, chip);
 
 	mutex_lock(&path_mutex);
-
 	if (enable) {
 		set_bit(ep_idx, port_array[hw_idx].fe_put_mask);
+		if (hw_idx == PORT_USB_RX || hw_idx == PORT_USB_TX)
+			aoc_usb_setup_config(chip,
+					     bitmap_weight(port_array[hw_idx].fe_put_mask,
+							   IDX_FE_MAX),
+					     hw_id & AOC_TX ? 1 : 0);
 		mutex_lock(&chip->audio_mutex);
 		aoc_audio_path_open(chip, ep_id, hw_id, port_array[hw_idx].on);
 		mutex_unlock(&chip->audio_mutex);
@@ -1259,6 +1331,11 @@ static int aoc_path_put(uint32_t ep_id, uint32_t hw_id,
 		mutex_lock(&chip->audio_mutex);
 		aoc_audio_path_close(chip, ep_id, hw_id, port_array[hw_idx].on);
 		mutex_unlock(&chip->audio_mutex);
+		if (hw_idx == PORT_USB_RX || hw_idx == PORT_USB_TX)
+			aoc_usb_cleanup_config(chip,
+					       bitmap_weight(port_array[hw_idx].fe_put_mask,
+							     IDX_FE_MAX),
+					       hw_id & AOC_TX ? 1 : 0);
 	}
 
 	mutex_unlock(&path_mutex);
@@ -1868,6 +1945,30 @@ const struct snd_kcontrol_new ep6_tx_ctrl[] = {
 	SOC_SINGLE_EXT("INCALL_TX", SND_SOC_NOPM, INCALL_TX, 1, 0, ep6_tx_get, ep6_tx_put),
 };
 
+static int hifi_tx_put(struct snd_kcontrol *kcontrol,
+		      struct snd_ctl_elem_value *ucontrol)
+{
+	struct soc_mixer_control *mc =
+		(struct soc_mixer_control *)kcontrol->private_value;
+	u32 hw_idx = mc->shift;
+
+	return aoc_path_put(IDX_HIFI_TX, hw_idx, kcontrol, ucontrol);
+}
+
+static int hifi_tx_get(struct snd_kcontrol *kcontrol,
+		      struct snd_ctl_elem_value *ucontrol)
+{
+	struct soc_mixer_control *mc =
+		(struct soc_mixer_control *)kcontrol->private_value;
+	u32 hw_idx = mc->shift;
+
+	return aoc_path_get(IDX_HIFI_TX, hw_idx, kcontrol, ucontrol);
+}
+
+const struct snd_kcontrol_new hifi_tx_ctrl[] = {
+	SOC_SINGLE_EXT("USB_TX", SND_SOC_NOPM, USB_TX, 1, 0, hifi_tx_get, hifi_tx_put),
+};
+
 static int voip_tx_put(struct snd_kcontrol *kcontrol,
 		      struct snd_ctl_elem_value *ucontrol)
 {
@@ -1963,6 +2064,7 @@ const struct snd_soc_dapm_widget aoc_widget[] = {
 	SND_SOC_DAPM_AIF_OUT("EP5_TX", "EP5 Capture", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_OUT("EP6_TX", "EP6 Capture", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_OUT("VOIP_TX", "audio_voip_tx", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("HIFI_TX", "audio_hifiin", 0, SND_SOC_NOPM, 0, 0),
 
 	/* NoHost FE */
 	/* RX */
@@ -2052,6 +2154,9 @@ const struct snd_soc_dapm_widget aoc_widget[] = {
 
 	SND_SOC_DAPM_MIXER("EP6 TX Mixer", SND_SOC_NOPM, 0, 0, ep6_tx_ctrl,
 			   ARRAY_SIZE(ep6_tx_ctrl)),
+
+	SND_SOC_DAPM_MIXER("HIFI TX Mixer", SND_SOC_NOPM, 0, 0,
+		hifi_tx_ctrl, ARRAY_SIZE(hifi_tx_ctrl)),
 
 	/* NoHost TX path */
 	SND_SOC_DAPM_MIXER("VOIP TX Mixer", SND_SOC_NOPM, 0, 0,
@@ -2262,6 +2367,9 @@ static const struct snd_soc_dapm_route aoc_routes[] = {
 	{ "EP6 TX Mixer", "BT_TX", "BT_TX" },
 	{ "EP6 TX Mixer", "USB_TX", "USB_TX" },
 	{ "EP6 TX Mixer", "INCALL_TX", "INCALL_TX" },
+
+	{ "HIFI_TX", NULL, "HIFI TX Mixer" },
+	{ "HIFI TX Mixer", "USB_TX", "USB_TX" },
 
 	{ "VOIP_TX", NULL, "VOIP TX Mixer" },
 	{ "VOIP TX Mixer", "I2S_0_TX", "I2S_0_TX" },

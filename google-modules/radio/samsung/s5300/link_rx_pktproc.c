@@ -2026,7 +2026,6 @@ int pktproc_create(struct platform_device *pdev, struct mem_link_device *mld,
 			alloc_size = sizeof(dma_addr_t) * q->num_desc;
 			q->dma_addr = kzalloc(alloc_size, GFP_KERNEL);
 			if (!q->dma_addr) {
-				mif_err("kzalloc() dma_addr failed\n");
 				ret = -ENOMEM;
 				goto create_error;
 			}

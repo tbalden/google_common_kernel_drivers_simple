@@ -21,41 +21,19 @@
 #include "lwis_gpio.h"
 #include "lwis_i2c.h"
 #include "lwis_ioreg.h"
+#include "lwis_platform.h"
 #include "lwis_regulator.h"
 #include "lwis_bus_manager.h"
 
+#define IOREG_RANGE_FIELD_SIZE 3
+
+#define LWIS_DT_I3C_OTP_SETTINGS "i3c-otp-settings"
+#define LWIS_DT_I3C_OTP_SETTLE_TIME "i3c-otp-settle-time"
+#define LWIS_DT_I2C_OTP_SETTINGS "i2c-otp-settings"
+#define LWIS_DT_I2C_OTP_SETTLE_TIME "i2c-otp-settle-time"
+
 /* Uncomment this to help debug device tree parsing. */
-// #define LWIS_DT_DEBUG
-
-static int parse_gpios(struct lwis_device *lwis_dev, char *name, bool *is_present)
-{
-	int count;
-	struct device *dev;
-	struct gpio_descs *list;
-
-	*is_present = false;
-
-	dev = lwis_dev->k_dev;
-
-	count = gpiod_count(dev, name);
-
-	/* No GPIO pins found, just return */
-	if (count <= 0)
-		return 0;
-
-	list = lwis_gpio_list_get(dev, name);
-	if (IS_ERR_OR_NULL(list)) {
-		pr_err("Error parsing GPIO list %s (%ld)\n", name, PTR_ERR(list));
-		return PTR_ERR(list);
-	}
-
-	/* The GPIO pins are valid, release the list as we do not need to hold
-	 * on to the pins yet
-	 */
-	lwis_gpio_list_put(list, dev);
-	*is_present = true;
-	return 0;
-}
+// #define CONFIG_LWIS_DT_DEBUG
 
 static int parse_irq_gpios(struct lwis_device *lwis_dev)
 {
@@ -200,87 +178,6 @@ error_parse_irq_gpios:
 	return ret;
 }
 
-static int parse_settle_time(struct lwis_device *lwis_dev)
-{
-	struct device_node *dev_node;
-	struct device *dev;
-
-	dev = lwis_dev->k_dev;
-	dev_node = dev->of_node;
-	lwis_dev->enable_gpios_settle_time = 0;
-
-	of_property_read_u32(dev_node, "enable-gpios-settle-time",
-			     &lwis_dev->enable_gpios_settle_time);
-	return 0;
-}
-
-static int parse_regulators(struct lwis_device *lwis_dev)
-{
-	int i;
-	int ret;
-	int count;
-	struct device_node *dev_node;
-	struct device_node *dev_node_reg;
-	const char *name;
-	struct device *dev;
-	int voltage;
-	int voltage_count;
-
-	dev = lwis_dev->k_dev;
-	dev_node = dev->of_node;
-
-	count = of_property_count_elems_of_size(dev_node, "regulators", sizeof(u32));
-
-	/* No regulators found, or entry does not exist, just return */
-	if (count <= 0) {
-		lwis_dev->regulators = NULL;
-		return 0;
-	}
-
-	/* Voltage count is allowed to be less than regulator count,
-	 * regulator_set_voltage will not be called for the ones with
-	 * unspecified voltage
-	 */
-	voltage_count =
-		of_property_count_elems_of_size(dev_node, "regulator-voltages", sizeof(u32));
-
-	lwis_dev->regulators = lwis_regulator_list_alloc(count);
-	if (IS_ERR_OR_NULL(lwis_dev->regulators)) {
-		pr_err("Cannot allocate regulator list\n");
-		ret = PTR_ERR(lwis_dev->regulators);
-		lwis_dev->regulators = NULL;
-		return ret;
-	}
-
-	/* Parse regulator list and acquire the regulator pointers */
-	for (i = 0; i < count; ++i) {
-		dev_node_reg = of_parse_phandle(dev_node, "regulators", i);
-		of_property_read_string(dev_node_reg, "regulator-name", &name);
-		voltage = 0;
-		if (i < voltage_count)
-			of_property_read_u32_index(dev_node, "regulator-voltages", i, &voltage);
-
-		ret = lwis_regulator_get(lwis_dev->regulators, (char *)name, voltage, dev);
-		if (ret < 0) {
-			pr_err("Cannot find regulator: %s\n", name);
-			goto error_parse_reg;
-		}
-	}
-
-#ifdef LWIS_DT_DEBUG
-	lwis_regulator_print(lwis_dev->regulators);
-#endif
-
-	return 0;
-
-error_parse_reg:
-	/* In case of error, free all the other regulators that were alloc'ed */
-	lwis_regulator_put_all(lwis_dev->regulators);
-	lwis_regulator_list_free(lwis_dev->regulators);
-	lwis_dev->regulators = NULL;
-	return ret;
-}
-
 static int parse_clocks(struct lwis_device *lwis_dev)
 {
 	int i;
@@ -317,6 +214,7 @@ static int parse_clocks(struct lwis_device *lwis_dev)
 		of_property_read_string_index(dev_node, "clock-names", i, &name);
 		/* It is allowed to omit clock rates for some of the clocks */
 		ret = of_property_read_u32_index(dev_node, "clock-rates", i, &rate);
+		/* Clock may fetched from devfreq as well */
 		rate = (ret == 0) ? rate : 0;
 
 		ret = lwis_clock_get(lwis_dev->clocks, (char *)name, dev, rate);
@@ -347,10 +245,10 @@ static int parse_clocks(struct lwis_device *lwis_dev)
 	for (i = 0; i < MAX_BTS_BLOCK_NUM; ++i)
 		lwis_dev->bts_indexes[i] = BTS_UNSUPPORTED;
 
-#ifdef LWIS_DT_DEBUG
-	pr_info("%s: clock family %d", lwis_dev->name, lwis_dev->clock_family);
-	lwis_clock_print(lwis_dev->clocks);
-#endif
+	if (IS_ENABLED(CONFIG_LWIS_DT_DEBUG)) {
+		pr_info("%s: clock family %d", lwis_dev->name, lwis_dev->clock_family);
+		lwis_clock_print(lwis_dev->clocks);
+	}
 
 	return 0;
 
@@ -361,52 +259,6 @@ error_parse_clk:
 	lwis_clock_list_free(lwis_dev->clocks);
 	lwis_dev->clocks = NULL;
 	return ret;
-}
-
-static int parse_pinctrls(struct lwis_device *lwis_dev, char *expected_state)
-{
-	int count;
-	struct device *dev;
-	struct device_node *dev_node;
-	struct pinctrl *pc;
-	struct pinctrl_state *pinctrl_state;
-
-	dev = lwis_dev->k_dev;
-	dev_node = dev->of_node;
-
-	lwis_dev->mclk_present = false;
-	lwis_dev->shared_pinctrl = 0;
-	count = of_property_count_strings(dev_node, "pinctrl-names");
-
-	/* No pinctrl found, just return */
-	if (count <= 0)
-		return 0;
-
-	/* Set up pinctrl */
-	pc = devm_pinctrl_get(dev);
-	if (IS_ERR_OR_NULL(pc)) {
-		pr_err("Cannot allocate pinctrl\n");
-		return PTR_ERR(pc);
-	}
-
-	pinctrl_state = pinctrl_lookup_state(pc, expected_state);
-	if (IS_ERR_OR_NULL(pinctrl_state)) {
-		pr_err("Cannot find pinctrl state %s\n", expected_state);
-		devm_pinctrl_put(pc);
-		return PTR_ERR(pinctrl_state);
-	}
-
-	/* Indicate if the pinctrl shared with other devices */
-	of_property_read_u32(dev_node, "shared-pinctrl", &lwis_dev->shared_pinctrl);
-
-	/* The pinctrl is valid, release it as we do not need to hold on to
-	 * the pins yet
-	 */
-	devm_pinctrl_put(pc);
-
-	lwis_dev->mclk_present = true;
-
-	return 0;
 }
 
 static int parse_irq_reg_bits(struct device_node *info, int *bits_num_result, u32 **reg_bits_result)
@@ -621,8 +473,10 @@ static int parse_interrupts(struct lwis_device *lwis_dev)
 	struct platform_device *plat_dev;
 	struct of_phandle_iterator it;
 
-	if (lwis_dev->type == DEVICE_TYPE_SPI)
+	if (!lwis_dev->plat_dev) {
+		dev_info(lwis_dev->dev, "Non-platform device, skip parse interrupts\n");
 		return 0;
+	}
 
 	plat_dev = lwis_dev->plat_dev;
 	dev_node = lwis_dev->k_dev->of_node;
@@ -652,10 +506,15 @@ static int parse_interrupts(struct lwis_device *lwis_dev)
 	}
 
 	for (i = 0; i < count; ++i) {
-		of_property_read_string_index(dev_node, "interrupt-names", i, &name);
-		ret = lwis_interrupt_init(lwis_dev->irqs, i, (char *)name);
-		if (ret) {
-			pr_err("Cannot initialize irq %s\n", name);
+		ret = of_property_read_string_index(dev_node, "interrupt-names", i, &name);
+		if (!ret) {
+			ret = lwis_interrupt_init(lwis_dev->irqs, i, (char *)name);
+			if (ret) {
+				pr_err("Cannot initialize irq %s\n", name);
+				goto error_get_irq;
+			}
+		} else {
+			pr_err("Cannot find irq with index %d in device tree\n", i);
 			goto error_get_irq;
 		}
 	}
@@ -796,9 +655,8 @@ static int parse_interrupts(struct lwis_device *lwis_dev)
 		i++;
 	}
 
-#ifdef LWIS_DT_DEBUG
-	lwis_interrupt_print(lwis_dev->irqs);
-#endif
+	if (IS_ENABLED(CONFIG_LWIS_DT_DEBUG))
+		lwis_interrupt_print(lwis_dev->irqs);
 
 	return 0;
 error_event_infos:
@@ -846,9 +704,8 @@ static int parse_phys(struct lwis_device *lwis_dev)
 		}
 	}
 
-#ifdef LWIS_DT_DEBUG
-	lwis_phy_print(lwis_dev->phys);
-#endif
+	if (IS_ENABLED(CONFIG_LWIS_DT_DEBUG))
+		lwis_phy_print(lwis_dev->phys);
 
 	return 0;
 
@@ -862,7 +719,6 @@ error_parse_phy:
 
 static void parse_bitwidths(struct lwis_device *lwis_dev)
 {
-	int __maybe_unused ret;
 	struct device *dev;
 	struct device_node *dev_node;
 	u32 addr_bitwidth = 32;
@@ -871,15 +727,13 @@ static void parse_bitwidths(struct lwis_device *lwis_dev)
 	dev = lwis_dev->k_dev;
 	dev_node = dev->of_node;
 
-	ret = of_property_read_u32(dev_node, "reg-addr-bitwidth", &addr_bitwidth);
-#ifdef LWIS_DT_DEBUG
-	pr_info("Addr bitwidth set to: %d\n", addr_bitwidth);
-#endif
+	of_property_read_u32(dev_node, "reg-addr-bitwidth", &addr_bitwidth);
+	if (IS_ENABLED(CONFIG_LWIS_DT_DEBUG))
+		pr_info("Addr bitwidth set to: %d\n", addr_bitwidth);
 
-	ret = of_property_read_u32(dev_node, "reg-value-bitwidth", &value_bitwidth);
-#ifdef LWIS_DT_DEBUG
-	pr_info("Value bitwidth set to: %d\n", value_bitwidth);
-#endif
+	of_property_read_u32(dev_node, "reg-value-bitwidth", &value_bitwidth);
+	if (IS_ENABLED(CONFIG_LWIS_DT_DEBUG))
+		pr_info("Value bitwidth set to: %d\n", value_bitwidth);
 
 	lwis_dev->native_addr_bitwidth = addr_bitwidth;
 	lwis_dev->native_value_bitwidth = value_bitwidth;
@@ -902,7 +756,6 @@ static int parse_power_seqs(struct lwis_device *lwis_dev, const char *seq_name,
 	const char *name;
 	const char *type;
 	int delay_us;
-	int type_regulator_count = 0;
 
 	scnprintf(str_seq_name, LWIS_MAX_NAME_STRING_LEN, "%s-seqs", seq_name);
 	scnprintf(str_seq_type, LWIS_MAX_NAME_STRING_LEN, "%s-seq-types", seq_name);
@@ -955,7 +808,9 @@ static int parse_power_seqs(struct lwis_device *lwis_dev, const char *seq_name,
 			if (ret)
 				goto error_parse_power_seqs;
 		} else if (strcmp(type, "regulator") == 0) {
-			type_regulator_count++;
+			ret = lwis_regulator_list_add_info(dev, &lwis_dev->regulator_list, name);
+			if (ret)
+				goto error_parse_power_seqs;
 		}
 
 		ret = of_property_read_u32_index(dev_node, str_seq_delay, i, &delay_us);
@@ -966,45 +821,14 @@ static int parse_power_seqs(struct lwis_device *lwis_dev, const char *seq_name,
 		(*list)->seq_info[i].delay_us = delay_us;
 	}
 
-#ifdef LWIS_DT_DEBUG
-	lwis_dev_power_seq_list_print(*list);
-#endif
-
-	if (type_regulator_count > 0 && lwis_dev->regulators == NULL) {
-		lwis_dev->regulators = lwis_regulator_list_alloc(type_regulator_count);
-		if (IS_ERR_OR_NULL(lwis_dev->regulators)) {
-			pr_err("Failed to allocate regulator list\n");
-			ret = PTR_ERR(lwis_dev->regulators);
-			goto error_parse_power_seqs;
-		}
-
-		for (i = 0; i < power_seq_count; ++i) {
-			struct device *dev;
-			char *seq_item_name;
-
-			if (strcmp((*list)->seq_info[i].type, "regulator") != 0)
-				continue;
-
-			dev = lwis_dev->k_dev;
-			seq_item_name = (*list)->seq_info[i].name;
-
-			ret = lwis_regulator_get(lwis_dev->regulators, seq_item_name,
-						 /*voltage=*/0, dev);
-			if (ret < 0) {
-				pr_err("Cannot find regulator: %s\n", seq_item_name);
-				goto error_parse_power_seqs;
-			}
-		}
-	}
+	if (IS_ENABLED(CONFIG_LWIS_DT_DEBUG))
+		lwis_dev_power_seq_list_print(*list);
 
 	return 0;
 
 error_parse_power_seqs:
-	if (lwis_dev->regulators) {
-		lwis_regulator_put_all(lwis_dev->regulators);
-		lwis_regulator_list_free(lwis_dev->regulators);
-		lwis_dev->regulators = NULL;
-	}
+	lwis_regulator_put_all(&lwis_dev->regulator_list);
+	lwis_regulator_list_free(&lwis_dev->regulator_list);
 	lwis_gpios_list_free(&lwis_dev->gpios_list);
 	lwis_dev_power_seq_list_free(*list);
 	*list = NULL;
@@ -1054,18 +878,6 @@ static int parse_unified_power_seqs(struct lwis_device *lwis_dev)
 	return ret;
 }
 
-static int parse_pm_hibernation(struct lwis_device *lwis_dev)
-{
-	struct device_node *dev_node;
-
-	dev_node = lwis_dev->k_dev->of_node;
-	lwis_dev->pm_hibernation = 1;
-
-	of_property_read_u32(dev_node, "pm-hibernation", &lwis_dev->pm_hibernation);
-
-	return 0;
-}
-
 static int parse_access_mode(struct lwis_device *lwis_dev)
 {
 	struct device_node *dev_node;
@@ -1073,6 +885,32 @@ static int parse_access_mode(struct lwis_device *lwis_dev)
 	dev_node = lwis_dev->k_dev->of_node;
 
 	lwis_dev->is_read_only = of_property_read_bool(dev_node, "lwis,read-only");
+
+	return 0;
+}
+
+/*
+ * parse_i2c_otp_support:
+ * This property supports DEVICE_TYPE_I2C for OTP settings in kernel.
+ */
+static bool parse_i2c_otp_support(struct lwis_i2c_device *i2c_dev)
+{
+	struct device_node *dev_node;
+
+	dev_node = i2c_dev->base_dev.k_dev->of_node;
+
+	i2c_dev->is_i2c_otp = of_property_read_bool(dev_node, "lwis,i2c-otp");
+
+	return 0;
+}
+
+static int parse_i3c_mode(struct lwis_i2c_device *i2c_dev)
+{
+	struct device_node *dev_node;
+
+	dev_node = i2c_dev->base_dev.k_dev->of_node;
+
+	i2c_dev->i3c_enabled = of_property_read_bool(dev_node, "i3c-enabled");
 
 	return 0;
 }
@@ -1155,6 +993,70 @@ static int parse_i2c_lock_group_id(struct lwis_i2c_device *i2c_dev)
 	return 0;
 }
 
+static int parse_otp_setting(struct lwis_i2c_device *i2c_dev, const char *prop_name,
+			     struct lwis_otp_config *otp_config)
+{
+	struct device *dev = i2c_dev->base_dev.k_dev;
+	struct device_node *dev_node = dev->of_node;
+	int count;
+	int ret;
+
+	count = of_property_count_u32_elems(dev_node, prop_name);
+
+	if (count == -EINVAL || count == 0) {
+		dev_dbg(dev, "%s property not found or empty, skipping.\n", prop_name);
+		otp_config->settings = NULL;
+		otp_config->setting_count = 0;
+		return 0;
+	} else if (count < 0) {
+		dev_err(dev, "Error reading %s property count: %d\n", prop_name, count);
+		return count;
+	}
+
+	if (count % 2 != 0) {
+		dev_err(dev, "Malformed %s property\n", prop_name);
+		return -EINVAL;
+	}
+
+	otp_config->settings =
+		devm_kmalloc_array(dev, count / 2, sizeof(*otp_config->settings), GFP_KERNEL);
+	if (!otp_config->settings)
+		return -ENOMEM;
+
+	ret = of_property_read_u32_array(dev_node, prop_name, (u32 *)otp_config->settings, count);
+	if (ret) {
+		dev_err(dev, "Failed to read %s array: %d\n", prop_name, ret);
+		return ret;
+	}
+	otp_config->setting_count = count / 2;
+
+	return 0;
+}
+
+static int parse_otp_settle_time_us(struct lwis_i2c_device *i2c_dev, const char *prop_name,
+				    struct lwis_otp_config *otp_config)
+{
+	struct device_node *dev_node = i2c_dev->base_dev.k_dev->of_node;
+
+	otp_config->settle_time_us = 0;
+	of_property_read_u32(dev_node, prop_name, &otp_config->settle_time_us);
+
+	return 0;
+}
+
+static int parse_i3c_ibi_config(struct lwis_i2c_device *i2c_dev)
+{
+	struct device_node *dev_node = i2c_dev->base_dev.k_dev->of_node;
+
+	i2c_dev->ibi_config.ibi_max_payload_len = 0;
+	/* The default value for the IBI num_slots in the common drivers is the magic number 8 */
+	i2c_dev->ibi_config.ibi_num_slots = 8;
+	of_property_read_u32(dev_node, "ibi-max-payload-len",
+			     &i2c_dev->ibi_config.ibi_max_payload_len);
+	of_property_read_u32(dev_node, "ibi-num-slots", &i2c_dev->ibi_config.ibi_num_slots);
+	return 0;
+}
+
 static void parse_transaction_process_limit(struct lwis_device *lwis_dev)
 {
 	struct device_node *dev_node;
@@ -1200,6 +1102,34 @@ static void parse_ioreg_device_priority(struct lwis_ioreg_device *ioreg_dev)
 	}
 }
 
+static int parse_ioreg_valid_range(struct lwis_ioreg_device *ioreg_dev)
+{
+	struct device *dev = ioreg_dev->base_dev.k_dev;
+	struct device_node *dev_node = ioreg_dev->base_dev.k_dev->of_node;
+	static const char * const prop_name = "reg-valid-ranges";
+	int count;
+
+	count = of_property_count_elems_of_size(dev_node, prop_name,
+						sizeof(u32) * IOREG_RANGE_FIELD_SIZE);
+	if (count <= 0)
+		return 0;
+
+	ioreg_dev->reg_valid_range_list.ranges =
+		devm_kcalloc(dev, count, sizeof(struct lwis_ioreg_valid_range), GFP_KERNEL);
+	if (!ioreg_dev->reg_valid_range_list.ranges)
+		return -ENOMEM;
+
+	of_property_read_u32_array(dev_node, prop_name,
+				   (u32 *)ioreg_dev->reg_valid_range_list.ranges,
+				   count * IOREG_RANGE_FIELD_SIZE);
+	ioreg_dev->reg_valid_range_list.count = count;
+
+	if (IS_ENABLED(CONFIG_LWIS_DT_DEBUG))
+		lwis_ioreg_device_valid_range_list_print(ioreg_dev);
+
+	return 0;
+}
+
 int lwis_base_parse_dt(struct lwis_device *lwis_dev)
 {
 	struct device *dev;
@@ -1222,25 +1152,13 @@ int lwis_base_parse_dt(struct lwis_device *lwis_dev)
 	}
 	strscpy(lwis_dev->name, name_str, LWIS_MAX_NAME_STRING_LEN);
 
+	ret = lwis_platform_check_qos_box_probed(dev, name_str);
+	if (ret) {
+		pr_err("%s device cannot be probed before qos_box device probed\n", name_str);
+		return -EINVAL;
+	}
+
 	pr_debug("Device tree entry [%s] - begin\n", lwis_dev->name);
-
-	ret = parse_gpios(lwis_dev, "shared-enable", &lwis_dev->shared_enable_gpios_present);
-	if (ret) {
-		pr_err("Error parsing shared-enable-gpios\n");
-		return ret;
-	}
-
-	ret = parse_gpios(lwis_dev, "enable", &lwis_dev->enable_gpios_present);
-	if (ret) {
-		pr_err("Error parsing enable-gpios\n");
-		return ret;
-	}
-
-	ret = parse_gpios(lwis_dev, "reset", &lwis_dev->reset_gpios_present);
-	if (ret) {
-		pr_err("Error parsing reset-gpios\n");
-		return ret;
-	}
 
 	ret = parse_irq_gpios(lwis_dev);
 	if (ret) {
@@ -1283,29 +1201,9 @@ int lwis_base_parse_dt(struct lwis_device *lwis_dev)
 		return ret;
 	}
 
-	ret = parse_settle_time(lwis_dev);
-	if (ret) {
-		pr_err("Error parsing settle-time\n");
-		return ret;
-	}
-
-	if (lwis_dev->regulators == NULL) {
-		ret = parse_regulators(lwis_dev);
-		if (ret) {
-			pr_err("Error parsing regulators\n");
-			return ret;
-		}
-	}
-
 	ret = parse_clocks(lwis_dev);
 	if (ret) {
 		pr_err("Error parsing clocks\n");
-		return ret;
-	}
-
-	ret = parse_pinctrls(lwis_dev, "mclk_on");
-	if (ret) {
-		pr_err("Error parsing mclk pinctrls\n");
 		return ret;
 	}
 
@@ -1321,12 +1219,6 @@ int lwis_base_parse_dt(struct lwis_device *lwis_dev)
 		return ret;
 	}
 
-	ret = parse_pm_hibernation(lwis_dev);
-	if (ret) {
-		pr_err("Error parsing pm hibernation\n");
-		return ret;
-	}
-
 	parse_access_mode(lwis_dev);
 	parse_power_up_mode(lwis_dev);
 	parse_thread_priority(lwis_dev);
@@ -1335,6 +1227,9 @@ int lwis_base_parse_dt(struct lwis_device *lwis_dev)
 
 	lwis_dev->bts_scenario_name = NULL;
 	of_property_read_string(dev_node, "bts-scenario", &lwis_dev->bts_scenario_name);
+
+	lwis_dev->mem_qos_scenario_name = NULL;
+	of_property_read_string(dev_node, "mem-qos-scenario", &lwis_dev->mem_qos_scenario_name);
 
 	dev_node->data = lwis_dev;
 
@@ -1348,16 +1243,25 @@ int lwis_i2c_device_parse_dt(struct lwis_i2c_device *i2c_dev)
 	struct device_node *dev_node;
 	struct device_node *dev_node_i2c;
 	int ret;
+	int size;
+	int i;
 
 	dev_node = i2c_dev->base_dev.k_dev->of_node;
 
-	dev_node_i2c = of_parse_phandle(dev_node, "i2c-bus", 0);
-	if (!dev_node_i2c) {
-		dev_err(i2c_dev->base_dev.dev, "Cannot find i2c-bus node\n");
-		return -ENODEV;
+	size = of_property_count_u32_elems(dev_node, "i2c-bus");
+
+	for (i = 0; i < size; ++i) {
+		dev_node_i2c = of_parse_phandle(dev_node, "i2c-bus", i);
+		if (!dev_node_i2c) {
+			dev_err(i2c_dev->base_dev.dev, "Cannot find i2c/i3c node\n");
+			return -ENODEV;
+		}
+		if (of_device_is_available(dev_node_i2c)) {
+			i2c_dev->adapter = of_find_i2c_adapter_by_node(dev_node_i2c);
+			break;
+		}
 	}
 
-	i2c_dev->adapter = of_find_i2c_adapter_by_node(dev_node_i2c);
 	if (!i2c_dev->adapter) {
 		dev_err(i2c_dev->base_dev.dev, "Cannot find i2c adapter\n");
 		return -ENODEV;
@@ -1378,6 +1282,66 @@ int lwis_i2c_device_parse_dt(struct lwis_i2c_device *i2c_dev)
 	ret = parse_i2c_device_priority(i2c_dev);
 	if (ret)
 		return ret;
+
+	parse_i2c_otp_support(i2c_dev);
+
+	if (i2c_dev->is_i2c_otp) {
+		ret = parse_otp_setting(i2c_dev, LWIS_DT_I2C_OTP_SETTINGS,
+					&i2c_dev->i2c_otp_config);
+		if (ret) {
+			dev_err(i2c_dev->base_dev.dev, "Error parsing i2c otp settings\n");
+			return ret;
+		}
+		ret = parse_otp_settle_time_us(i2c_dev, LWIS_DT_I2C_OTP_SETTLE_TIME,
+					       &i2c_dev->i2c_otp_config);
+		if (ret) {
+			dev_err(i2c_dev->base_dev.dev, "Error parsing i2c otp settle time\n");
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
+int lwis_i3c_proxy_device_parse_dt(struct lwis_i2c_device *i2c_dev)
+{
+	struct device *dev = i2c_dev->base_dev.dev;
+	int ret;
+
+	ret = parse_otp_setting(i2c_dev, LWIS_DT_I2C_OTP_SETTINGS, &i2c_dev->i2c_otp_config);
+	if (ret) {
+		dev_err(dev, "Error parsing i2c otp settings: %d\n", ret);
+		return ret;
+	}
+
+	ret = parse_otp_settle_time_us(i2c_dev, LWIS_DT_I2C_OTP_SETTLE_TIME,
+				       &i2c_dev->i2c_otp_config);
+	if (ret) {
+		dev_err(i2c_dev->base_dev.dev, "Error parsing i2c otp settle time\n");
+		return ret;
+	}
+
+	ret = parse_otp_setting(i2c_dev, LWIS_DT_I3C_OTP_SETTINGS, &i2c_dev->i3c_otp_config);
+	if (ret) {
+		dev_err(dev, "Error parsing i3c otp settings: %d\n", ret);
+		return ret;
+	}
+
+	ret = parse_otp_settle_time_us(i2c_dev, LWIS_DT_I3C_OTP_SETTLE_TIME,
+				       &i2c_dev->i3c_otp_config);
+	if (ret) {
+		dev_err(i2c_dev->base_dev.dev, "Error parsing i3c otp settle time\n");
+		return ret;
+	}
+
+	ret = of_property_read_u32(i2c_dev->base_dev.k_dev->of_node, "i3c-dcr", &i2c_dev->dcr);
+	if (ret) {
+		dev_err(i2c_dev->base_dev.dev, "Failed to read i3c-dcr\n");
+		return ret;
+	}
+
+	parse_i3c_ibi_config(i2c_dev);
+	parse_i3c_mode(i2c_dev);
 
 	return 0;
 }
@@ -1422,6 +1386,7 @@ int lwis_ioreg_device_parse_dt(struct lwis_ioreg_device *ioreg_dev)
 
 	parse_ioreg_device_priority(ioreg_dev);
 	parse_ioreg_device_group(ioreg_dev);
+	parse_ioreg_valid_range(ioreg_dev);
 
 	return 0;
 
@@ -1430,6 +1395,61 @@ error_ioreg:
 		lwis_ioreg_put_by_idx(ioreg_dev, i);
 	lwis_ioreg_list_free(ioreg_dev);
 	return ret;
+}
+
+int lwis_slc_device_parse_dt(struct lwis_slc_device *slc_dev)
+{
+	struct lwis_device *lwis_dev = NULL;
+	struct device_node *node = NULL;
+	int num_pt_id = 0;
+	int num_pt_size = 0;
+	int i;
+	size_t pt_size_kb[MAX_NUM_PT] = {};
+
+	if (!slc_dev) {
+		pr_err("SLC device cannot be NULL\n");
+		return -ENODEV;
+	}
+	lwis_dev = &slc_dev->io_dev.base_dev;
+	node = lwis_dev->k_dev->of_node;
+
+	num_pt_id = of_property_count_strings(node, "pt_id");
+	num_pt_size = of_property_count_u32_elems(node, "pt_size");
+	if (num_pt_id != num_pt_size) {
+		dev_err(lwis_dev->dev,
+			"Mismatch partition names and sizes: %d partition names VS %d partition sizes",
+			num_pt_id, num_pt_size);
+		return -EINVAL;
+	}
+	if (num_pt_id > MAX_NUM_PT) {
+		dev_err(lwis_dev->dev,
+			"The number of partitions in slc device is %d, exceeds the max value %d",
+			num_pt_id, MAX_NUM_PT);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < num_pt_id; i++) {
+		/*
+		 * Make sure pt_size are in ascending order, since it's required by the
+		 * allocation logic.
+		 */
+		of_property_read_u32_index(node, "pt_size", i, (u32 *)&pt_size_kb[i]);
+		if (i > 0 && pt_size_kb[i] < pt_size_kb[i - 1]) {
+			dev_err(lwis_dev->dev, "SLC partition sizes are not in ascending order!");
+			return -EINVAL;
+		}
+	}
+
+	slc_dev->num_pt = num_pt_id;
+	for (i = 0; i < slc_dev->num_pt; i++) {
+		slc_dev->pt[i].id = i;
+		slc_dev->pt[i].size_kb = pt_size_kb[i];
+		slc_dev->pt[i].fd = -1;
+		slc_dev->pt[i].partition_id = lwis_platform_get_default_pt_id();
+		slc_dev->pt[i].partition_handle = NULL;
+	}
+
+	return 0;
 }
 
 int lwis_top_device_parse_dt(struct lwis_top_device *top_dev)

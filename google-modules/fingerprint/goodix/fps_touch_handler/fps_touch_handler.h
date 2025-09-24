@@ -24,9 +24,6 @@
 #define FTH_MAX_FD_EVENTS 128
 
 #define FTH_MAX_FINGERS 10
-
-#define FTH_LPTW_FINGER_SLOT -1
-
 /*
  * enum fth_finger_events -
  *      enumeration of fth finger events

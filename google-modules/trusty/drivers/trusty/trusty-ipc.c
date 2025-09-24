@@ -704,8 +704,9 @@ static int tipc_shared_handle_drop(struct tipc_shared_handle *shared_handle)
 	}
 
 	if (shared_handle->sgt)
-		dma_buf_unmap_attachment(shared_handle->attach,
-					 shared_handle->sgt, DMA_BIDIRECTIONAL);
+		dma_buf_unmap_attachment_unlocked(shared_handle->attach,
+						  shared_handle->sgt,
+						  DMA_BIDIRECTIONAL);
 	if (shared_handle->attach)
 		dma_buf_detach(shared_handle->dma_buf, shared_handle->attach);
 	if (shared_handle->dma_buf)
@@ -1254,8 +1255,8 @@ static int dn_share_fd(struct tipc_dn_chan *dn, int fd,
 		goto cleanup_handle;
 	}
 
-	shared_handle->sgt = dma_buf_map_attachment(shared_handle->attach,
-						    DMA_BIDIRECTIONAL);
+	shared_handle->sgt = dma_buf_map_attachment_unlocked(
+		shared_handle->attach, DMA_BIDIRECTIONAL);
 	if (IS_ERR(shared_handle->sgt)) {
 		ret = PTR_ERR(shared_handle->sgt);
 		shared_handle->sgt = NULL;
@@ -1392,6 +1393,7 @@ static long filp_send_ioctl(struct file *filp,
 		default:
 			dev_err(dev, "Unknown transfer type: 0x%x\n",
 				shm[shm_idx].transfer);
+			ret = -EINVAL;
 			goto shm_share_failed;
 		}
 		ret = dn_share_fd(dn, shm[shm_idx].fd, shm[shm_idx].transfer,
@@ -2272,7 +2274,7 @@ static int __init tipc_init(void)
 	}
 
 	tipc_major = MAJOR(dev);
-	tipc_class = class_create(THIS_MODULE, KBUILD_MODNAME);
+	tipc_class = class_create(KBUILD_MODNAME);
 	if (IS_ERR(tipc_class)) {
 		ret = PTR_ERR(tipc_class);
 		pr_err("%s: class_create failed: %d\n", __func__, ret);

@@ -36,9 +36,12 @@ static int lwis_ioreg_register_io_barrier(struct lwis_device *lwis_dev, bool rea
 
 static struct lwis_device_subclass_operations ioreg_vops = {
 	.register_io = lwis_ioreg_register_io,
+	.batch_register_io = NULL,
 	.register_io_barrier = lwis_ioreg_register_io_barrier,
 	.device_enable = lwis_ioreg_device_enable,
 	.device_disable = lwis_ioreg_device_disable,
+	.device_resume = NULL,
+	.device_suspend = NULL,
 	.event_enable = NULL,
 	.event_flags_updated = NULL,
 	.close = NULL,
@@ -124,6 +127,7 @@ static int lwis_ioreg_device_probe(struct platform_device *plat_dev)
 	 * valid group, then associate this device with the appropriate IOREG manager.
 	 */
 	if (ioreg_dev->device_group == LWIS_DEFAULT_DEVICE_GROUP) {
+		ioreg_dev->base_dev.bus_manager = NULL;
 		ret = lwis_create_kthread_workers(&ioreg_dev->base_dev);
 		if (ret) {
 			lwis_base_unprobe(&ioreg_dev->base_dev);
@@ -140,7 +144,7 @@ static int lwis_ioreg_device_probe(struct platform_device *plat_dev)
 			}
 		}
 		dev_dbg(ioreg_dev->base_dev.dev, "Created worker thread successfully for %s\n",
-			 ioreg_dev->base_dev.name);
+			ioreg_dev->base_dev.name);
 	} else {
 		ret = lwis_bus_manager_create(&ioreg_dev->base_dev);
 		if (ret) {
@@ -154,13 +158,13 @@ static int lwis_ioreg_device_probe(struct platform_device *plat_dev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 static int lwis_ioreg_device_suspend(struct device *dev)
 {
 	struct lwis_device *lwis_dev = dev_get_drvdata(dev);
 
 	if (lwis_dev->enabled != 0) {
-		dev_warn(lwis_dev->dev, "Can't suspend because %s is in use!\n", lwis_dev->name);
+		dev_warn(lwis_dev->dev, "Can't suspend %s in use\n", lwis_dev->name);
 		return -EBUSY;
 	}
 
@@ -189,7 +193,9 @@ static struct platform_driver lwis_driver = {
 			.name = LWIS_DRIVER_NAME,
 			.owner = THIS_MODULE,
 			.of_match_table = lwis_id_match,
+#if IS_ENABLED(CONFIG_PM)
 			.pm = &lwis_ioreg_device_ops,
+#endif
 		},
 };
 #else /* CONFIG_OF not defined */
@@ -231,4 +237,15 @@ int lwis_ioreg_device_deinit(void)
 {
 	platform_driver_unregister(&lwis_driver);
 	return 0;
+}
+
+void lwis_ioreg_device_valid_range_list_print(struct lwis_ioreg_device *ioreg_dev)
+{
+	for (int i = 0; i < ioreg_dev->reg_valid_range_list.count; ++i) {
+		dev_info(ioreg_dev->base_dev.dev,
+			 "range list index %d: block_id: %#x, start_addr %#x, size %#x\n", i,
+			 ioreg_dev->reg_valid_range_list.ranges[i].block_id,
+			 ioreg_dev->reg_valid_range_list.ranges[i].start_addr,
+			 ioreg_dev->reg_valid_range_list.ranges[i].size);
+	}
 }

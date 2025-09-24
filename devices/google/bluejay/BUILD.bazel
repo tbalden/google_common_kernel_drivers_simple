@@ -35,7 +35,7 @@ device_build(
         "//private/google-modules/radio/samsung/s5300:cpif.dit",
         "//private/google-modules/touch/common:touch.common",
         "//private/google-modules/touch/fts/ftm5_legacy:ftm5",
-        "//private/google-modules/wlan/bcm4389:bcmdhd4389",
+        "//private/google-modules/wlan/bcmdhd/bcm4389:bcmdhd4389",
     ],
     insmod_cfgs = glob(["insmod_cfg/*.cfg"]),
     kconfig_exts = ["Kconfig.ext.bluejay"],

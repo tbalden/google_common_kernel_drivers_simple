@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
-source "$(KCONFIG_SOC_GS_PREFIX)drivers/block/zram/Kconfig"
-
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/bts/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/clk/gs/Kconfig"
@@ -50,6 +48,8 @@ source "$(KCONFIG_SOC_GS_PREFIX)drivers/rtc/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/Kconfig"
 
+source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/gsa/Kconfig"
+
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/spi/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/thermal/Kconfig"
@@ -65,6 +65,12 @@ source "$(KCONFIG_SOC_GS_PREFIX)drivers/video/Kconfig"
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/video/backlight/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/watchdog/Kconfig"
+
+source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/aoc/Kconfig"
+
+source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/aoc/alsa/Kconfig"
+
+source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/aoc/usb/Kconfig"
 
 source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/bms/misc/Kconfig"
 

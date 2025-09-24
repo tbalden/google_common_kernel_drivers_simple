@@ -25,8 +25,8 @@
 #include <net/xfrm.h>
 #if IS_ENABLED(CONFIG_ECT)
 #include <soc/google/ect_parser.h>
-#endif
 #include <soc/google/cal-if.h>
+#endif
 #include <soc/google/modem_notifier.h>
 #include <linux/soc/samsung/exynos-smc.h>
 #include <trace/events/napi.h>
@@ -43,6 +43,9 @@
 #include "dit.h"
 #endif
 #include "direct_dm.h"
+#if IS_ENABLED(CONFIG_METRICS_COLLECTION_FRAMEWORK)
+#include "metrics_collection.h"
+#endif /* CONFIG_METRICS_COLLECTION_FRAMEWORK */
 
 #define MIF_TX_QUOTA 64
 
@@ -1180,6 +1183,9 @@ static enum hrtimer_restart pktproc_tx_timer_func(struct hrtimer *timer)
 	unsigned long flags;
 	unsigned int count;
 	int ret, i;
+
+	if (mc->device_suspended)
+		return HRTIMER_NORESTART;
 
 	for (i = 0; i < ppa_ul->num_queue; i++) {
 		struct pktproc_queue_ul *q = ppa_ul->q[i];
@@ -2785,7 +2791,11 @@ static void pcie_send_ap2cp_irq(struct mem_link_device *mld, u16 mask)
 		mif_info_limited("Reserve doorbell interrupt: PCI not powered on\n");
 		set_ctrl_msg(&mld->ap2cp_msg, mask);
 		mc->reserve_doorbell_int = true;
+#if IS_ENABLED(CONFIG_SOC_LGA)
+		queue_work(mc->ap2cp_wakeup_wq, &mc->ap2cp_wakeup_work);
+#else
 		s5100_try_gpio_cp_wakeup(mc);
+#endif
 		goto exit;
 	}
 
@@ -2809,7 +2819,7 @@ static inline u16 pcie_read_ap2cp_irq(struct mem_link_device *mld)
 
 struct shmem_srinfo {
 	unsigned int size;
-	char buf[0];
+	char buf[];
 };
 
 /* not in use */
@@ -3408,7 +3418,7 @@ static ssize_t rx_int_count_store(struct device *dev,
 		mif_err("kstrtouint() failed, rc:%d\n", ret);
 	}
 
-	if (val == 0)
+	if (ret == 0 && val == 0)
 		modem->mld->rx_int_count = 0;
 	return count;
 }
@@ -3462,7 +3472,7 @@ static ssize_t rx_int_disabled_time_store(struct device *dev,
 		mif_err("kstrtouint() failed, rc:%d", ret);
 	}
 
-	if (val == 0)
+	if (ret == 0 && val == 0)
 		modem->mld->rx_int_disabled_time = 0;
 	return count;
 }
@@ -3519,6 +3529,21 @@ static struct attribute *wakeup_attrs[] = {
 static const struct attribute_group wakeup_group = {
 	.attrs = wakeup_attrs,
 };
+
+#if IS_ENABLED(CONFIG_METRICS_COLLECTION_FRAMEWORK)
+static int mcf_pull_modem_wakeup_ap_statistics(
+		struct mcf_modem_wakeup_ap_stats *data, void *priv)
+{
+	struct modem_data *modem = priv;
+	struct mem_link_device *mld = modem->mld;
+
+	data->counts[WAKEUP_SRC_ID_NETWORK] = atomic_read(&mld->net_wakeup_count);
+	data->counts[WAKEUP_SRC_ID_MISC] = atomic_read(&mld->misc_wakeup_count);
+
+	return 0;
+}
+#endif /* CONFIG_METRICS_COLLECTION_FRAMEWORK */
+
 #endif
 
 #if IS_ENABLED(CONFIG_CP_PKTPROC_CLAT)
@@ -4212,11 +4237,8 @@ struct link_device *create_link_device(struct platform_device *pdev, u32 link_ty
 	 * Alloc an instance of mem_link_device structure
 	 */
 	mld = kzalloc(sizeof(struct mem_link_device), GFP_KERNEL);
-	if (!mld) {
-		mif_err("%s<->%s: ERR! mld kzalloc fail\n",
-			modem->link_name, modem->name);
+	if (!mld)
 		return NULL;
-	}
 
 	/*
 	 * Retrieve modem-specific attributes value
@@ -4427,6 +4449,12 @@ struct link_device *create_link_device(struct platform_device *pdev, u32 link_ty
 #if defined(CPIF_WAKEPKT_SET_MARK)
 	if (sysfs_create_group(&pdev->dev.kobj, &wakeup_group))
 		mif_err("failed to create sysfs node for wakeup events\n");
+
+#if IS_ENABLED(CONFIG_METRICS_COLLECTION_FRAMEWORK)
+	if (mcf_register_modem_wakeup_ap(mcf_pull_modem_wakeup_ap_statistics, modem))
+		mif_err("failed to register wakeup events to mcf\n");
+#endif /* CONFIG_METRICS_COLLECTION_FRAMEWORK */
+
 #endif
 
 #if IS_ENABLED(CONFIG_CP_PKTPROC_CLAT)

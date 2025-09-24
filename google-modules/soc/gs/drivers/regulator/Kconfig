@@ -141,5 +141,20 @@ config REGULATOR_RT6160_GS
 	  The wide output range is from 2025mV to 5200mV and can be used on most
 	  common application scenario.
 
+config REGULATOR_S2DOS07X02_GS
+	tristate "Samsung S2DOS07X02 BuckBoost voltage regulator for some GS SoCs"
+	depends on I2C
+	help
+	  This adds support for the Samsung S2DOS07X02 voltage regulator via I2C
+	  bus. This driver file includes functions for reading and writing
+	  output voltage, and enabling/disabling the regulator.
+
+config REGULATOR_TPS628600_GS
+	tristate "TI TPS628600 BuckBoost voltage regulator for some GS SoCs"
+	depends on I2C
+	help
+	  This adds support for the TI TPS628600 voltage regulator via I2C bus.
+	  This driver file includes functions for reading and writing output
+	  voltage, and enabling/disabling the regulator.
 
 endif

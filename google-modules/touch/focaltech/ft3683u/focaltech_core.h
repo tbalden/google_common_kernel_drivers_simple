@@ -325,8 +325,6 @@ struct fts_ts_data {
 
     u8 work_mode;
 
-    u8 enable_fw_grip;
-    u8 enable_fw_palm;
     ktime_t isr_timestamp; /* Time that the event was first received from the
                         * touch IC, acquired during hard interrupt, in
                         * CLOCK_MONOTONIC */
@@ -349,6 +347,11 @@ struct fts_ts_data {
     u8 *mutual_data;
     uint16_t *self_water_data;
     uint16_t *self_normal_data;
+#if GOOGLE_REPORT_TIMESTAMP_MODE
+    u32 timestamp;
+    u32 raw_timestamp_sensing;
+    u64 timestamp_sensing;
+#endif // GOOGLE_REPORT_TIMESTAMP_MODE
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
     struct goog_touch_interface *gti;
 #endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
@@ -398,8 +401,8 @@ int fts_gesture_readdata(struct fts_ts_data *ts_data);
 
 int fts_write_reg_safe(u8 reg, u8 write_val);
 int fts_set_heatmap_mode(struct fts_ts_data *ts_data, u8 heatmap_mode);
-int fts_set_grip_mode(struct fts_ts_data *ts_datam, u8 grip_mode);
-int fts_set_palm_mode(struct fts_ts_data *ts_data, u8 palm_mode);
+int fts_set_grip_mode(struct fts_ts_data *ts_datam, bool en);
+int fts_set_palm_mode(struct fts_ts_data *ts_data, bool en);
 int fts_set_glove_mode(struct fts_ts_data *ts_data, bool en);
 int fts_set_continuous_mode(u8 mode);
 

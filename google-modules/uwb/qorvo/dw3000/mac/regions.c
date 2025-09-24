@@ -185,12 +185,10 @@ void mcps802154_region_xmit_done(struct mcps802154_llhw *llhw,
 {
 	struct mcps802154_local *local = llhw_to_local(llhw);
 
-	if (ok) {
+	if (ok)
 		ieee802154_xmit_complete(local->hw, skb, false);
-	} else {
-		ieee802154_wake_queue(local->hw);
-		dev_kfree_skb_any(skb);
-	}
+	else
+		ieee802154_xmit_error(local->hw, skb, IEEE802154_SYSTEM_ERROR);
 }
 EXPORT_SYMBOL_GPL(mcps802154_region_xmit_done);
 

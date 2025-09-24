@@ -32,6 +32,15 @@ config ZCOMP_EH
 	  Support Emerald Hill HW compressor. User should configure it via
 	  echo "lz77eh" > /sys/block/zramX/comp_algorithm
 
+config ZRAM_GS_VENDOR_HOOK
+	bool "Enable zram vendor hooks"
+	depends on ZRAM_GS
+	default n
+	help
+	  Enable the zram vendor hooks. It provides a set of hooks for vendor
+	  to implement their own logic. For example, vendor could implement
+	  their block device read/write page functions to improve performance.
+
 config ZRAM_GS_WRITEBACK
        bool "Write back incompressible or idle page to backing device"
        depends on ZRAM_GS

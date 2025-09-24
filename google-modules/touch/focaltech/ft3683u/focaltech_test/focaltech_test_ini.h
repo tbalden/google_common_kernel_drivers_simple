@@ -1,5 +1,5 @@
 /************************************************************************
-* Copyright (c) 2012-2020, Focaltech Systems (R)£¬All Rights Reserved.
+* Copyright (c) 2012-2020, Focaltech Systems (R)ï¿½ï¿½All Rights Reserved.
 *
 * File Name: focaltech_test_ini.h
 *
@@ -105,9 +105,10 @@ struct ini_data {
     "UniformityTest_Tx_Hole", "UniformityTest_Rx_Hole", "UniformityTest_MinMax_Hole", \
     "SCapCbTest_OFF_Min", "SCapCbTest_OFF_Max", "ScapCBTest_SetWaterproof_OFF", \
     "SCapCbTest_ON_Min", "SCapCbTest_ON_Max", "ScapCBTest_SetWaterproof_ON", \
-    "SCapRawDataTest_OFF_Min", "SCapRawDataTest_OFF_Max", "SCapRawDataTest_SetWaterproof_OFF", \
-    "SCapRawDataTest_ON_Min", "SCapRawDataTest_ON_Max", "SCapRawDataTest_SetWaterproof_ON", \
-    "WeakShortTest_CG", "WeakShortTest_CC", \
+    "SCapRawDataTest_OFF_Min", "SCapRawDataTest_OFF_Max", "SCapRawDataTest_OFF_Min_Ical", \
+    "SCapRawDataTest_OFF_Max_Ical", "SCapRawDataTest_SetWaterproof_OFF", "SCapRawDataTest_ON_Min", \
+    "SCapRawDataTest_ON_Max", "SCapRawDataTest_ON_Min_Ical", "SCapRawDataTest_ON_Max_Ical", \
+    "SCapRawDataTest_SetWaterproof_ON", "WeakShortTest_CG", "WeakShortTest_CC", \
     "PanelDifferTest_Min", "PanelDifferTest_Max", \
     "SCapCbTest_High_Min", "SCapCbTest_High_Max", "ScapCBTest_SetHighSensitivity", \
     "SCapRawDataTest_High_Min", "SCapRawDataTest_High_Max", "SCapRawDataTest_SetHighSensitivity", \

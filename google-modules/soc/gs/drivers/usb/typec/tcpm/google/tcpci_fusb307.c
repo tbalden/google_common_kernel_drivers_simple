@@ -311,12 +311,13 @@ static int fusb307_set_vbus(struct google_shim_tcpci *tcpci, struct google_shim_
 	return 0;
 }
 
-static int fusb307b_get_vbus_voltage_max_mv(struct i2c_client *tcpc_client)
+static int fusb307b_get_vbus_voltage_max_mv(struct device *dev)
 {
 	u16 raw;
-	struct fusb307b_plat *chip = i2c_get_clientdata(tcpc_client);
+	struct fusb307b_plat *chip;
 	int ret;
 
+	chip = i2c_get_clientdata(to_i2c_client(dev));
 	if (!chip->set_voltage_alarm)
 		return chip->vbus_mv;
 
@@ -327,10 +328,12 @@ static int fusb307b_get_vbus_voltage_max_mv(struct i2c_client *tcpc_client)
 	return raw * TCPC_VBUS_VOLTAGE_ALARM_HI_CFG - VBUS_HI_HEADROOM_MV;
 }
 
-static int fusb307b_set_vbus_voltage_max_mv(struct i2c_client *tcpc_client,
+static int fusb307b_set_vbus_voltage_max_mv(struct device *dev,
 					    unsigned int mv)
 {
-	struct fusb307b_plat *chip = i2c_get_clientdata(tcpc_client);
+	struct fusb307b_plat *chip;
+
+	chip = i2c_get_clientdata(to_i2c_client(dev));
 
 	chip->vbus_mv = mv;
 
@@ -353,11 +356,13 @@ static int fusb307b_set_vbus_voltage_max_mv(struct i2c_client *tcpc_client,
 	return 0;
 }
 
-static int fusb307b_get_vbus_voltage_mv(struct i2c_client *tcpc_client)
+static int fusb307b_get_vbus_voltage_mv(struct device *dev)
 {
 	u16 raw;
-	struct fusb307b_plat *chip = i2c_get_clientdata(tcpc_client);
+	struct fusb307b_plat *chip;
 	int ret;
+
+	chip = i2c_get_clientdata(to_i2c_client(dev));
 
 	/* TCPC_POWER_CTRL_VBUS_VOLT_MON enabled in init_regs */
 	ret = fusb307b_read16(chip, TCPC_VBUS_VOLTAGE, &raw);
@@ -570,11 +575,13 @@ static int fusb307b_usb_set_role(struct usb_role_switch *sw, enum usb_role role)
 	return 0;
 }
 
-static void fusb307b_set_port_data_capable(struct i2c_client *tcpc_client,
+static void fusb307b_set_port_data_capable(struct device *dev,
 					   enum power_supply_usb_type
 					   usb_type)
 {
-	struct fusb307b_plat *chip = i2c_get_clientdata(tcpc_client);
+	struct fusb307b_plat *chip;
+
+	chip = i2c_get_clientdata(to_i2c_client(dev));
 
 	switch (usb_type) {
 	case POWER_SUPPLY_USB_TYPE_SDP:
@@ -662,8 +669,7 @@ static void fusb307b_teardown_data_notifier(struct fusb307b_plat *chip)
 		usb_role_switch_unregister(chip->usb_sw);
 }
 
-static int fusb307b_probe(struct i2c_client *client,
-			  const struct i2c_device_id *i2c_id)
+static int fusb307b_probe(struct i2c_client *client)
 {
 	int ret;
 	struct fusb307b_plat *chip;
@@ -739,7 +745,7 @@ static int fusb307b_probe(struct i2c_client *client,
 	chip->psy_ops.tcpc_set_port_data_capable =
 		fusb307b_set_port_data_capable;
 
-	chip->usb_psy_data = usb_psy_setup(client, chip->log,
+	chip->usb_psy_data = usb_psy_setup(&client->dev, chip->log,
 					   &chip->psy_ops, chip, NULL);
 	if (IS_ERR_OR_NULL(chip->usb_psy_data)) {
 		dev_err(&client->dev, "USB psy failed to initialize");

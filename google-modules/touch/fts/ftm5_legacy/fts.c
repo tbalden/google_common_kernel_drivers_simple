@@ -52,6 +52,7 @@
 
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/consumer.h>
 
 #ifdef KERNEL_ABOVE_2_6_38
@@ -60,8 +61,8 @@
 
 #include <drm/drm_panel.h>
 #include <video/display_timing.h>
-#include <samsung/exynos_drm_connector.h>
-#include <samsung/panel/panel-samsung-drv.h>
+#include <exynos_drm_connector.h>
+#include <panel/panel-samsung-drv.h>
 
 #include "fts.h"
 #include "fts_lib/ftsCompensation.h"
@@ -4344,7 +4345,7 @@ static void fts_populate_mutual_channel(struct fts_ts_info *info,
 						x_val * max_y + y_val];
 
 				((uint16_t *)
-				 mutual_strength->data)[frame_index++] =
+				 mutual_strength->data_flex)[frame_index++] =
 				    heatmap_value;
 			}
 		}
@@ -4352,7 +4353,7 @@ static void fts_populate_mutual_channel(struct fts_ts_info *info,
 
 	if (data_type == MS_STRENGTH) {
 		fts_update_v4l2_mutual_strength(info, max_x, max_y,
-		    (int16_t *) mutual_strength->data);
+		    (int16_t *) mutual_strength->data_flex);
 	}
 
 	kfree(ms_frame.node_data);
@@ -4408,8 +4409,8 @@ static void fts_populate_self_channel(struct fts_ts_info *info,
 			rx_src = ss_frame.sense_data;
 		}
 		/* tx, rx data order is fixed in TouchOffloadData1d */
-		tx_dst = (uint16_t *)self_strength->data;
-		rx_dst = (uint16_t *)&self_strength->data[
+		tx_dst = (uint16_t *)self_strength->data_flex;
+		rx_dst = (uint16_t *)&self_strength->data_flex[
 					2 * self_strength->tx_size];
 
 		/* If the tx data is flipped, copy in left-to-right order */
@@ -6417,20 +6418,18 @@ static int parse_dt(struct device *dev, struct fts_hw_platform_data *bdata)
 	bdata->switch_gpio = of_get_named_gpio(np, "st,switch_gpio", 0);
 	dev_info(dev, "switch_gpio = %d\n", bdata->switch_gpio);
 
-	bdata->irq_gpio = of_get_named_gpio_flags(np, "st,irq-gpio", 0, NULL);
+	bdata->irq_gpio = of_get_named_gpio(np, "st,irq-gpio", 0);
 	dev_info(dev, "irq_gpio = %d\n", bdata->irq_gpio);
 
 	if (of_property_read_bool(np, "st,reset-gpio")) {
-		bdata->reset_gpio = of_get_named_gpio_flags(np,
-							    "st,reset-gpio", 0,
-							    NULL);
+		bdata->reset_gpio = of_get_named_gpio(np, "st,reset-gpio", 0);
 		dev_info(dev, "reset_gpio = %d\n", bdata->reset_gpio);
 	} else
 		bdata->reset_gpio = GPIO_NOT_DEFINED;
 
 	if (of_property_read_bool(np, "st,disp-rate-gpio")) {
 		bdata->disp_rate_gpio =
-		    of_get_named_gpio_flags(np, "st,disp-rate-gpio", 0, NULL);
+		    of_get_named_gpio(np, "st,disp-rate-gpio", 0);
 		dev_info(dev, "disp_rate_gpio = %d\n", bdata->disp_rate_gpio);
 	} else
 		bdata->disp_rate_gpio = GPIO_NOT_DEFINED;

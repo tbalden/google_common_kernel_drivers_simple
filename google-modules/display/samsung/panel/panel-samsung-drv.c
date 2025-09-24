@@ -13,7 +13,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
-#include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/sysfs.h>
@@ -276,8 +275,11 @@ static int exynos_panel_parse_gpios(struct exynos_panel *ctx)
 	if (IS_ERR(ctx->vddd_gpio))
 		ctx->vddd_gpio = NULL;
 
-	ctx->ready_signal.gpio = of_get_named_gpio_flags(dev->of_node, "rdy-gpios", 0,
-							 &ctx->ready_signal.gpio_flags);
+	ctx->ready_signal.gpio = devm_gpiod_get_optional(dev, "rdy", GPIOD_IN);
+	if (IS_ERR(ctx->ready_signal.gpio)) {
+		dev_err(dev, "failed to acquire rdy-gpios %ld\n", PTR_ERR(ctx->ready_signal.gpio));
+		return PTR_ERR(ctx->ready_signal.gpio);
+	}
 
 	dev_dbg(ctx->dev, "%s -\n", __func__);
 	return 0;
@@ -551,7 +553,6 @@ EXPORT_SYMBOL_GPL(exynos_panel_init);
 static int exynos_panel_wait_ready(struct exynos_panel *ctx)
 {
 	ktime_t start_time, end_time;
-	int rdy_active_val;
 	unsigned int timeout_ms;
 	bool panel_ready_detected = false;
 
@@ -565,13 +566,11 @@ static int exynos_panel_wait_ready(struct exynos_panel *ctx)
 	reinit_completion(&ctx->ready_signal.detected);
 	enable_irq(ctx->ready_signal.irq);
 
-	/* expected ready pin active value */
-	rdy_active_val = (ctx->ready_signal.gpio_flags & OF_GPIO_ACTIVE_LOW) == 0;
 	timeout_ms = (ctx->desc && ctx->desc->rdy_timeout_ms) ? ctx->desc->rdy_timeout_ms :
 								PANEL_READY_TIMEOUT_MS;
 
 	/* Check if the ready pin is already ready. If not just wait for the interrupt. */
-	if (gpio_get_value(ctx->ready_signal.gpio) == rdy_active_val ||
+	if (gpiod_get_value(ctx->ready_signal.gpio) ||
 	    wait_for_completion_timeout(&ctx->ready_signal.detected, msecs_to_jiffies(timeout_ms)) >
 		    0)
 		panel_ready_detected = true;
@@ -898,8 +897,8 @@ static int exynos_panel_register_irqs(struct exynos_panel *ctx)
 
 	/* 1: Panel ready */
 	init_completion(&ctx->ready_signal.detected);
-	if (gpio_is_valid(ctx->ready_signal.gpio)) {
-		ret = gpio_to_irq(ctx->ready_signal.gpio);
+	if (ctx->ready_signal.gpio) {
+		ret = gpiod_to_irq(ctx->ready_signal.gpio);
 		if (ret < 0) {
 			dev_err(ctx->dev, "Failed to get irq number for rdy_gpio: %d\n", ret);
 			return ret;
@@ -908,7 +907,7 @@ static int exynos_panel_register_irqs(struct exynos_panel *ctx)
 		irq = ret;
 		irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);
 		ret = devm_request_irq(ctx->dev, irq, panel_rdy_irq_handler,
-				       (ctx->ready_signal.gpio_flags & OF_GPIO_ACTIVE_LOW ?
+				       (gpiod_is_active_low(ctx->ready_signal.gpio) ?
 						IRQF_TRIGGER_FALLING :
 						IRQF_TRIGGER_RISING),
 				       pdev->name, ctx);
@@ -920,7 +919,7 @@ static int exynos_panel_register_irqs(struct exynos_panel *ctx)
 
 		ctx->ready_signal.irq = irq;
 		dev_info(ctx->dev, "Request rdy irq number(%d) okay (%sING_TRIGGER)\n", irq,
-			 (ctx->ready_signal.gpio_flags & OF_GPIO_ACTIVE_LOW ? "FALL" : "RIS"));
+			 (gpiod_is_active_low(ctx->ready_signal.gpio) ? "FALL" : "RIS"));
 	} else {
 		/* Panel doesn't have the ready pin */
 		ctx->ready_signal.irq = -ENOENT;
@@ -2612,7 +2611,7 @@ static void exynos_panel_set_atc_config(struct exynos_panel *ctx,
 	exynos_atc_update(decon->dqe, &exynos_crtc_state->dqe);
 }
 
-static void exynos_panel_commit_properties(
+static void exynos_panel_pre_commit_properties(
 				struct exynos_panel *ctx,
 				struct exynos_drm_connector_state *conn_state)
 {
@@ -2752,6 +2751,8 @@ static void exynos_panel_connector_atomic_pre_commit(
 {
 	struct exynos_panel *ctx = exynos_connector_to_panel(exynos_connector);
 
+	exynos_panel_pre_commit_properties(ctx, exynos_new_state);
+
 	mutex_lock(&ctx->mode_lock);
 	if (ctx->panel_update_idle_mode_pending)
 		panel_update_idle_mode_locked(ctx, false);
@@ -2769,9 +2770,6 @@ static void exynos_panel_connector_atomic_commit(
 
 	if (!exynos_panel_func)
 		return;
-
-	/* send mipi_sync commands at the time close to the expected present time */
-	exynos_panel_commit_properties(ctx, exynos_new_state);
 
 	mutex_lock(&ctx->mode_lock);
 	if (exynos_panel_func->commit_done && ctx->current_mode)

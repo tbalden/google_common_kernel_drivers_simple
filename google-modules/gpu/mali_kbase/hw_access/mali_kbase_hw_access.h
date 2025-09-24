@@ -23,7 +23,6 @@
 #define _MALI_KBASE_HW_ACCESS_H_
 
 #include <linux/version_compat_defs.h>
-#include <mali_kbase_io.h>
 
 #define KBASE_REGMAP_PERM_READ (1U << 0)
 #define KBASE_REGMAP_PERM_WRITE (1U << 1)
@@ -209,7 +208,7 @@ u32 kbase_regmap_backend_init(struct kbase_device *kbdev);
 void kbase_regmap_term(struct kbase_device *kbdev);
 
 /**
- * kbase_reg_poll32_timeout - Poll a 32 bit register with timeout or until GPU is lost
+ * kbase_reg_poll32_timeout - Poll a 32 bit register with timeout
  * @kbdev:             Kbase device pointer
  * @reg_enum:          Register enum
  * @val:               Variable for result of read
@@ -218,21 +217,15 @@ void kbase_regmap_term(struct kbase_device *kbdev);
  * @timeout_us:        Timeout (in uS)
  * @delay_before_read: If true delay for @delay_us before read
  *
- * Return: 0 if condition is met, otherwise a negative error code.
+ * Return: 0 if condition is met, -ETIMEDOUT if timed out.
  */
-#define kbase_reg_poll32_timeout(kbdev, reg_enum, val, cond, delay_us, timeout_us,                 \
-				 delay_before_read)                                                \
-	({                                                                                         \
-		int ret = mali_read_poll_timeout_atomic(kbase_reg_read32, val,                     \
-							((cond) || kbase_io_is_aw_removed(kbdev)), \
-							delay_us, timeout_us, delay_before_read,   \
-							kbdev, reg_enum);                          \
-		bool gpu_lost = kbase_io_is_aw_removed(kbdev);                                     \
-		gpu_lost ? -ENODEV : ret;                                                          \
-	})
+#define kbase_reg_poll32_timeout(kbdev, reg_enum, val, cond, delay_us, timeout_us,       \
+				 delay_before_read)                                      \
+	mali_read_poll_timeout_atomic(kbase_reg_read32, val, cond, delay_us, timeout_us, \
+				      delay_before_read, kbdev, reg_enum)
 
 /**
- * kbase_reg_poll64_timeout - Poll a 64 bit register with timeout or until GPU is lost
+ * kbase_reg_poll64_timeout - Poll a 64 bit register with timeout
  * @kbdev:             Kbase device pointer
  * @reg_enum:          Register enum
  * @val:               Variable for result of read
@@ -241,18 +234,12 @@ void kbase_regmap_term(struct kbase_device *kbdev);
  * @timeout_us:        Timeout (in uS)
  * @delay_before_read: If true delay for @delay_us before read
  *
- * Return: 0 if condition is met, otherwise a negative error code.
+ * Return: 0 if condition is met, -ETIMEDOUT if timed out.
  */
-#define kbase_reg_poll64_timeout(kbdev, reg_enum, val, cond, delay_us, timeout_us,                 \
-				 delay_before_read)                                                \
-	({                                                                                         \
-		int ret = mali_read_poll_timeout_atomic(kbase_reg_read64, val,                     \
-							((cond) || kbase_io_is_aw_removed(kbdev)), \
-							delay_us, timeout_us, delay_before_read,   \
-							kbdev, reg_enum);                          \
-		bool gpu_lost = kbase_io_is_aw_removed(kbdev);                                     \
-		gpu_lost ? -ENODEV : ret;                                                          \
-	})
+#define kbase_reg_poll64_timeout(kbdev, reg_enum, val, cond, delay_us, timeout_us,       \
+				 delay_before_read)                                      \
+	mali_read_poll_timeout_atomic(kbase_reg_read64, val, cond, delay_us, timeout_us, \
+				      delay_before_read, kbdev, reg_enum)
 
 /**
  * kbase_reg_gpu_irq_all - Return a mask for all GPU IRQ sources
@@ -270,7 +257,9 @@ static inline u32 kbase_reg_gpu_irq_all(bool is_legacy)
 	u32 mask = GPU_IRQ_REG_COMMON;
 
 	if (is_legacy) {
+#if MALI_USE_CSF
 		mask |= (RESET_COMPLETED | POWER_CHANGED_ALL);
+#endif /* MALI_USE_CSF */
 		/* Include POWER_CHANGED_SINGLE in debug builds for use in irq latency test. */
 		if (IS_ENABLED(CONFIG_MALI_DEBUG))
 			mask |= POWER_CHANGED_SINGLE;

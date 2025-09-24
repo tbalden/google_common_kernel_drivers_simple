@@ -22,6 +22,26 @@
 #include "aoc-interface.h"
 
 struct aoc_auth_header {
+	u32 image_format_version;
+	u8 root_signature[512];
+	u8 root_public_key[512];
+	u8 delegate_public_key[512];
+	u8 delegate_policy[96];
+	u8 delegate_signature[512];
+	struct {
+		u32 sw_image_id;
+		u32 sw_rollback_info;
+		u32 delegate_rollback_info;
+		u32 length;
+		u8 delegate_header_flags[40];
+		u8 body_hash[64];
+		u8 chip_id[20];
+		u8 auth_config[256];
+		u8 image_config[256];
+	} delegate_header;
+} __packed;
+
+struct aoc_auth_header_legacy {
 	u8 signature[512];
 	u8 key[512];
 	union {
@@ -95,6 +115,22 @@ struct aoc_image_config {
 	};
 };
 
+static bool is_legacy_auth_header_v1(const struct aoc_auth_header *header)
+{
+	const struct aoc_auth_header_legacy *legacy_header =
+		(const struct aoc_auth_header_legacy *)(header);
+	return (le32_to_cpu(legacy_header->header_v1.generation) == 1) &&
+			le32_to_cpu(legacy_header->header_v1.magic) == AOC_AUTH_HEADER_MAGIC_VALUE;
+}
+
+static bool is_legacy_auth_header_v2(const struct aoc_auth_header *header)
+{
+	const struct aoc_auth_header_legacy *legacy_header =
+		(const struct aoc_auth_header_legacy *)(header);
+	return (le32_to_cpu(legacy_header->header_v2.generation) == 2) &&
+		le32_to_cpu(legacy_header->header_v2.magic) == AOC_AUTH_HEADER_MAGIC_VALUE;
+}
+
 static u32 aoc_img_header_size(const struct firmware *fw)
 {
 	if(_aoc_fw_is_signed(fw))
@@ -111,6 +147,13 @@ static bool region_is_in_firmware(size_t start, size_t length,
 
 static const struct aoc_superbin_header *superbin_header(const struct firmware* fw) {
 	return (const struct aoc_superbin_header *)(fw->data + aoc_img_header_size(fw));
+}
+
+bool _aoc_fw_has_legacy_auth_header(const struct firmware *fw)
+{
+	const struct aoc_auth_header *header = (const struct aoc_auth_header *)(fw->data);
+
+	return is_legacy_auth_header_v1(header) || is_legacy_auth_header_v2(header);
 }
 
 bool _aoc_fw_is_valid(const struct firmware *fw)
@@ -163,17 +206,14 @@ bool _aoc_fw_is_release(const struct firmware *fw)
 u32 _aoc_fw_get_header_version(const struct firmware *fw)
 {
 	const struct aoc_auth_header *header = (const struct aoc_auth_header *)(fw->data);
-	if ((le32_to_cpu(header->header_v1.generation) == 1) &&
-			le32_to_cpu(header->header_v1.magic) == AOC_AUTH_HEADER_MAGIC_VALUE) {
+
+	if (is_legacy_auth_header_v1(header))
 		return 1;
-	}
 
-	if ((le32_to_cpu(header->header_v2.generation) == 2) &&
-		le32_to_cpu(header->header_v2.magic) == AOC_AUTH_HEADER_MAGIC_VALUE) {
+	if (is_legacy_auth_header_v2(header))
 		return 2;
-	}
 
-	return 0;
+	return header->image_format_version;
 }
 
 bool _aoc_fw_is_signed(const struct firmware *fw)
@@ -184,15 +224,22 @@ bool _aoc_fw_is_signed(const struct firmware *fw)
 struct aoc_image_config *_aoc_fw_image_config(const struct firmware *fw)
 {
 	const struct aoc_auth_header *header = (const struct aoc_auth_header *)(fw->data);
-	u32 header_version = _aoc_fw_get_header_version(fw);
+	u32 header_version;
 
-	switch (header_version) {
-	case 1:
-		return (struct aoc_image_config *)&header->header_v1.image_config;
-	case 2:
-		return (struct aoc_image_config *)&header->header_v2.image_config;
-	default:
-		return (struct aoc_image_config *)&header->header_v1.image_config;
+	if (_aoc_fw_has_legacy_auth_header(fw)) {
+		const struct aoc_auth_header_legacy *legacy_header =
+			(const struct aoc_auth_header_legacy *)(header);
+		header_version = _aoc_fw_get_header_version(fw);
+		switch (header_version) {
+		case 1:
+			return (struct aoc_image_config *)&legacy_header->header_v1.image_config;
+		case 2:
+			return (struct aoc_image_config *)&legacy_header->header_v2.image_config;
+		default:
+			return (struct aoc_image_config *)&legacy_header->header_v1.image_config;
+		}
+	} else {
+		return (struct aoc_image_config *)&header->delegate_header.image_config;
 	}
 }
 

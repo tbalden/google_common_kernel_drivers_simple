@@ -184,10 +184,11 @@ void fts_tp_state_recovery(struct fts_ts_data *ts_data)
 int fts_reset_proc(int hdelayms)
 {
     FTS_DEBUG("tp reset");
-    
+
+    /* Notify FW to discharge before reset to prevent power from VDD6 to flow into AVDD */
     fts_write_reg(0xB6, 1);
     msleep(20);
-    
+
     gpio_direction_output(fts_data->pdata->reset_gpio, 0);
     /* The minimum reset duration is 1 ms. */
     msleep(1);
@@ -900,20 +901,38 @@ static void fts_update_setting_status(struct fts_ts_data *data,
 {
     bool changed = false;
     struct fw_status_ts *current_status = &data->current_host_status;
+#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+    struct gti_fw_status_data gti_status_data = { 0 };
+#endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 
     if (current_status->B0_b3_water_state != new_status->B0_b3_water_state) {
       current_status->B0_b3_water_state = new_status->B0_b3_water_state;
       changed = true;
+#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+      goog_notify_fw_status_changed(data->gti,
+          current_status->B0_b3_water_state ? GTI_FW_STATUS_WATER_ENTER : GTI_FW_STATUS_WATER_EXIT,
+          &gti_status_data);
+#endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
     }
 
     if (current_status->B0_b4_grip_status != new_status->B0_b4_grip_status) {
       current_status->B0_b4_grip_status = new_status->B0_b4_grip_status;
       changed = true;
+#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+      goog_notify_fw_status_changed(data->gti,
+          current_status->B0_b4_grip_status ? GTI_FW_STATUS_GRIP_ENTER : GTI_FW_STATUS_GRIP_EXIT,
+          &gti_status_data);
+#endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
     }
 
     if (current_status->B0_b5_palm_status != new_status->B0_b5_palm_status) {
       current_status->B0_b5_palm_status = new_status->B0_b5_palm_status;
       changed = true;
+#if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+      goog_notify_fw_status_changed(data->gti,
+          current_status->B0_b5_palm_status ? GTI_FW_STATUS_PALM_ENTER : GTI_FW_STATUS_PALM_EXIT,
+          &gti_status_data);
+#endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
     }
 
     if (current_status->B2_b3_v_sync_status != new_status->B2_b3_v_sync_status) {
@@ -1138,6 +1157,10 @@ static int fts_read_parse_touchdata(struct fts_ts_data *data)
 			}
 			break;
 	}
+
+#if GOOGLE_REPORT_TIMESTAMP_MODE
+    data->timestamp = (u32)((buf[84] << 24) + (buf[85] << 16) + (buf[86] << 8) + buf[87]);
+#endif // GOOGLE_REPORT_TIMESTAMP_MODE
 
     if (data->touch_point == 0) {
         FTS_INFO("no touch point information(%02x)", buf[1]);
@@ -2147,8 +2170,6 @@ static int fts_ts_probe_entry(struct fts_ts_data *ts_data)
     memset(ts_data->current_host_status.data, 0, sizeof(struct fw_status_ts));
 #endif
 
-    ts_data->enable_fw_grip = FW_GRIP_ENABLE;
-    ts_data->enable_fw_palm = FW_GRIP_ENABLE;
     ts_data->glove_mode = DISABLE;
     fts_update_feature_setting(ts_data);
 
@@ -2438,32 +2459,28 @@ int fts_set_heatmap_mode(struct fts_ts_data *ts_data, u8 heatmap_mode)
     return ret;
 }
 
-int fts_set_grip_mode(struct fts_ts_data *ts_data, u8 grip_mode)
+int fts_set_grip_mode(struct fts_ts_data *ts_data, bool en)
 {
     int ret = 0;
-    bool en = grip_mode % 2;
-    u8 value = en ? 0x01 : 0xAA;
+    u8 value = en ? 0x00 : 0xAA;
     u8 reg = FTS_REG_EDGE_MODE_EN;
 
     ret = fts_write_reg_safe(reg, value);
 
-    FTS_DEBUG("%s fw_grip(%d) %s.\n", en ? "Enable" : "Disable",
-        ts_data->enable_fw_grip,
+    FTS_DEBUG("%s fw_grip %s.\n", en ? "Enable" : "Disable",
         (ret == 0)  ? "successfully" : "unsuccessfully");
     return ret;
 }
 
-int fts_set_palm_mode(struct fts_ts_data *ts_data, u8 palm_mode)
+int fts_set_palm_mode(struct fts_ts_data *ts_data, bool en)
 {
     int ret = 0;
-    bool en = palm_mode % 2;
     u8 value = en ? ENABLE : DISABLE;
     u8 reg = FTS_REG_PALM_EN;
 
     ret = fts_write_reg_safe(reg, value);
 
-    FTS_DEBUG("%s fw_palm(%d) %s.\n", en ? "Enable" : "Disable",
-        ts_data->enable_fw_palm,
+    FTS_DEBUG("%s fw_palm %s.\n", en ? "Enable" : "Disable",
         (ret == 0) ? "successfully" : "unsuccessfully");
     return ret;
 }
@@ -2538,6 +2555,9 @@ void fts_update_feature_setting(struct fts_ts_data *ts_data)
 
     goog_notify_fw_status_changed(ts_data->gti, GTI_FW_STATUS_RESET, &gti_status_data);
 #endif /* IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE) */
+#if GOOGLE_REPORT_TIMESTAMP_MODE
+    ts_data->raw_timestamp_sensing = 0;
+#endif // GOOGLE_REPORT_TIMESTAMP_MODE
 
     fts_set_irq_report_onoff(ENABLE);
 }

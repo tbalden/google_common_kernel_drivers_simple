@@ -1566,7 +1566,7 @@ struct exynos_dqe *exynos_dqe_register(struct decon_device *decon)
 	dqe_name_heap = kstrdup(dqe_name, GFP_KERNEL);
 	if (!dqe_name_heap)
 		return NULL;
-	dqe->dqe_class = class_create(THIS_MODULE, dqe_name_heap);
+	dqe->dqe_class = class_create(dqe_name_heap);
 	if (IS_ERR(dqe->dqe_class)) {
 		pr_err("failed to create dqe class\n");
 		return NULL;

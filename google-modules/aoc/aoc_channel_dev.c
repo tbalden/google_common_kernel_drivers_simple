@@ -357,7 +357,7 @@ static struct aocc_device_entry *aocc_device_entry_for_inode(struct inode *inode
 	return NULL;
 }
 
-static char *aocc_devnode(struct device *dev, umode_t *mode)
+static char *aocc_devnode(const struct device *dev, umode_t *mode)
 {
 	if (!mode || !dev)
 		return NULL;
@@ -581,6 +581,8 @@ static ssize_t aocc_read(struct file *file, char __user *buf, size_t count,
 	mutex_lock(&private->pending_msg_lock);
 	node = list_first_entry_or_null(&private->pending_aoc_messages,
 					struct aoc_message_node, msg_list);
+	if (node)
+		list_del(&node->msg_list);
 	mutex_unlock(&private->pending_msg_lock);
 
 	if (!node) {
@@ -602,7 +604,6 @@ static ssize_t aocc_read(struct file *file, char __user *buf, size_t count,
 	retval = node->msg_size - retval;
 
 	mutex_lock(&private->pending_msg_lock);
-	list_del(&node->msg_list);
 	atomic_dec(&private->pending_msg_count);
 	if (atomic_read(&private->pending_msg_count) <
 	    aocc_block_channel_threshold && private->is_channel_blocked) {
@@ -913,7 +914,7 @@ static int __init aocc_init(void)
 
 	aocc_major_dev = MKDEV(aocc_major, 0);
 
-	aocc_class = class_create(THIS_MODULE, AOCC_CHARDEV_NAME);
+	aocc_class = class_create(AOCC_CHARDEV_NAME);
 	if (!aocc_class) {
 		pr_err("Failed to create class\n");
 		goto fail;
@@ -941,4 +942,5 @@ static void __exit aocc_exit(void)
 module_init(aocc_init);
 module_exit(aocc_exit);
 
+MODULE_DESCRIPTION("Google AOC channel driver");
 MODULE_LICENSE("GPL v2");

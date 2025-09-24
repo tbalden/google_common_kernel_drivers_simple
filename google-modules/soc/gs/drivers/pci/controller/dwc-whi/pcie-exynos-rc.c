@@ -2012,7 +2012,7 @@ static int exynos_pcie_rc_get_pin_state(struct platform_device *pdev,
 	struct device_node *np = dev->of_node;
 	int ret;
 
-	exynos_pcie->perst_gpio = of_get_gpio(np, 0);
+	exynos_pcie->perst_gpio = of_get_named_gpio(np, "gpios", 0);
 	if (exynos_pcie->perst_gpio < 0) {
 		dev_err(&pdev->dev, "cannot get perst_gpio\n");
 	} else {

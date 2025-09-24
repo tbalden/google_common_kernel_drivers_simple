@@ -167,6 +167,18 @@ static int fts_fwupg_reset_to_boot(struct fts_upgrade *upg)
 
     msleep(FTS_DELAY_UPGRADE_RESET);
 
+    /* For SPI 20M, it need the bootloader preout function, that speed up
+     * the data in the waveform and avoid the data not being ready
+     * before the CLK rising edge.
+     */
+    FTS_INFO("enable bootloader preout function");
+    reg = FTS_REG_BOOTLOADER_PREOUT;
+
+    ret = fts_write_reg(reg, FTS_BOOTLOADER_PREOUT_A0);
+    if (ret < 0) {
+      FTS_ERROR("enable bootloader preout fail, ret=%d", ret);
+    }
+
     return 0;
 }
 

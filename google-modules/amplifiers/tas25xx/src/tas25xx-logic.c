@@ -1028,7 +1028,7 @@ static int tas_smartamp_add_sysfs(struct tas25xx_priv *p_tas25xx)
 	struct linux_platform *plat_data =
 		(struct linux_platform *) p_tas25xx->platform_data;
 
-	class = class_create(THIS_MODULE, "tas25xx_dev");
+	class = class_create("tas25xx_dev");
 	if (IS_ERR(class)) {
 		ret = PTR_ERR(class);
 		dev_err(plat_data->dev,

@@ -8,7 +8,7 @@
 
 #define pr_fmt(fmt) "pixel-em: " fmt
 
-#include <linux/arch_topology.h>
+#include <linux/sched/topology.h>
 #include <linux/bitops.h>
 #include <linux/cpufreq.h>
 #include <linux/cpumask.h>
@@ -44,15 +44,61 @@ extern void reset_scaling_freq(int cpu);
 extern struct pixel_em_profile **exynos_cpu_cooling_pixel_em_profile;
 #endif
 
+#if IS_ENABLED(CONFIG_VH_SCHED)
 extern int pixel_cpu_num;
 extern int pixel_cluster_num;
 extern int *pixel_cluster_start_cpu;
 extern bool pixel_cpu_init;
 
+static int init_pixel_cpu(void)
+{
+	if (!pixel_cpu_init)
+		return -EPROBE_DEFER;
+	return 0;
+}
+#else
+static int pixel_cpu_num;
+static int pixel_cluster_num;
+static int *pixel_cluster_start_cpu;
+
+static int init_pixel_cpu(void)
+{
+	int i = 0, j = 0;
+	unsigned long cur_capacity = 0;
+
+	pixel_cluster_num = 0;
+
+	pixel_cpu_num = cpumask_weight(cpu_possible_mask);
+	if (!pixel_cpu_num)
+		return -EPROBE_DEFER;
+
+	for_each_possible_cpu(i) {
+		if (arch_scale_cpu_capacity(i) > cur_capacity) {
+			cur_capacity = arch_scale_cpu_capacity(i);
+			pixel_cluster_num++;
+		}
+	}
+
+	pixel_cluster_start_cpu = kcalloc(pixel_cluster_num, sizeof(int), GFP_KERNEL);
+	if (!pixel_cluster_start_cpu)
+		return -ENOMEM;
+
+	cur_capacity = 0;
+	for_each_possible_cpu(i) {
+		if (arch_scale_cpu_capacity(i) > cur_capacity) {
+			pixel_cluster_start_cpu[j++] = i;
+			cur_capacity = arch_scale_cpu_capacity(i);
+		}
+	}
+
+	return 0;
+}
+#endif /* CONFIG_VH_SCHED */
+
 static struct mutex profile_list_lock;
 static LIST_HEAD(profile_list);
 static struct pixel_em_profile *active_profile;
-static struct pixel_idle_em *idle_profile;
+static struct pixel_idle_em *idle_profile __maybe_unused;
 
 static struct mutex sysfs_lock; // Synchronize sysfs calls.
 static struct kobject *primary_sysfs_folder;
@@ -71,10 +117,11 @@ static void pixel_em_free_idle(struct pixel_idle_em *);
 
 static int pixel_em_init_cpu_layout(void)
 {
-	int i;
+	int i, ret;
 
-	if (!pixel_cpu_init)
-		return -EPROBE_DEFER;
+	ret = init_pixel_cpu();
+	if (ret)
+		return ret;
 
 	for (i = 0; i < pixel_cluster_num; i++) {
 		struct em_perf_domain *pd = em_cpu_get(pixel_cluster_start_cpu[i]);
@@ -195,7 +242,9 @@ static void apply_profile(struct pixel_em_profile *profile)
 			pr_err("Could not find cpufreq policy for CPU %d!\n", cpu);
 		}
 
+#if IS_ENABLED(CONFIG_VH_SCHED)
 		update_thermal_freq_cap(cpu);
+#endif
 	}
 }
 
@@ -790,10 +839,11 @@ early_return:
 
 static bool generate_em_cluster(struct pixel_em_cluster *dst, struct em_perf_domain *pd)
 {
-    int first_cpu = cpumask_first(em_span_cpus(pd));
-    int cpu_scale = topology_get_cpu_scale(first_cpu);
+	int first_cpu = cpumask_first(em_span_cpus(pd));
+	int cpu_scale = topology_get_cpu_scale(first_cpu);
 	int max_freq_index = pd->nr_perf_states - 1;
-	unsigned long max_freq = pd->table[max_freq_index].frequency;
+	unsigned long max_freq;
+	struct em_perf_state *table;
 	int opp_id;
 
 	cpumask_copy(&dst->cpus, em_span_cpus(pd));
@@ -814,13 +864,17 @@ static bool generate_em_cluster(struct pixel_em_cluster *dst, struct em_perf_dom
 	if (!dst->opps)
 		return false;
 
+	rcu_read_lock();
+	table = em_perf_state_from_pd(pd);
+	max_freq = table[max_freq_index].frequency;
 	for (opp_id = 0; opp_id < pd->nr_perf_states; opp_id++) {
-		dst->opps[opp_id].freq = pd->table[opp_id].frequency;
-		dst->opps[opp_id].power = pd->table[opp_id].power;
+		dst->opps[opp_id].freq = table[opp_id].frequency;
+		dst->opps[opp_id].power = table[opp_id].power;
 		dst->opps[opp_id].capacity = (dst->opps[opp_id].freq * cpu_scale) / max_freq;
-		dst->opps[opp_id].cost = pd->table[opp_id].power / dst->opps[opp_id].capacity;
+		dst->opps[opp_id].cost = table[opp_id].power / dst->opps[opp_id].capacity;
 		update_inefficient_prev_opp(dst->opps, opp_id);
 	}
+	rcu_read_unlock();
 
 	return true;
 }
@@ -869,8 +923,11 @@ static struct pixel_em_profile *generate_default_em_profile(const char *name)
 	while (!cpumask_empty(&unmatched_cpus)) {
 		int first_cpu = cpumask_first(&unmatched_cpus);
 		struct em_perf_domain *pd = em_cpu_get(first_cpu);
-		// pd is guaranteed not to be NULL, as pixel_em_count_clusters completed earlier.
 		int pd_cpu;
+		/* pd is guaranteed not to be NULL, as pixel_em_init_cpu_layout
+		 * completed earlier.
+		 */
+		WARN_ON(pd == NULL);
 
 		if (!generate_em_cluster(&res->clusters[current_cluster_id], pd)) {
 			do {
@@ -911,6 +968,7 @@ failed_res_allocation:
 
 static bool generate_idle_em_cluster(struct pixel_em_cluster *dst, struct em_perf_domain *pd)
 {
+	struct em_perf_state *table;
 	int opp_id;
 
 	cpumask_copy(&dst->cpus, em_span_cpus(pd));
@@ -921,10 +979,13 @@ static bool generate_idle_em_cluster(struct pixel_em_cluster *dst, struct em_per
 	if (!dst->idle_opps)
 		return false;
 
+	rcu_read_lock();
+	table = em_perf_state_from_pd(pd);
 	for (opp_id = 0; opp_id < pd->nr_perf_states; opp_id++) {
-		dst->idle_opps[opp_id].freq = pd->table[opp_id].frequency;
+		dst->idle_opps[opp_id].freq = table[opp_id].frequency;
 		dst->idle_opps[opp_id].energy = 0;
 	}
+	rcu_read_unlock();
 
 	return true;
 }
@@ -961,8 +1022,11 @@ static struct pixel_idle_em *generate_idle_em(void)
 	while (!cpumask_empty(&unmatched_cpus)) {
 		int first_cpu = cpumask_first(&unmatched_cpus);
 		struct em_perf_domain *pd = em_cpu_get(first_cpu);
-		// pd is guaranteed not to be NULL, as pixel_em_count_clusters completed earlier.
 		int pd_cpu;
+		/* pd is guaranteed not to be NULL, as pixel_em_init_cpu_layout
+		 * completed earlier.
+		 */
+		WARN_ON(pd == NULL);
 
 		if (!generate_idle_em_cluster(&idle_em->clusters[current_cluster_id], pd)) {
 			do {
@@ -1527,6 +1591,9 @@ static void pixel_em_drv_undo_probe(void)
 	pixel_em_free_idle(idle_profile);
 	idle_profile = NULL;
 	vendor_sched_pixel_idle_em = NULL;
+#else
+	kfree(pixel_cluster_start_cpu);
+	pixel_cluster_start_cpu = NULL;
 #endif
 
 	if (!platform_dev) {
@@ -1545,7 +1612,7 @@ static int pixel_em_drv_probe(struct platform_device *dev)
 	int res;
 	struct pixel_em_profile *default_profile;
 	int num_dt_profiles;
-	unsigned long flags;
+	unsigned long flags __maybe_unused;
 	int i;
 
 	mutex_init(&sysfs_lock);

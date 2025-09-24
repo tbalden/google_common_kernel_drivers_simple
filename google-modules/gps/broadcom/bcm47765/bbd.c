@@ -742,7 +742,7 @@ struct bbd_device *bbd_init(struct device *dev, bool legacy_patch)
 	}
 
 	/* Create class which is required for device_create() */
-	bbd->class = class_create(THIS_MODULE, "bbd");
+	bbd->class = class_create("bbd");
 	if (IS_ERR(bbd->class)) {
 		pr_err("failed to create class bbd\n");
 		goto exit;

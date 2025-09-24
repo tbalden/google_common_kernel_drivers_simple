@@ -25,7 +25,7 @@
 #define MAX77779_FIRMWARE_BINARY_PREFIX "batt_fw_adi_79"
 #define MAX77779_REASON_FIRMWARE        "FW_UPDATE"
 
-#define FW_UPDATE_RETRY_CPU_RESET             100
+#define FW_UPDATE_RETRY_CPU_RESET             40
 #define FW_UPDATE_RETRY_FW_UPDATE             1000
 #define FW_UPDATE_RETRY_RISCV_REBOOT          20
 #define FW_UPDATE_RETRY_ONCE                  1
@@ -1039,6 +1039,7 @@ static inline int perform_firmware_update(struct max77779_fwupdate *fwu, const c
 	u32 written = 0;
 	enum gbms_fwupdate_max77779_err_code err_code = FWU_MAX77779_ERR_NONE;
 	int ret, ret_st;
+	int retry = 2;
 	struct max77779_fwupdate_stats stats_backup;
 
 	/* if previous update is not completed yet, stop at here */
@@ -1070,7 +1071,13 @@ static inline int perform_firmware_update(struct max77779_fwupdate *fwu, const c
 		goto perform_firmware_update_cleanup;
 	}
 
-	ret = max77779_fwl_write(fwu, data, 0, count, &written);
+	do {
+		retry--;
+		written = 0;
+
+		ret = max77779_fwl_write(fwu, data, 0, count, &written);
+	} while (ret && retry > 0);
+
 	if (ret || written != count) {
 		err_code = FWU_MAX77779_ERR_DATA_TRANSFER;
 		goto perform_firmware_update_cleanup;

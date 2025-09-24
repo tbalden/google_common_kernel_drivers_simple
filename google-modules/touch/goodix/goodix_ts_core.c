@@ -15,6 +15,7 @@
  *
  */
 #include <linux/fs.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
@@ -3221,14 +3222,14 @@ static int __init goodix_ts_core_init(void)
 	ts_info("Core layer init:%s", GOODIX_DRIVER_VERSION);
 	goodix_device_manager_init();
 
-#ifdef CONFIG_TOUCHSCREEN_GOODIX_BRL_SPI
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_GOODIX_BRL_SPI)
 	ret = goodix_spi_bus_init();
 	if (ret) {
 		ts_err("failed add spi bus driver");
 		return ret;
 	}
 #endif
-#ifdef CONFIG_TOUCHSCREEN_GOODIX_BRL_I2C
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_GOODIX_BRL_I2C)
 	ret = goodix_i2c_bus_init();
 	if (ret) {
 		ts_err("failed add i2c bus driver");
@@ -3243,10 +3244,10 @@ static void __exit goodix_ts_core_exit(void)
 {
 	ts_info("Core layer exit");
 	platform_driver_unregister(&goodix_ts_driver);
-#ifdef CONFIG_TOUCHSCREEN_GOODIX_BRL_SPI
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_GOODIX_BRL_SPI)
 	goodix_spi_bus_exit();
 #endif
-#ifdef CONFIG_TOUCHSCREEN_GOODIX_BRL_I2C
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_GOODIX_BRL_I2C)
 	goodix_i2c_bus_exit();
 #endif
 	goodix_device_manager_exit();

@@ -17,6 +17,9 @@
 #define USLEEP_RANGE_DELTA_SHORT 2
 #define USLEEP_RANGE_DELTA 20
 
+/* Retrict to udelay with 10us */
+#define UDELAY_BOUND_TIME 10
+
 int lwis_io_entry_poll(struct lwis_device *lwis_dev, struct lwis_io_entry *entry, bool is_short)
 {
 	uint64_t val, start;
@@ -87,6 +90,10 @@ int lwis_io_entry_wait(struct lwis_device *lwis_dev, struct lwis_io_entry *entry
 	if (entry->wait_us == 0)
 		return 0;
 
+	if (entry->wait_us <= UDELAY_BOUND_TIME) {
+		udelay(entry->wait_us);
+		return 0;
+	}
 	if (entry->wait_us <= MAX_WAIT_TIME) {
 		usleep_range(entry->wait_us, entry->wait_us + USLEEP_RANGE_DELTA);
 		return 0;

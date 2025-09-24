@@ -210,11 +210,10 @@ out:
 static void iif_all_signaler_submission_waiter_cancel(struct iif_signaler_submission_waiter *waiter)
 {
 	struct iif_signaler_submission_waiter_cb *cur, *tmp;
-	unsigned long flags;
 
-	spin_lock_irqsave(&waiter->lock, flags);
+	spin_lock(&waiter->lock);
 	waiter->cancel = true;
-	spin_unlock_irqrestore(&waiter->lock, flags);
+	spin_unlock(&waiter->lock);
 
 	/* From now on, @waiter->cb_list won't be changed. */
 

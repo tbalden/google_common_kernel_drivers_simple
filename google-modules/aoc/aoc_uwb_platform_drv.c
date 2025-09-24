@@ -105,7 +105,7 @@ static int uwb_pdrv_pin_init(struct platform_device *pdev)
 
 	chip.label = node->name;
 	chip.parent = dev;
-	chip.of_node = node;
+	chip.fwnode = of_node_to_fwnode(node);
 	chip.ngpio = ngpio;
 	return devm_gpiochip_add_data(dev, &chip, NULL);
 }
@@ -143,4 +143,5 @@ static struct platform_driver aoc_uwb_pdrv = {
 
 module_platform_driver(aoc_uwb_pdrv);
 
+MODULE_DESCRIPTION("Google AOC uwb platform driver");
 MODULE_LICENSE("GPL v2");

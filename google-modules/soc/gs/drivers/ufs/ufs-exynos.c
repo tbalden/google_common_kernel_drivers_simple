@@ -1770,11 +1770,6 @@ static int exynos_ufs_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static void exynos_ufs_shutdown(struct platform_device *pdev)
-{
-	ufshcd_shutdown((struct ufs_hba *)platform_get_drvdata(pdev));
-}
-
 static const struct dev_pm_ops exynos_ufs_dev_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(ufshcd_system_suspend, ufshcd_system_resume)
 };
@@ -1795,7 +1790,6 @@ static struct platform_driver exynos_ufs_driver = {
 	},
 	.probe = exynos_ufs_probe,
 	.remove = exynos_ufs_remove,
-	.shutdown = exynos_ufs_shutdown,
 };
 
 module_platform_driver(exynos_ufs_driver);

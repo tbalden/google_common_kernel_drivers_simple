@@ -8,6 +8,9 @@
 #define MAX77779_CHARGER_H_
 
 #include <linux/gpio.h>
+#if IS_ENABLED(CONFIG_GPIOLIB)
+#include <linux/gpio/driver.h>
+#endif
 
 #include "max77779_usecase.h"
 
@@ -16,6 +19,10 @@
 #define MAX77779_COP_WARN_THRESHOLD 105 /* Percentage */
 #define MAX77779_COP_MIN_DEBOUNCE_TIME_MS 16
 #define MAX77779_CHG_NUM_IRQS 16
+#define MAX77779_WCIN_INLIM_DEFAULT_DEBOUNCE 3
+#define MAX77779_WCIN_EMA_TIME_MS 500
+#define MAX77779_WCIN_EMA_ALPHA_THOUSANDTHS 400
+#define MAX77779_DC_ICL_STEP 25000
 
 struct max77779_chgr_data {
 	struct device *dev;
@@ -39,6 +46,8 @@ struct max77779_chgr_data {
 	struct max77779_usecase_data uc_data;
 	struct delayed_work mode_rerun_work;
 
+	struct delayed_work usecase_work;
+
 	struct gvotable_election *dc_icl_votable;
 	struct gvotable_election *dc_suspend_votable;
 	struct gvotable_election *wlc_spoof_votable;
@@ -49,14 +58,20 @@ struct max77779_chgr_data {
 
 	/* wcin inlim tracking */
 	struct delayed_work wcin_inlim_work;
-	struct delayed_work wcin_charge_disable_work;
+	struct delayed_work wcin_ema_work;
 	uint32_t wcin_inlim_t;
-	uint32_t wcin_inlim_flag;
+	int wcin_inlim_flag;
+	int wcin_inlim_debounce_count;
 	uint32_t wcin_inlim_headroom;
 	uint32_t wcin_inlim_step;
+	uint32_t wcin_inlim_debounce_thresh;
 	uint32_t wcin_soft_icl;
 	uint32_t wcin_inlim_en;
 	uint32_t dc_icl;
+	int wcin_ema;
+	bool wcin_ema_disable;
+	uint32_t wcin_ema_t;
+	uint32_t wcin_ema_alpha;
 	struct mutex wcin_inlim_lock;
 
 #if IS_ENABLED(CONFIG_GPIOLIB)
@@ -83,12 +98,11 @@ struct max77779_chgr_data {
 	atomic_t early_topoff_cnt;
 
 	struct mutex io_lock;
-	struct mutex mode_callback_lock;
 	struct mutex prot_lock;
-	struct mutex reg_dump_lock;
-	bool resume_complete;
+	struct mutex mode_lock;
 	bool init_complete;
 	struct wakeup_source *usecase_wake_lock;
+	//struct wakeup_source *inlim_wake_lock;
 
 	int fship_dtls;
 	bool online;
@@ -103,10 +117,22 @@ struct max77779_chgr_data {
 	struct gvotable_election *msc_last_votable;
 	int chg_term_voltage;
 	int chg_term_volt_debounce;
+
+	struct thermal_zone_device *chg_vs_thm2_tz;
+
+	/* control cv reporting in wlc inlim */
+	int prev_vbatt;
+	u8 prev_chg_type;
+	int fv_cv_margin;
+	int fv_cv_debounce;
+	int fv_cv_dcr;
+	bool wlc_inlim_cv;
 };
 int max77779_charger_init(struct max77779_chgr_data *data);
 void max77779_charger_remove(struct max77779_chgr_data *data);
 bool max77779_chg_is_reg(struct device *dev, unsigned int reg);
+int max77779_get_usecase(struct max77779_foreach_cb_data *cb_data,
+			 struct max77779_usecase_data *uc_data);
 #if IS_ENABLED(CONFIG_PM)
 int max77779_charger_pm_suspend(struct device *dev);
 int max77779_charger_pm_resume(struct device *dev);

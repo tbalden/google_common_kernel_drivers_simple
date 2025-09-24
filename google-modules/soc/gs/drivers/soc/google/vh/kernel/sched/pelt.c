@@ -197,7 +197,7 @@ unsigned long approximate_util_avg(unsigned long util, u64 delta)
 u64 approximate_runtime(unsigned long util)
 {
 	struct sched_avg sa = {};
-	u64 delta = 1024; // period = 1024 = ~1ms
+	u64 delta = TICK_USEC;
 	u64 runtime = 0;
 
 	if (unlikely(!util))
@@ -209,5 +209,5 @@ u64 approximate_runtime(unsigned long util)
 		runtime++;
 	}
 
-	return runtime;
+	return runtime * (TICK_USEC/USEC_PER_MSEC);
 }

@@ -326,6 +326,7 @@ static int enable_mailbox(struct gxp_mailbox *mailbox)
 
 	ACCESS_PRIVATE(mailbox, handle_irq) = gxp_mailbox_irq_handler;
 	rwlock_init(&mailbox->handle_irq_lock);
+	spin_lock_init(&mailbox->wait_list_lock);
 	kthread_init_work(&mailbox->response_work,
 			  gxp_mailbox_consume_responses_work);
 

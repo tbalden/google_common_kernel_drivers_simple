@@ -14,6 +14,10 @@
 #include <linux/wait.h>
 #include <linux/kobject.h>
 
+#if IS_ENABLED(CONFIG_SOC_LGA)
+#include <perf/mbfs.h>
+#endif
+
 struct eh_completion {
 	void *priv;
 };
@@ -120,8 +124,16 @@ struct eh_device {
 	/* keep pending request */
 	struct eh_sw_fifo sw_fifo;
 	atomic64_t nr_stall;
-#ifdef CONFIG_SOC_ZUMA
+#if IS_ENABLED(CONFIG_SOC_ZUMA) || IS_ENABLED(CONFIG_SOC_LGA)
 	int ip_index;
+#endif
+#if IS_ENABLED(CONFIG_SOC_LGA)
+	union mbfs_client_handle hwacg_handle;
+	struct mutex hwacg_lock;
+	bool hwacg_state;
+	unsigned long eh_hwacg_threshold_ms;
+	unsigned long eh_last_updated_jiffies;
+	struct delayed_work eh_hwacg_dwork;
 #endif
 };
 #endif

@@ -27,12 +27,6 @@
 #define EEPROM_SN	0
 #define MAX1720X_SN	1
 
-enum max1720x_recovery_log {
-	MAX1720X_RECOVERY_LOG_INIT = 1,
-	MAX1720X_RECOVERY_LOG_TRIGGER,
-	MAX1720X_RECOVERY_LOG_REPORT,
-};
-
 struct max17x0x_cache_data {
 	struct maxfg_reg atom;
 	u16 *cache_data;
@@ -43,7 +37,7 @@ int max1720x_get_voltage_now(struct i2c_client *client, int *iic_raw);
 int max17x0x_sw_reset(struct i2c_client *client);
 
 /* */
-#ifdef CONFIG_MAX1720X_REGLOG_LOG
+#if IS_ENABLED(CONFIG_MAX1720X_REGLOG_LOG)
 static inline void max17x0x_reglog_log(struct maxfg_reglog *reglog,
 				       unsigned int reg, u16 data, int rtn)
 {

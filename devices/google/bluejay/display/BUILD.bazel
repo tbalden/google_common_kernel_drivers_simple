@@ -1,31 +1,35 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "ddk_module", "kernel_module_group")
 
-kernel_module(
-    name = "drm_panel.google",
-    srcs = glob([
-        "**/*.c",
-        "**/*.h",
-    ]) + [
-        "Kbuild",
-        "//private/google-modules/display/common:headers",
-        "//private/google-modules/display/samsung:headers",
-        "//private/google-modules/display/samsung/include:headers",
-        "//private/google-modules/soc/gs:gs_soc_headers",
+ddk_module(
+    name = "panel-samsung-s6e3fc3_6a",
+    srcs = [
+        "panel-samsung-s6e3fc3_6a.c",
     ],
-    outs = [
-        # keep sorted
-        "panel-samsung-s6e3fc3_6a.ko",
+    out = "panel-samsung-s6e3fc3_6a.ko",
+    copts = [
+        "-Werror",
     ],
     kernel_build = "//private/devices/google/common:kernel",
-    visibility = [
-        "//private/devices/google:__subpackages__",
-        "//private/google-modules/soc/gs:__pkg__",
+    local_defines = [
+        "DYNAMIC_DEBUG_MODULE=1",
     ],
     deps = [
-        "//private/google-modules/display/common/gs_panel",
-        "//private/google-modules/display/samsung:display.samsung",
-        "//private/google-modules/soc/gs:gs_soc_module",
+        "//common:all_headers_aarch64",
+        "//private/google-modules/display/common:ddk_headers",
+        "//private/google-modules/display/samsung:headers",
+        "//private/google-modules/display/samsung/panel:panel-samsung-drv",
+        "//private/google-modules/soc/gs:headers",
+    ],
+)
+
+kernel_module_group(
+    name = "drm_panel.google",
+    srcs = [
+        ":panel-samsung-s6e3fc3_6a",
+    ],
+    visibility = [
+        "//private/devices/google:__subpackages__",
     ],
 )

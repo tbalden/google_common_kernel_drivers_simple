@@ -24,7 +24,7 @@
 	fragment@battery {
 		target-path = "/";
 		__overlay__ {
-			google_mitigation: google,mitigation {
+			google_mitigation: google-mitigation {
 				compatible = "google,google-bcl";
 				#thermal-sensor-cells = <1>;
 				google,charger = <&max77759_chg>;
@@ -67,6 +67,16 @@
 				cpu2_cluster = <8>;
 				usb_otg_conf;
 
+				ifpmic_irq_mapping {
+					sys_uvlo1_cnt = <1>;
+					sys_uvlo2_cnt = <1>;
+					bat_oilo1_cnt = <1>;
+					sys_uvlo1 = <IF_VDROOP1>;
+					sys_uvlo2 = <IF_VDROOP2>;
+					bat_oilo1 = <IF_INTB>;
+					bat_oilo2 = <IF_VDROOP2>;
+				};
+
 				irq_config {
 					irq,uvlo1;
 					irq,uvlo2;
@@ -105,33 +115,33 @@
 					ch12 { setting = <166>; };
 				};
 				freq_qos {
-					batoilo {
-						cpucl0 = <1475000>;
-						cpucl1 = <1549000>;
-						cpucl2 = <2147000>;
-						gpu = <649000>;
-						tpu = <627000>;
+					oilo1 {
+						cpucl0 = <1475000 1475000>;
+						cpucl1 = <1549000 1549000>;
+						cpucl2 = <2147000 2147000>;
+						gpu = <649000 649000>;
+						tpu = <627000 627000>;
 					};
-					vdroop1 {
-						cpucl0 = <1475000>;
-						cpucl1 = <1549000>;
-						cpucl2 = <2147000>;
-						gpu = <723000>;
-						tpu = <627000>;
+					uvlo1 {
+						cpucl0 = <1475000 1475000>;
+						cpucl1 = <1549000 1549000>;
+						cpucl2 = <2147000 2147000>;
+						gpu = <723000 723000>;
+						tpu = <627000 627000>;
 					};
-					vdroop2 {
-						cpucl0 = <1475000>;
-						cpucl1 = <1549000>;
-						cpucl2 = <2147000>;
-						gpu = <580000>;
-						tpu = <455000>;
+					uvlo2 {
+						cpucl0 = <1475000 1475000>;
+						cpucl1 = <1549000 1549000>;
+						cpucl2 = <2147000 2147000>;
+						gpu = <580000 580000>;
+						tpu = <455000 455000>;
 					};
-					smpl_gm {
-						cpucl0 = <1475000>;
-						cpucl1 = <1549000>;
-						cpucl2 = <2147000>;
-						gpu = <649000>;
-						tpu = <627000>;
+					smpl_warn {
+						cpucl0 = <1475000 1475000>;
+						cpucl1 = <1549000 1549000>;
+						cpucl2 = <2147000 2147000>;
+						gpu = <649000 649000>;
+						tpu = <627000 627000>;
 					};
 				};
 			};

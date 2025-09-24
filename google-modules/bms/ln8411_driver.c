@@ -4,6 +4,8 @@
  * Based on existing PCA9468 driver
  */
 
+#pragma clang diagnostic ignored "-Wenum-conversion"
+#pragma clang diagnostic ignored "-Wswitch"
 
 #include <linux/err.h>
 #include <linux/version.h>
@@ -31,7 +33,7 @@
 #define LN8411_VBATMIN_CHECK_T	1000	/* 1000ms */
 #define LN8411_CCMODE_CHECK1_T	5000	/* 10000ms -> 500ms */
 #define LN8411_CCMODE_CHECK2_T	5000	/* 5000ms */
-#define LN8411_CVMODE_CHECK_T 	10000	/* 10000ms */
+#define LN8411_CVMODE_CHECK_T	2000	/* 2000ms */
 #define LN8411_ENABLE_DELAY_T	250	/* 250ms */
 #define LN8411_CVMODE_CHECK2_T	1000	/* 1000ms */
 #define LN8411_ENABLE_WLC_DELAY_T	300	/* 300ms */
@@ -39,7 +41,7 @@
 /* Battery Threshold */
 #define LN8411_DC_VBAT_MIN		3000000 /* uV */
 /* Input Current Limit default value */
-#define LN8411_IIN_CFG_DFT		2500000 /* uA*/
+#define LN8411_IIN_CFG_DFT		3000000 /* uA*/
 /* Charging Float Voltage default value */
 #define LN8411_VFLOAT_DFT		4350000	/* uV */
 /* Charging Float Voltage max voltage for comp */
@@ -62,6 +64,7 @@
 
 #define LN8411_TA_VOL_PRE_OFFSET	500000	 /* uV */
 #define LN8411_WLC_VOL_PRE_OFFSET	500000   /* uV */
+#define LN8411_WLC_VOL_TOLERANCE	80000	 /* uV */
 /* Adjust CC mode TA voltage step */
 #define LN8411_TA_VOL_STEP_ADJ_CC	40000	/* uV */
 /* Pre CV mode TA voltage step */
@@ -80,11 +83,16 @@
 /* Offset for TA max current */
 #define LN8411_TA_CUR_MAX_OFFSET	200000 /* uA */
 
+#define LN8411_POWER_OFFSET		350000 /* mW */
+#define LN8411_POWER_STABLE_CNT		2
+#define LN8411_WLC_RX_VOL_OFFSET	100000 /* uV */
+
 /* maximum retry counter for restarting charging */
 #define LN8411_MAX_RETRY_CNT			3	/* retries */
-#define LN8411_MAX_IBUS_UCP_RETRY_CNT		10	/* retries */
-#define LN8411_MAX_IBUS_UCP_DEBOUNCE_COUNT	3
+#define LN8411_MAX_EAGAIN_RETRY_CNT		10	/* retries */
+#define LN8411_MAX_EAGAIN_DEBOUNCE_CNT	3
 #define LN8411_MAX_LOW_BATT_RETRY_CNT		10	/* retries */
+#define LN8411_MAX_RX_VOL_RETRY_CNT		3	/* retries */
 
 /* TA IIN tolerance */
 #define LN8411_TA_IIN_OFFSET		100000	/* uA */
@@ -94,9 +102,12 @@
 #define PD_MSG_TA_CUR_STEP		50000	/* uA */
 
 /* Maximum WCRX voltage threshold */
-#define LN8411_WCRX_MAX_VOL		9750000 /* uV */
+#define LN8411_WCRX_MAX_VOL		9500000 /* uV */
 /* WCRX voltage Step */
 #define WCRX_VOL_STEP			40000	/* uV */
+#define WCRX_VOL_ERROR_STEP		50000	/* uV */
+#define WCRX_VOL_STEP_SIZE		10000	/* uV */
+#define MAX_CAL_POWER			20000   /* mW */
 
 /* Default value for protections */
 #define VBAT_REV_UVP_DFT		3500000 /* 3.5V */
@@ -130,6 +141,8 @@
 #define LN8411_INFET_OFF_DET_DIS	0xd
 #define VBAT_ALARM_CFG_DELTA		50000 /* 50mV */
 #define IBUS_ALARM_CFG_DELTA		200000 /* 200mA */
+#define LN8411_IBUS_UCP_ENABLE_THRESHOLD 300000 /* 300mA */
+#define IBUS_UCP_ENABLE_TIMEOUT		10 /* 10 sec */
 
 #define ADC_EN_RETRIES			400
 
@@ -165,6 +178,8 @@ enum timer_id_t {
 	TIMER_PDMSG_SEND,   /* 9 */
 	TIMER_ADJUST_TAVOL,
 	TIMER_ADJUST_TACUR,
+	TIMER_POWER_CAL,
+	TIMER_ERROR_RECOVER,
 };
 
 
@@ -241,7 +256,7 @@ static u8 mode_settings_B0[3][9][3] = {
 		{LN8411_VWPC_OVP, VUSB_OVP_DFT_4_1, 0xcf},
 		{LN8411_CFG_10, CFG_10_DFT_4_1, 0x1},
 		{LN8411_IBUS_OCP, IBUS_OCP_DFT_4_1, 0x0},
-		{0x0, 0x0, 0x0},
+		{LN8411_PMID2OUT_UVP, PMID2OUT_UVP_DFT_4_1, 0x9f},
 		{0x0, 0x0, 0x0},
 		{0x0, 0x0, 0x0},
 		{0x0, 0x0, 0x0},
@@ -615,52 +630,20 @@ static int ln8411_get_charging_enabled(struct ln8411_charger *ln8411)
 	return (val & LN8411_CP_EN) != 0;
 }
 
-
-/* b/194346461 ramp down IIN */
-static int ln8411_wlc_ramp_down_iin(struct ln8411_charger *ln8411,
-				     struct power_supply *wlc_psy)
+static bool ln8411_check_ibus_ucp_enable(struct device *dev, struct regmap *reg_map,
+					 bool active, ktime_t disable_ts, int iin)
 {
-	const int ramp_down_step = LN8411_IIN_CFG_STEP;
-	int ret = 0, iin;
+	const ktime_t now = get_boot_sec();
 
-	if (!ln8411->wlc_ramp_out_iin)
-		return 0;
-
-	iin = ln8411_input_current_limit(ln8411);
-	for ( ; iin >= LN8411_IIN_CFG_MIN; iin -= ramp_down_step) {
-		int iin_adc, wlc_iout = -1;
-
-		iin_adc = ln8411_read_adc(ln8411, ADCCH_IIN);
-
-		if (wlc_psy) {
-			union power_supply_propval pro_val;
-
-			ret = power_supply_get_property(wlc_psy,
-					POWER_SUPPLY_PROP_ONLINE,
-					&pro_val);
-			if (ret < 0 || pro_val.intval != PPS_PSY_PROG_ONLINE)
-				break;
-
-			ret = power_supply_get_property(wlc_psy,
-					POWER_SUPPLY_PROP_CURRENT_NOW,
-					&pro_val);
-			if (ret == 0)
-				wlc_iout = pro_val.intval;
-		}
-
-		ret = ln8411_set_input_current(ln8411, iin);
-		if (ret < 0) {
-			dev_err(ln8411->dev, "%s: ramp down iin=%d (%d)\n", __func__,
-				iin, ret);
-			break;
-		}
-
-		dev_dbg(ln8411->dev, "%s: iin_adc=%d, wlc_iout-%d ramp down iin=%d\n",
-				__func__, iin_adc, wlc_iout, iin);
-		msleep(ln8411->wlc_ramp_out_delay);
+	if (disable_ts && active && (iin >= LN8411_IBUS_UCP_ENABLE_THRESHOLD
+				     || now - disable_ts >= IBUS_UCP_ENABLE_TIMEOUT)) {
+		dev_info(dev, "%s: enabling ibus_ucp iin: %d reason: %s\n", __func__, iin,
+			 iin >= LN8411_IBUS_UCP_ENABLE_THRESHOLD ? "current" : "timeout");
+		regmap_update_bits(reg_map, LN8411_IBUS_UCP, LN8411_IBUS_UCP_DIS, 0x0);
+		return true;
 	}
 
-	return ret;
+	return false;
 }
 
 /* b/194346461 ramp down VOUT */
@@ -672,48 +655,63 @@ static int ln8411_wlc_ramp_down_vout(struct ln8411_charger *ln8411,
 {
 	const int ramp_down_step = WLC_VOUT_CFG_STEP;
 	union power_supply_propval pro_val;
-	int vout = 0, vout_target = ln8411->wlc_ramp_out_vout_target;
-	int ret, vbatt;
+	int target, adc_ch;
+	int ret, val, vout = 0;
+
+	if (ln8411->mpp) {
+		target = ln8411->wlc_ramp_out_iin_target;
+		adc_ch = ADCCH_IIN;
+	} else {
+		target = ln8411->wlc_ramp_out_vout_target;
+		adc_ch = ADCCH_VBAT;
+	}
 
 	while (true) {
-		vbatt = ln8411_read_adc(ln8411, ADCCH_VBAT);
-		if (vbatt <= 0) {
-			dev_err(ln8411->dev, "%s: invalid vbatt %d\n", __func__, vbatt);
+		val = ln8411_read_adc(ln8411, adc_ch);
+		if (val < 0) {
+			dev_err(ln8411->dev, "%s: invalid adc ch:%d=%d\n", __func__, adc_ch, val);
 			break;
 		}
 
-		ret = power_supply_get_property(wlc_psy, POWER_SUPPLY_PROP_VOLTAGE_NOW,
-						&pro_val);
-		if (ret < 0) {
-			dev_err(ln8411->dev, "%s: invalid vout %d\n", __func__, ret);
-			break;
-		}
+		if (!ln8411->mpp && !target)
+			target = val * 4;
 
-		if (!ln8411->wlc_ramp_out_vout_target)
-			vout_target = vbatt * 4;
+		if (!vout) {
+			ret = power_supply_get_property(wlc_psy, POWER_SUPPLY_PROP_VOLTAGE_NOW,
+							&pro_val);
+			if (ret < 0) {
+				dev_err(ln8411->dev, "%s: invalid vout %d\n", __func__, ret);
+				break;
+			}
 
-		if (!vout)
 			vout = pro_val.intval;
-		if (vout < vout_target) {
+		}
+
+		if (ln8411->mpp && val <= target) {
+			dev_dbg(ln8411->dev, "%s: reached target vout=%d, iin=%d, (target=%d)\n",
+				__func__, vout, val, target);
+			return 0;
+		} else if (!ln8411->mpp && vout < target) {
 			dev_dbg(ln8411->dev, "%s: underflow vout=%d, vbatt=%d (target=%d)\n",
-				__func__, vout, vbatt, vout_target);
+				__func__, vout, val, target);
 			return 0;
 		}
 
 		pro_val.intval = vout - ramp_down_step;
+		if (ln8411->mpp)
+			dev_dbg(ln8411->dev, "%s: iin=%d, wlc_vout=%d->%d\n", __func__, val,
+				vout, pro_val.intval);
+		else
+			dev_dbg(ln8411->dev, "%s: vbatt=%d, wlc_vout=%d->%d\n", __func__, val,
+				vout, pro_val.intval);
 
-		dev_dbg(ln8411->dev, "%s: vbatt=%d, wlc_vout=%d->%d\n", __func__, vbatt,
-			 vout, pro_val.intval);
-
-		ret = power_supply_set_property(wlc_psy, POWER_SUPPLY_PROP_VOLTAGE_NOW,
-						&pro_val);
+		ret = power_supply_set_property(wlc_psy, POWER_SUPPLY_PROP_VOLTAGE_NOW,	&pro_val);
 		if (ret < 0) {
 			dev_err(ln8411->dev, "%s: cannot set vout %d\n", __func__, ret);
 			break;
 		}
-
-		msleep(ln8411->wlc_ramp_out_delay);
 		vout = pro_val.intval;
+		msleep(ln8411->wlc_ramp_out_delay);
 	}
 
 	return -EIO;
@@ -774,6 +772,15 @@ static int ln8411_set_status_charging(struct ln8411_charger *ln8411)
 		return ret;
 
 	msleep(30);
+
+	/* Disable UCP */
+	if (ln8411->mpp && ln8411->ta_type == TA_TYPE_WIRELESS) {
+		ln8411->ibus_ucp_disable_timestamp = get_boot_sec();
+		ret = regmap_update_bits(ln8411->regmap, LN8411_IBUS_UCP, LN8411_IBUS_UCP_DIS,
+					 LN8411_IBUS_UCP_DIS);
+		if (ret)
+			return ret;
+	}
 
 	ret = regmap_set_bits(ln8411->regmap, LN8411_CTRL1, LN8411_CP_EN);
 	return ret;
@@ -883,17 +890,27 @@ static int ln8411_set_charging(struct ln8411_charger *ln8411, bool enable)
 		if (ln8411->ta_type == TA_TYPE_WIRELESS) {
 			struct power_supply *wlc_psy;
 
+			/* Disable UCP */
+			if (ln8411->mpp) {
+				ret = regmap_update_bits(ln8411->regmap, LN8411_IBUS_UCP,
+							 LN8411_IBUS_UCP_DIS, LN8411_IBUS_UCP_DIS);
+				if (ret)
+					goto error;
+			}
+
 			wlc_psy = ln8411_get_rx_psy(ln8411);
 			if (wlc_psy) {
 				int ret;
 
-				ret = ln8411_wlc_ramp_down_iin(ln8411, wlc_psy);
-				if (ret < 0)
-					dev_err(ln8411->dev, "cannot ramp out iin (%d)\n", ret);
-
 				ret = ln8411_wlc_ramp_down_vout(ln8411, wlc_psy);
 				if (ret < 0)
 					dev_err(ln8411->dev, "cannot ramp out vout (%d)\n", ret);
+			}
+
+			if (ln8411->mpp) {
+				dev_dbg(ln8411->dev, "%s: setting mpp gpio to 0\n", __func__);
+				gpiod_direction_output(ln8411->pdata->mpp_gpio, 0);
+				msleep(1000);
 			}
 		}
 
@@ -931,10 +948,10 @@ static int ln8411_check_state(struct ln8411_charger *ln8411, int loglevel)
 	return ret;
 }
 
-static bool ln8411_err_is_ucp(struct ln8411_charger *ln8411, bool *retries)
+static bool ln8411_err_is_retry(struct ln8411_charger *ln8411, bool *retries)
 {
-	*retries = !!ln8411->ibus_ucp_retry_cnt;
-	return ln8411->error == LN8411_ERROR_UCP;
+	*retries = !!ln8411->eagain_retry_cnt;
+	return ln8411->error == LN8411_ERROR_RETRY;
 }
 
 static bool ln8411_err_is_low_batt(struct ln8411_charger *ln8411, bool *retries)
@@ -948,6 +965,7 @@ static int ln8411_check_not_active(struct ln8411_charger *ln8411, int loglevel)
 	int ret, rc = -EINVAL;
 	unsigned int reg;
 	u8 safety_sts[4];
+	bool eagain_condition;
 
 	ret = regmap_bulk_read(ln8411->regmap, LN8411_SAFETY_STS, safety_sts, 4);
 	if (ret < 0)
@@ -957,10 +975,18 @@ static int ln8411_check_not_active(struct ln8411_charger *ln8411, int loglevel)
 	if (ret < 0)
 		goto done;
 
+	if (ln8411->mpp && ln8411->ta_type == TA_TYPE_WIRELESS)
+		eagain_condition = !!(safety_sts[0] & LN8411_REV_IBUS_LATCHED ||
+					safety_sts[1] & LN8411_VOLT_FAULT_DETECTED ||
+					safety_sts[1] & LN8411_PMID2OUT_OV_STS ||
+					safety_sts[1] & LN8411_PMID2OUT_UV_STS);
+	else
+		eagain_condition = !!(safety_sts[0] & LN8411_REV_IBUS_LATCHED);
+
 	if (reg & LN8411_STANDBY_STS) {
-		if (safety_sts[0] & LN8411_REV_IBUS_LATCHED) {
+		if (eagain_condition) {
 			rc = -EAGAIN;
-			ln8411->error = LN8411_ERROR_UCP;
+			ln8411->error = LN8411_ERROR_RETRY;
 		} else {
 			rc = -EINVAL;
 			ln8411->error = LN8411_ERROR_NOT_ACTIVE;
@@ -1031,21 +1057,29 @@ int ln8411_check_active(struct ln8411_charger *ln8411)
 static int ln8411_check_error(struct ln8411_charger *ln8411)
 {
 	int ret = -EINVAL, vbatt;
-	const int debounce_cnt = ln8411->ibus_ucp_debounce_cnt;
+	int iin;
+	bool active;
+	const int debounce_cnt = ln8411->eagain_debounce_cnt;
+
+	active = (ln8411_check_active(ln8411) == 1);
+	iin = ln8411_read_adc(ln8411, ADCCH_IIN);
+	if (ln8411_check_ibus_ucp_enable(ln8411->dev, ln8411->regmap, active,
+					 ln8411->ibus_ucp_disable_timestamp, iin))
+		ln8411->ibus_ucp_disable_timestamp = 0;
 
 	/* LN8411 is active state */
-	if (ln8411_check_active(ln8411) == 1) {
-		if (ln8411->ibus_ucp_debounce_cnt &&
-		    (ln8411->ibus_ucp_retry_cnt != LN8411_MAX_IBUS_UCP_RETRY_CNT)) {
-			ln8411->ibus_ucp_debounce_cnt--;
-		} else if (!ln8411->ibus_ucp_debounce_cnt) {
-			ln8411->ibus_ucp_retry_cnt = LN8411_MAX_IBUS_UCP_RETRY_CNT;
-			ln8411->ibus_ucp_debounce_cnt = LN8411_MAX_IBUS_UCP_DEBOUNCE_COUNT;
+	if (active) {
+		if (ln8411->eagain_debounce_cnt &&
+		    (ln8411->eagain_retry_cnt != LN8411_MAX_EAGAIN_RETRY_CNT)) {
+			ln8411->eagain_debounce_cnt--;
+		} else if (!ln8411->eagain_debounce_cnt) {
+			ln8411->eagain_retry_cnt = LN8411_MAX_EAGAIN_RETRY_CNT;
+			ln8411->eagain_debounce_cnt = LN8411_MAX_EAGAIN_DEBOUNCE_CNT;
 		}
 		ln8411->error = LN8411_ERROR_NONE;
 		ln8411->low_batt_retry_cnt = LN8411_MAX_LOW_BATT_RETRY_CNT;
 		dev_dbg(ln8411->dev, "%s: Active Status ok. debounce_cnt:%d->%d\n", __func__,
-			debounce_cnt, ln8411->ibus_ucp_debounce_cnt);
+			debounce_cnt, ln8411->eagain_debounce_cnt);
 
 		return 0;
 	}
@@ -1091,15 +1125,15 @@ static int ln8411_get_iin_original(struct ln8411_charger *ln8411, int *iin)
 
 static int ln8411_get_iin(struct ln8411_charger *ln8411, int *iin)
 {
-    int ret;
-    int temp;
+	int ret;
+	int temp;
 
-    ret = ln8411_get_iin_original(ln8411, &temp);
-    if (ret < 0)
-        return ret;
+	ret = ln8411_get_iin_original(ln8411, &temp);
+	if (ret < 0)
+		return ret;
 
-    *iin = conv_chg_mode(ln8411, temp);
-    return 0;
+	*iin = conv_chg_mode(ln8411, temp);
+	return 0;
 }
 
 /* only needed for logging */
@@ -1178,6 +1212,7 @@ static int ln8411_read_status(struct ln8411_charger *ln8411)
 {
 	int ret = 0;
 	unsigned int reg_val;
+	int vbat;
 
 	ret = regmap_read(ln8411->regmap, LN8411_FAULT3_STS, &reg_val);
 	if (ret < 0) {
@@ -1195,12 +1230,16 @@ static int ln8411_read_status(struct ln8411_charger *ln8411)
 	}
 	*/
 
+	ret = ln8411_get_batt_info(ln8411, BATT_VOLTAGE, &vbat);
+	if (ret)
+		return ret;
+
 	if (ln8411_read_adc(ln8411, ADCCH_IIN) >= ln8411->iin_reg)
 		ret = STS_MODE_IIN_LOOP;
-	else if (ln8411_read_adc(ln8411, ADCCH_VBAT) >= ln8411->vfloat_reg)
+	else if (vbat >= ln8411->vfloat_reg)
 		ret = STS_MODE_VFLT_LOOP;
 	else
-		ret = STS_MODE_LOOP_INACTIVE;;
+		ret = STS_MODE_LOOP_INACTIVE;
 
 	return ret;
 }
@@ -1232,6 +1271,104 @@ error:
 		 ln8411->fv_uv, ln8411->cc_max);
 
 	return status;
+}
+
+/*
+ * max iin given cc_max and iin_cfg.
+ * TODO: maybe use pdata->iin_cfg if cc_max is zero or negative.
+ */
+static int ln8411_get_iin_max(const struct ln8411_charger *ln8411, int cc_max)
+{
+	const int cc_limit = ln8411->pdata->iin_max_offset +
+			     cc_max / conv_chg_mode(ln8411, 1);
+	int iin_max;
+
+	iin_max = min_t(unsigned int, ln8411->pdata->iin_cfg_max, cc_limit);
+
+	dev_dbg(ln8411->dev, "%s: iin_max=%d iin_cfg=%u iin_cfg_max=%d cc_max=%d cc_limit=%d\n",
+		 __func__, iin_max, ln8411->pdata->iin_cfg,
+		 ln8411->pdata->iin_cfg_max, cc_max, cc_limit);
+
+	return iin_max;
+}
+
+/*
+ * iin limit for the adapter for the chg_mode
+ * Minimum between the configuration, cc_max (scaled with offset) and the
+ * adapter capabilities.
+ */
+static int ln8411_get_iin_limit(const struct ln8411_charger *ln8411)
+{
+	int iin_cc;
+
+	iin_cc = ln8411_get_iin_max(ln8411, ln8411->cc_max);
+	if (ln8411->ta_max_cur < iin_cc)
+		iin_cc = ln8411->ta_max_cur;
+
+	dev_dbg(ln8411->dev, "%s: iin_cc=%d ta_max_cur=%u, chg_mode=%d\n", __func__,
+		 iin_cc, ln8411->ta_max_cur, ln8411->chg_mode);
+
+	return iin_cc;
+}
+
+static int ln8411_get_power(struct ln8411_charger *ln8411)
+{
+	return ln8411->cal_power ? min(ln8411->cal_power, ln8411->power) : ln8411->power;
+}
+
+static int ln8411_set_iin_cc_from_power(struct ln8411_charger *ln8411)
+{
+	int power_tgt = ln8411_get_power(ln8411);
+	unsigned long long iin;
+
+	/* power limit based control for MPP HPM (25W) */
+	iin = ((unsigned long long)power_tgt * 1000) / (ln8411->ta_vol / 1000);
+	iin = iin * 1000;
+	ln8411->iin_cc = min_t(int, ln8411_get_iin_limit(ln8411), iin);
+	dev_info(ln8411->dev, "%s: iin_cc=%d, power=%d, ta_vol=%d\n",
+			__func__, ln8411->iin_cc, power_tgt, ln8411->ta_vol);
+	return 0;
+}
+
+static int ln8411_set_ta_pwr(struct ln8411_charger *ln8411, int power)
+{
+	if (power < 0)
+		return -EINVAL;
+
+	mutex_lock(&ln8411->lock);
+
+	if (power == ln8411->power)
+		goto done;
+
+	logbuffer_prlog(ln8411, LOGLEVEL_INFO,
+			"%s: charging_state=%d ta_pwr=%d->%d, ta_max_pwr=%lu\n",
+			__func__, ln8411->charging_state, ln8411->power, power, ln8411->ta_max_pwr);
+	ln8411->power = power;
+
+	/* Re-calculate iin_cc */
+	ln8411_set_iin_cc_from_power(ln8411);
+done:
+	mutex_unlock(&ln8411->lock);
+	return 0;
+}
+
+static int ln8411_set_ta_cal_pwr(struct ln8411_charger *ln8411, int power)
+{
+	if (power < 0)
+		return -EINVAL;
+
+	mutex_lock(&ln8411->lock);
+
+	if (power == ln8411->cal_power)
+		goto done;
+
+	logbuffer_prlog(ln8411, LOGLEVEL_INFO,
+			"%s: charging_state=%d ta_pwr=%d->%d, ta_max_pwr=%lu\n",
+			__func__, ln8411->charging_state, ln8411->power, power, ln8411->ta_max_pwr);
+	ln8411->cal_power = power;
+done:
+	mutex_unlock(&ln8411->lock);
+	return 0;
 }
 
 /* hold mutex_lock(&ln8411->lock); */
@@ -1298,18 +1435,21 @@ static int ln8411_stop_charging(struct ln8411_charger *ln8411)
 	 * TODO: use defaults when these are negative or zero at startup
 	 * NOTE: cc_max is twice of IIN + headroom
 	 */
-	ln8411->cc_max = -1;
-	ln8411->fv_uv = -1;
+	if (!ln8411->cal_mode) {
+		ln8411->cc_max = -1;
+		ln8411->fv_uv = -1;
 
-	/* Clear requests for new Vfloat and new IIN */
-	ln8411->new_vfloat = 0;
-	ln8411->new_iin = 0;
+		/* Clear requests for new Vfloat and new IIN */
+		ln8411->new_vfloat = 0;
+		ln8411->new_iin = 0;
+	}
 
 	/* used to start DC and during errors */
 	ln8411->retry_cnt = 0;
 
 	ln8411->prev_ta_cur = 0;
 	ln8411->prev_ta_vol = 0;
+	ln8411->no_inc_ta_vol = 0;
 
 	/* close stats */
 	ln8411_chg_stats_done(&ln8411->chg_data, ln8411);
@@ -1331,6 +1471,9 @@ static int ln8411_stop_charging(struct ln8411_charger *ln8411)
 		ln8411_recover_ta(ln8411);
 
 	power_supply_changed(ln8411->mains);
+
+	if (ln8411->cal_mode)
+		ln8411->cal_mode = false;
 
 done:
 	mutex_unlock(&ln8411->lock);
@@ -1581,25 +1724,6 @@ static int ln8411_set_ta_current_comp(struct ln8411_charger *ln8411)
 	return 0;
 }
 
-/*
- * max iin given cc_max and iin_cfg.
- * TODO: maybe use pdata->iin_cfg if cc_max is zero or negative.
- */
-static int ln8411_get_iin_max(const struct ln8411_charger *ln8411, int cc_max)
-{
-	const int cc_limit = ln8411->pdata->iin_max_offset +
-			     cc_max / conv_chg_mode(ln8411, 1);
-	int iin_max;
-
-	iin_max = min(ln8411->pdata->iin_cfg_max, (unsigned int)cc_limit);
-
-	dev_dbg(ln8411->dev, "%s: iin_max=%d iin_cfg=%u iin_cfg_max=%d cc_max=%d cc_limit=%d\n",
-		 __func__, iin_max, ln8411->pdata->iin_cfg,
-		 ln8411->pdata->iin_cfg_max, cc_max, cc_limit);
-
-	return iin_max;
-}
-
 /* Compensate TA current for constant power mode */
 /* hold mutex_lock(&ln8411->lock), schedule on return 0 */
 static int ln8411_set_ta_current_comp2(struct ln8411_charger *ln8411)
@@ -1848,7 +1972,7 @@ static int ln8411_set_rx_voltage_comp(struct ln8411_charger *ln8411)
 	if (iin > (ln8411->iin_cc + ln8411->pdata->iin_cc_comp_offset)) {
 
 		/* RX current is higher than the target input current */
-		ln8411->ta_vol = ln8411->ta_vol - WCRX_VOL_STEP;
+		ln8411->ta_vol = ln8411->ta_vol - ln8411->pdata->wcrx_vol_down_step;
 		logbuffer_prlog(ln8411, LOGLEVEL_DEBUG, "Cont1: rx_vol=%u",
 				ln8411->ta_vol);
 
@@ -1879,7 +2003,7 @@ static int ln8411_set_rx_voltage_comp(struct ln8411_charger *ln8411)
 			}
 		} else {
 			/* Increase RX voltage (100mV) */
-			ln8411->ta_vol = ln8411->ta_vol + WCRX_VOL_STEP;
+			ln8411->ta_vol = ln8411->ta_vol + ln8411->pdata->wcrx_vol_up_step;
 			logbuffer_prlog(ln8411, LOGLEVEL_DEBUG, "Cont2: rx_vol=%u",
 					ln8411->ta_vol);
 
@@ -1905,44 +2029,44 @@ static int ln8411_set_rx_voltage_comp(struct ln8411_charger *ln8411)
 	return 0;
 }
 
-/*
- * iin limit for the adapter for the chg_mode
- * Minimum between the configuration, cc_max (scaled with offset) and the
- * adapter capabilities.
- */
-static int ln8411_get_iin_limit(const struct ln8411_charger *ln8411)
-{
-	int iin_cc;
-
-	iin_cc = ln8411_get_iin_max(ln8411, ln8411->cc_max);
-	if (ln8411->ta_max_cur < iin_cc)
-		iin_cc = ln8411->ta_max_cur;
-
-	dev_dbg(ln8411->dev, "%s: iin_cc=%d ta_max_cur=%u, chg_mode=%d\n", __func__,
-		 iin_cc, ln8411->ta_max_cur, ln8411->chg_mode);
-
-	return iin_cc;
-}
-
 /* recalculate ->ta_vol looking at demand (cc_max) */
 static int ln8411_set_wireless_dc(struct ln8411_charger *ln8411, int vbat)
 {
-	unsigned long val;
+	unsigned long long val;
+	int iin_cc;
 
-	ln8411->iin_cc = ln8411_get_iin_limit(ln8411);
+	iin_cc = ln8411_get_iin_limit(ln8411);
 
-	ln8411->ta_vol = 2 * vbat * ln8411->chg_mode +	LN8411_WLC_VOL_PRE_OFFSET;
+	if (ln8411->mpp) {
+		int power_tgt = ln8411_get_power(ln8411);
+
+		/* Don't recalculate ta_vol on tier switch */
+		if (ln8411->charging_state == DC_STATE_PRESET_DC) {
+			val = (ln8411->init_vol_mult * (unsigned long long)vbat)
+			      + (ln8411->init_vol_offset * 1000000);
+			ln8411->ta_vol = val / 1000;
+
+			ln8411->iin_cc = iin_cc;
+		} else if (!power_tgt) {
+			ln8411->iin_cc = iin_cc;
+		} else if (!ln8411->no_inc_ta_vol || iin_cc <= ln8411->iin_cc) {
+			ln8411->iin_cc = iin_cc;
+		}
+	} else {
+		ln8411->ta_vol = 2 * vbat * ln8411->chg_mode +	LN8411_WLC_VOL_PRE_OFFSET;
+		ln8411->iin_cc = iin_cc;
+	}
 
 	/* RX voltage resolution is 100mV */
-	val = ln8411->ta_vol / WCRX_VOL_STEP;
-	ln8411->ta_vol = val * WCRX_VOL_STEP;
+	val = ln8411->ta_vol / WCRX_VOL_STEP_SIZE;
+	ln8411->ta_vol = val * WCRX_VOL_STEP_SIZE;
 	/* Set RX voltage to MIN[RX voltage, RX_MAX_VOL*chg_mode] */
 	ln8411->ta_vol = min(ln8411->ta_vol, ln8411->ta_max_vol);
 
 	/* ta_cur is ignored */
 	logbuffer_prlog(ln8411, LOGLEVEL_DEBUG,
-			"%s: iin_cc=%d, ta_vol=%d ta_max_vol=%d", __func__,
-			ln8411->iin_cc, ln8411->ta_vol, ln8411->ta_max_vol);
+			"%s: iin_cc=%d, vbat=%d, ta_vol=%d ta_max_vol=%d", __func__,
+			ln8411->iin_cc, vbat, ln8411->ta_vol, ln8411->ta_max_vol);
 
 	return 0;
 }
@@ -2042,8 +2166,14 @@ error:
 static void ln8411_return_to_loop(struct ln8411_charger *ln8411)
 {
 	switch (ln8411->ret_state) {
+	case DC_STATE_ADJUST_CC:
+		ln8411->timer_id = TIMER_ADJUST_CCMODE;
+		break;
 	case DC_STATE_CC_MODE:
 		ln8411->timer_id = TIMER_CHECK_CCMODE;
+		break;
+	case DC_STATE_START_CV:
+		ln8411->timer_id = TIMER_ENTER_CVMODE;
 		break;
 	case DC_STATE_CV_MODE:
 		ln8411->timer_id = TIMER_CHECK_CVMODE;
@@ -2301,7 +2431,7 @@ static int ln8411_adjust_rx_voltage(struct ln8411_charger *ln8411)
 		/* RX current is higher than the target input current */
 
 		/* Decrease RX voltage (100mV) */
-		ln8411->ta_vol = ln8411->ta_vol - WCRX_VOL_STEP;
+		ln8411->ta_vol = ln8411->ta_vol - ln8411->pdata->wcrx_vol_down_step;
 
 		logbuffer_prlog(ln8411, LOGLEVEL_DEBUG, "Cont1, rx_vol=%u",
 				ln8411->ta_vol);
@@ -2329,7 +2459,7 @@ static int ln8411_adjust_rx_voltage(struct ln8411_charger *ln8411)
 			ln8411_return_to_loop(ln8411);
 		} else {
 			/* Increase RX voltage (100mV) */
-			ln8411->ta_vol = ln8411->ta_vol + WCRX_VOL_STEP;
+			ln8411->ta_vol = ln8411->ta_vol + ln8411->pdata->wcrx_vol_up_step;
 
 			logbuffer_prlog(ln8411, LOGLEVEL_DEBUG, "Cont2, rx_vol=%u",
 					ln8411->ta_vol);
@@ -2473,6 +2603,18 @@ static int ln8411_set_new_cc_max(struct ln8411_charger *ln8411, int cc_max)
 		goto done;
 	}
 
+	if (ln8411->cal_mode) {
+		int power;
+
+		power = (iin_max / 1000) * (ln8411->ta_vol / 1000);
+		if (power < ln8411->pdata->max_cal_power * 1000) {
+			dev_info(ln8411->dev, "%s: power %d < max cal power %d. iin_max: %d, ta_vol: %d. Stopping.\n",
+				 __func__, power / 1000, ln8411->pdata->max_cal_power,
+				 iin_max, ln8411->ta_vol);
+			ln8411_send_rx_message(ln8411, WLC_CAL_ERROR, 0);
+		}
+	}
+
 	ret = ln8411_set_new_iin(ln8411, iin_max);
 	if (ret == 0)
 		ln8411->cc_max = cc_max;
@@ -2505,7 +2647,8 @@ static int ln8411_apply_new_vfloat(struct ln8411_charger *ln8411)
 		goto error_done;
 
 	/* Restart the process if tier switch happened (either direction) */
-	if (ln8411->charging_state == DC_STATE_CV_MODE
+	if ((ln8411->charging_state == DC_STATE_CV_MODE ||
+	     ln8411->charging_state == DC_STATE_START_CV)
 	    && abs(ln8411->new_vfloat - ln8411->fv_uv) > LN8411_TIER_SWITCH_DELTA) {
 		ret = ln8411_reset_dcmode(ln8411);
 		if (ret < 0) {
@@ -2599,7 +2742,7 @@ static void ln8411_adjust_ccmode_wireless(struct ln8411_charger *ln8411, int iin
 		ln8411->timer_period = 0;
 	} else {
 		/* Try to increase RX voltage(100mV) */
-		ln8411->ta_vol = ln8411->ta_vol + WCRX_VOL_STEP;
+		ln8411->ta_vol = ln8411->ta_vol + ln8411->pdata->wcrx_vol_up_step;
 		if (ln8411->ta_vol > ln8411->ta_max_vol)
 			ln8411->ta_vol = ln8411->ta_max_vol;
 
@@ -2762,11 +2905,108 @@ static int ln8411_vote_dc_avail(struct ln8411_charger *ln8411, int vote, int ena
 			dev_err(ln8411->dev, "Unable to cast vote for DC Chg avail (%d)\n", ret);
 	}
 
-	logbuffer_prlog(ln8411, ln8411->charging_state == DC_STATE_ERROR ?
-			LOGLEVEL_INFO : LOGLEVEL_DEBUG,
-			"%s: Voting dc_avail when in error state", __func__);
+	if (ln8411->charging_state == DC_STATE_ERROR)
+		logbuffer_prlog(ln8411, LOGLEVEL_INFO,
+				"%s: Voting dc_avail when in error state", __func__);
 
 	return ret;
+}
+
+static int ln8411_power_cal(struct ln8411_charger *ln8411)
+{
+	int iin, iin_cc, vbus, power, rx_vol;
+	bool power_stable = 0;
+	int power_tgt;
+
+	mutex_lock(&ln8411->lock);
+
+	ln8411->timer_period = ln8411->wcrx_vol_delay;
+
+	if (ln8411_check_error(ln8411)) {
+		ln8411_send_rx_message(ln8411, WLC_CAL_ERROR, 0);
+		goto done;
+	}
+
+	if (ln8411->charging_state != DC_STATE_CAL) {
+		dev_info(ln8411->dev, "%s: charging_state=%u->%u\n", __func__,
+			 ln8411->charging_state, DC_STATE_CAL);
+		ln8411->charging_state = DC_STATE_CAL;
+	}
+
+	iin_cc = ln8411_get_iin_limit(ln8411);
+	iin = ln8411_read_adc(ln8411, ADCCH_IIN);
+	vbus = ln8411_read_adc(ln8411, ADCCH_VBUS);
+	power = (iin / 1000) * (vbus / 1000);
+	power_tgt = ln8411_get_power(ln8411);
+
+	rx_vol = ln8411_get_rx_voltage(ln8411);
+	logbuffer_prlog(ln8411, LOGLEVEL_INFO, "WLCCAL: rx_vol=%d\n", rx_vol);
+
+	if (rx_vol < 0) {
+		ln8411_send_rx_message(ln8411, WLC_CAL_ERROR, 0);
+		goto done;
+	}
+
+	logbuffer_prlog(ln8411, LOGLEVEL_INFO,
+			"WLCCAL: iin=%d, iin_cc=%d, vbus=%d, power=%d, power tgt: %d, ta_vol: %d\n",
+			iin, iin_cc, vbus, power, power_tgt * 1000, ln8411->ta_vol);
+
+	if (iin > iin_cc + LN8411_IIN_CC_COMP_OFFSET) {
+		ln8411_send_rx_message(ln8411, WLC_CAL_ERROR, 0);
+		dev_info(ln8411->dev, "%s: ERROR iin > iin_cc\n", __func__);
+		goto done;
+	}
+
+	if (power > (power_tgt * 1000) + ln8411->power_offset) {
+		ln8411->ta_vol -= ln8411->pdata->wcrx_vol_down_step;
+		ln8411->timer_id = TIMER_PDMSG_SEND;
+		ln8411->timer_period = 0;
+		dev_dbg(ln8411->dev, "%s: ta vol dec ta_vol: %d\n", __func__, ln8411->ta_vol);
+	} else if (power < (power_tgt * 1000) - ln8411->power_offset) {
+		if (rx_vol >= ln8411->ta_max_vol) {
+			ln8411->power_cnt++;
+			power_stable = ln8411->power_cnt == ln8411->power_stable_cnt_goal;
+			dev_dbg(ln8411->dev, "%s: check stable rx_vol >= ta_max_vol\n", __func__);
+		} else {
+			ln8411->ta_vol += ln8411->pdata->wcrx_vol_up_step;
+			ln8411->timer_id = TIMER_PDMSG_SEND;
+			ln8411->timer_period = 0;
+			dev_dbg(ln8411->dev, "%s: ta_vol inc ta_vol: %d\n", __func__,
+				 ln8411->ta_vol);
+		}
+	} else {
+		ln8411->power_cnt++;
+		power_stable = ln8411->power_cnt == ln8411->power_stable_cnt_goal;
+		dev_dbg(ln8411->dev, "%s: check stable\n", __func__);
+	}
+
+	if (power_stable) {
+		dev_info(ln8411->dev, "%s: power is stable\n", __func__);
+		ln8411_send_rx_message(ln8411, WLC_CAL_DONE, power_tgt);
+		goto done;
+	}
+
+	mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work,
+			 msecs_to_jiffies(ln8411->timer_period));
+
+done:
+	mutex_unlock(&ln8411->lock);
+	return 0;
+}
+
+/* <0 error, 0 no new limits, >0 new limits */
+static int ln8411_apply_new_limits(struct ln8411_charger *ln8411)
+{
+	int ret = -1;
+
+	if (ln8411->new_iin && ln8411->new_iin < ln8411->iin_cc)
+		ret = ln8411_apply_new_iin(ln8411);
+	else if (ln8411->new_vfloat)
+		ret = ln8411_apply_new_vfloat(ln8411);
+	else if (ln8411->new_iin)
+		ret = ln8411_apply_new_iin(ln8411);
+
+	return ret == 0 ? 1 : 0;
 }
 
 /* Direct Charging Adjust CC MODE control
@@ -2793,6 +3033,12 @@ static int ln8411_charge_adjust_ccmode(struct ln8411_charger *ln8411)
 	if (ret != 0)
 		goto error; /*This is not active mode. */
 
+	ret = ln8411_apply_new_limits(ln8411);
+	if (ret < 0)
+		goto error;
+	if (ret > 0)
+		goto done;
+
 	ccmode = ln8411_check_status(ln8411);
 	if (ccmode < 0) {
 		ret = ccmode;
@@ -2805,7 +3051,7 @@ static int ln8411_charge_adjust_ccmode(struct ln8411_charger *ln8411)
 	case STS_MODE_CHG_LOOP:	/* CHG_LOOP does't exist */
 		if (ln8411->ta_type == TA_TYPE_WIRELESS) {
 			/* Decrease RX voltage (100mV) */
-			ln8411->ta_vol = ln8411->ta_vol - WCRX_VOL_STEP;
+			ln8411->ta_vol = ln8411->ta_vol - ln8411->pdata->wcrx_vol_down_step;
 			logbuffer_prlog(ln8411, LOGLEVEL_DEBUG, "End1: rx_vol=%u",
 					 ln8411->ta_vol);
 		} else if (ln8411->ta_cur > LN8411_TA_MIN_CUR) {
@@ -2881,35 +3127,12 @@ static int ln8411_charge_adjust_ccmode(struct ln8411_charger *ln8411)
 		goto error;
 	}
 
+done:
 	mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work,
 			 msecs_to_jiffies(ln8411->timer_period));
 error:
 	mutex_unlock(&ln8411->lock);
 	dev_dbg(ln8411->dev, "%s: End, ret=%d\n", __func__, ret);
-	return ret;
-}
-
-/* <0 error, 0 no new limits, >0 new limits */
-static int ln8411_apply_new_limits(struct ln8411_charger *ln8411)
-{
-	int ret = 0;
-
-	if (ln8411->new_iin && ln8411->new_iin < ln8411->iin_cc) {
-		ret = ln8411_apply_new_iin(ln8411);
-		if (ret == 0)
-			ret = 1;
-	} else if (ln8411->new_vfloat) {
-		ret = ln8411_apply_new_vfloat(ln8411);
-		if (ret == 0)
-			ret = 1;
-	} else if (ln8411->new_iin) {
-		ret = ln8411_apply_new_iin(ln8411);
-		if (ret == 0)
-			ret = 1;
-	} else {
-		return 0;
-	}
-
 	return ret;
 }
 
@@ -3011,7 +3234,7 @@ static int ln8411_charge_ccmode(struct ln8411_charger *ln8411)
 
 		if (ln8411->ta_type == TA_TYPE_WIRELESS) {
 			/* Decrease RX voltage (100mV) */
-			ln8411->ta_vol = ln8411->ta_vol - WCRX_VOL_STEP;
+			ln8411->ta_vol = ln8411->ta_vol - ln8411->pdata->wcrx_vol_down_step;
 			logbuffer_prlog(ln8411, LOGLEVEL_DEBUG,
 					"IIN_LOOP1: iin=%d, next_rx_vol=%u",
 					iin, ln8411->ta_vol);
@@ -3086,6 +3309,12 @@ static int ln8411_charge_start_cvmode(struct ln8411_charger *ln8411)
 	if (ret != 0)
 		goto error_exit;
 
+	ret = ln8411_apply_new_limits(ln8411);
+	if (ret < 0)
+		goto error_exit;
+	if (ret > 0)
+		goto done;
+
 	/* Check the status */
 	cvmode = ln8411_check_status(ln8411);
 	if (cvmode < 0) {
@@ -3100,7 +3329,7 @@ static int ln8411_charge_start_cvmode(struct ln8411_charger *ln8411)
 
 		if (ln8411->ta_type == TA_TYPE_WIRELESS) {
 			/* Decrease RX voltage (100mV) */
-			ln8411->ta_vol = ln8411->ta_vol - WCRX_VOL_STEP;
+			ln8411->ta_vol = ln8411->ta_vol - ln8411->pdata->wcrx_vol_down_step;
 			logbuffer_prlog(ln8411, LOGLEVEL_DEBUG,
 					"%s: PreCV IIN_LOOP: rx_vol=%u",
 				 __func__, ln8411->ta_vol);
@@ -3133,7 +3362,7 @@ static int ln8411_charge_start_cvmode(struct ln8411_charger *ln8411)
 		/* Check the TA type */
 		if (ln8411->ta_type == TA_TYPE_WIRELESS) {
 			/* Decrease RX voltage (100mV) */
-			ln8411->ta_vol = ln8411->ta_vol - WCRX_VOL_STEP;
+			ln8411->ta_vol = ln8411->ta_vol - ln8411->pdata->wcrx_vol_down_step;
 			logbuffer_prlog(ln8411, LOGLEVEL_DEBUG,
 					"%s: PreCV VF Cont: rx_vol=%u",
 					__func__, ln8411->ta_vol);
@@ -3183,6 +3412,7 @@ static int ln8411_charge_start_cvmode(struct ln8411_charger *ln8411)
 		break;
 	}
 
+done:
 	mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work,
 			 msecs_to_jiffies(ln8411->timer_period));
 error_exit:
@@ -3297,7 +3527,7 @@ static int ln8411_charge_cvmode(struct ln8411_charger *ln8411)
 		if (ln8411->ta_type == TA_TYPE_WIRELESS) {
 			/* Decrease RX Voltage (100mV) */
 			ln8411->ta_vol = ln8411->ta_vol -
-						WCRX_VOL_STEP;
+						ln8411->pdata->wcrx_vol_down_step;
 			logbuffer_prlog(ln8411, LOGLEVEL_DEBUG,
 					"%s: CV LOOP, Cont: rx_vol=%u",
 					__func__, ln8411->ta_vol);
@@ -3330,7 +3560,7 @@ static int ln8411_charge_cvmode(struct ln8411_charger *ln8411)
 		/* Check the TA type */
 		if (ln8411->ta_type == TA_TYPE_WIRELESS) {
 			/* Decrease RX voltage */
-			ln8411->ta_vol = ln8411->ta_vol - WCRX_VOL_STEP;
+			ln8411->ta_vol = ln8411->ta_vol - ln8411->pdata->wcrx_vol_down_step;
 			logbuffer_prlog(ln8411, LOGLEVEL_DEBUG,
 					"%s: CV VFLOAT, Cont: rx_vol=%u",
 					__func__, ln8411->ta_vol);
@@ -3506,7 +3736,10 @@ static int ln8411_preset_dcmode(struct ln8411_charger *ln8411)
 		if (ret)
 			goto error;
 
-		ret = regmap_write(ln8411->regmap, LN8411_CTRL1, LN8411_WPCGATE_EN);
+		if (ln8411->wlc_usb_path)
+			ret = regmap_write(ln8411->regmap, LN8411_CTRL1, LN8411_OVPGATE_EN);
+		else
+			ret = regmap_write(ln8411->regmap, LN8411_CTRL1, LN8411_WPCGATE_EN);
 		if (ret)
 			goto error;
 		/*
@@ -3595,6 +3828,29 @@ static int ln8411_preset_config(struct ln8411_charger *ln8411)
 
 	ln8411->charging_state = DC_STATE_PRESET_DC;
 
+	/* wait till ta_vol has reached initial set value */
+	if (ln8411->mpp && ln8411->ta_type == TA_TYPE_WIRELESS && ln8411->wlc_rx_vol_retry_cnt
+	    && ln8411->wlc_rx_vol_check) {
+		int rx_vol_now;
+
+		rx_vol_now = ln8411_get_rx_voltage(ln8411);
+		if (rx_vol_now <= ln8411->ta_vol - LN8411_WLC_VOL_TOLERANCE) {
+			ln8411->wlc_rx_vol_retry_cnt--;
+			dev_info(ln8411->dev, "%s: rx_vol_now %d not within %d of ta_vol %d\n",
+				 __func__, rx_vol_now, LN8411_WLC_VOL_TOLERANCE,
+				 ln8411->ta_vol);
+
+			mutex_unlock(&ln8411->lock);
+			mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work,
+					 msecs_to_jiffies(ln8411->wcrx_vol_delay));
+			return 0;
+		}
+
+		dev_info(ln8411->dev, "%s: rx_vol_now %d within %d of ta_vol %d\n",
+			__func__, rx_vol_now, LN8411_WLC_VOL_TOLERANCE,
+			ln8411->ta_vol);
+	}
+
 	/* ->iin_cc and ->fv_uv are configured externally */
 	ret = ln8411_set_input_current(ln8411, ln8411->pdata->iin_cfg);
 	if (ret < 0)
@@ -3604,6 +3860,7 @@ static int ln8411_preset_config(struct ln8411_charger *ln8411)
 	if (ret < 0)
 		goto error;
 
+	ln8411_read_adc(ln8411, ADCCH_VIN);
 	/* Enable LN8411 unless aready enabled */
 	ret = ln8411_set_charging(ln8411, true);
 	if (ret < 0)
@@ -3651,7 +3908,15 @@ static int ln8411_check_active_state(struct ln8411_charger *ln8411)
 	if (ret == 0) {
 		/* LN8411 is active state */
 		ln8411->retry_cnt = 0;
-		ln8411->timer_id = TIMER_ADJUST_CCMODE;
+		if (ln8411->mpp && ln8411->ta_type == TA_TYPE_WIRELESS) {
+			dev_dbg(ln8411->dev, "%s: setting mpp gpio to 1\n", __func__);
+			gpiod_direction_output(ln8411->pdata->mpp_gpio, 1);
+		}
+
+		if (ln8411->cal_mode)
+			ln8411->timer_id = TIMER_POWER_CAL;
+		else
+			ln8411->timer_id = TIMER_ADJUST_CCMODE;
 		ln8411->timer_period = 0;
 	}
 
@@ -3741,9 +4006,8 @@ static int ln8411_check_vbatmin(struct ln8411_charger *ln8411)
 		if (!ln8411_hw_init(ln8411))
 			ln8411->hw_init_done = true;
 
-	vbat = ln8411_read_adc(ln8411, ADCCH_VBAT);
-	if (vbat < 0) {
-		ret = vbat;
+	ret = ln8411_get_batt_info(ln8411, BATT_VOLTAGE, &vbat);
+	if (ret < 0) {
 		goto error;
 	} else if (vbat <= LN8411_DC_VBAT_MIN) {
 		ret = -EAGAIN;
@@ -3893,14 +4157,39 @@ static int ln8411_send_message(struct ln8411_charger *ln8411)
 
 	/* Adjust TA current and voltage step */
 	if (ln8411->ta_type == TA_TYPE_WIRELESS) {
+		int power_tgt = ln8411_get_power(ln8411);
+
 		/* RX voltage resolution is 40mV */
-		val = ln8411->ta_vol / WCRX_VOL_STEP;
-		ln8411->ta_vol = val * WCRX_VOL_STEP;
+		val = ln8411->ta_vol / WCRX_VOL_STEP_SIZE;
+		ln8411->ta_vol = val * WCRX_VOL_STEP_SIZE;
+
+		dev_dbg(ln8411->dev, "power: %d, ta_vol: %d, prev_ta_vol: %d, no_inc: %d\n",
+			 ln8411->power, ln8411->ta_vol, ln8411->prev_ta_vol, ln8411->no_inc_ta_vol);
+
+		if (power_tgt && ln8411->ta_vol != ln8411->prev_ta_vol && ln8411->ta_vol != 0)
+			ln8411_set_iin_cc_from_power(ln8411);
+
+		/* power limit based control for MPP HPM (25W) */
+		if (ln8411->no_inc_ta_vol && ln8411->ta_vol > ln8411->prev_ta_vol) {
+			ln8411->ta_vol = ln8411->prev_ta_vol;
+			dev_dbg(ln8411->dev, "%s: updating ta_vol to %d no_inc: %d\n", __func__,
+				ln8411->ta_vol, ln8411->no_inc_ta_vol);
+			goto skip_pps;
+		}
 
 		/* Set RX voltage */
 		dev_dbg(ln8411->dev, "%s: ta_type=%d, ta_vol=%d\n", __func__,
-			 ln8411->ta_type, ln8411->ta_vol);
+			ln8411->ta_type, ln8411->ta_vol);
 		ret = ln8411_send_rx_voltage(ln8411, WCRX_REQUEST_VOLTAGE);
+		if (ret == 0) {
+			ln8411->prev_ta_vol = ln8411->ta_vol;
+			dev_dbg(ln8411->dev, "%s: updating prev_ta_vol to %d\n", __func__,
+				ln8411->ta_vol);
+		} else if (ret == -EAGAIN && ln8411->prev_ta_vol) {
+			ln8411->ta_vol = ln8411->prev_ta_vol;
+			dev_dbg(ln8411->dev, "%s: updating ta_vol to %d\n", __func__,
+				ln8411->ta_vol);
+		}
 	} else {
 		/* PPS voltage resolution is 20mV */
 		val = ln8411->ta_vol / PD_MSG_TA_VOL_STEP;
@@ -3933,7 +4222,8 @@ static int ln8411_send_message(struct ln8411_charger *ln8411)
 skip_pps:
 	switch (ln8411->charging_state) {
 	case DC_STATE_PRESET_DC:
-		ln8411->timer_id = TIMER_PRESET_CONFIG;
+		if (ret != -EAGAIN)
+			ln8411->timer_id = TIMER_PRESET_CONFIG;
 		break;
 	case DC_STATE_ADJUST_CC:
 		ln8411->timer_id = TIMER_ADJUST_CCMODE;
@@ -3953,10 +4243,19 @@ skip_pps:
 	case DC_STATE_ADJUST_TACUR:
 		ln8411->timer_id = TIMER_ADJUST_TACUR;
 		break;
+	case DC_STATE_CAL:
+		ln8411->timer_id = TIMER_POWER_CAL;
+		break;
+	case DC_STATE_ERROR_RECOVER:
+		ln8411->timer_id = TIMER_ERROR_RECOVER;
+		break;
 	default:
 		ret = -EINVAL;
 		break;
 	}
+
+	if (ret == -EAGAIN)
+		ret = 0;
 
 	if (ret < 0) {
 		dev_err(ln8411->dev, "%s: Error-send_pd_message to %d (%d)\n",
@@ -3967,10 +4266,13 @@ skip_pps:
 	/* Ensure both TA voltage and current get set before enabling charging */
 	if (ln8411->ftm_mode)
 		ln8411->timer_period = 0;
+	else if (ln8411->ta_type == TA_TYPE_WIRELESS)
+		ln8411->timer_period = ln8411->wcrx_vol_delay;
 	else if (ln8411->timer_id == TIMER_PRESET_CONFIG)
 		ln8411->timer_period = LN8411_TA_CONFIG_WAIT_T;
-	else if (ln8411->ta_type == TA_TYPE_WIRELESS)
-		ln8411->timer_period = LN8411_PDMSG_WLC_WAIT_T;
+	else if ((ln8411->charging_state == DC_STATE_CV_MODE) ||
+		 (ln8411->charging_state == DC_STATE_START_CV))
+		ln8411->timer_period = LN8411_CVMODE_CHECK_T;
 	else
 		ln8411->timer_period = LN8411_PDMSG_WAIT_T;
 
@@ -3986,6 +4288,24 @@ skip_pps:
 		 ln8411->timer_id, ln8411->timer_period);
 
 	mutex_unlock(&ln8411->lock);
+	return ret;
+}
+
+static int ln8411_error_recover(struct ln8411_charger *ln8411)
+{
+	int ret;
+
+	ret = ln8411_set_status_disable_charging(ln8411);
+	if (ret) {
+		dev_err(ln8411->dev, "%s: unable to disable charging for retry (%d)\n",
+			__func__, ret);
+		return ret;
+	}
+
+	ret = ln8411_set_status_charging(ln8411);
+	if (ret)
+		dev_err(ln8411->dev, "%s: unable to enable charging for retry (%d)\n",
+		__func__, ret);
 	return ret;
 }
 
@@ -4027,6 +4347,10 @@ static void ln8411_timer_work(struct work_struct *work)
 		ret = ln8411_start_direct_charging(ln8411);
 		if (ret < 0)
 			goto error;
+		break;
+
+	case TIMER_POWER_CAL:
+		ret = ln8411_power_cal(ln8411);
 		break;
 
 	/*
@@ -4112,6 +4436,18 @@ static void ln8411_timer_work(struct work_struct *work)
 		mutex_unlock(&ln8411->lock);
 		break;
 
+	case TIMER_ERROR_RECOVER:
+		ln8411->charging_state = ln8411->ret_state;
+		ln8411->ret_state = 0;
+		ln8411->timer_id = ln8411->ret_timer_id;
+		ln8411->ret_timer_id = 0;
+
+		ret = ln8411_error_recover(ln8411);
+		if (!ret)
+			mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work,
+					msecs_to_jiffies(LN8411_ENABLE_WLC_DELAY_T));
+		break;
+
 	case TIMER_ID_NONE:
 		ret = ln8411_stop_charging(ln8411);
 		if (ret < 0)
@@ -4141,34 +4477,36 @@ error:
 			"ucp_count:%d ucp_debounce:%d low_batt_count:%d",
 			__func__, timer_id, ln8411->timer_id, charging_state,
 			ln8411->charging_state, ln8411->timer_period, ln8411->error, ret,
-			ln8411->ibus_ucp_retry_cnt, ln8411->ibus_ucp_debounce_cnt,
+			ln8411->eagain_retry_cnt, ln8411->eagain_debounce_cnt,
 			ln8411->low_batt_retry_cnt);
 
-	if (ret == -EAGAIN && ln8411_err_is_ucp(ln8411, &retries) && retries) {
+	if (ret == -EAGAIN && ln8411_err_is_retry(ln8411, &retries) && retries) {
 		/* Retry for IBUS UCP case */
-		ln8411->ibus_ucp_retry_cnt--;
-		ln8411->ibus_ucp_debounce_cnt = LN8411_MAX_IBUS_UCP_DEBOUNCE_COUNT;
-		ret = ln8411_set_status_disable_charging(ln8411);
-		if (ret) {
-			dev_err(ln8411->dev, "%s: unable to disable charging for retry (%d)\n",
-				__func__, ret);
-		} else {
-			ret = ln8411_set_status_charging(ln8411);
-			if (ret)
-				dev_err(ln8411->dev, "%s: unable to enable charging for retry (%d)\n",
-				__func__, ret);
-		}
+		ln8411->eagain_retry_cnt--;
+		ln8411->eagain_debounce_cnt = LN8411_MAX_EAGAIN_DEBOUNCE_CNT;
 
-		if (!ret)
-			mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work,
-					msecs_to_jiffies(LN8411_ENABLE_WLC_DELAY_T));
+		if (ln8411->mpp && ln8411->ta_type == TA_TYPE_WIRELESS) {
+			dev_info(ln8411->dev, "%s: entering error recovery ...\n", __func__);
+			ln8411->ret_state = ln8411->charging_state;
+			ln8411->ret_timer_id = ln8411->timer_id;
+			ln8411->charging_state = DC_STATE_ERROR_RECOVER;
+			ln8411->ta_vol += WCRX_VOL_ERROR_STEP;
+			ln8411->timer_id = TIMER_PDMSG_SEND;
+			ln8411->timer_period = 0;
+			mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work, 0);
+		} else {
+			ret = ln8411_error_recover(ln8411);
+			if (!ret)
+				mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work,
+						msecs_to_jiffies(LN8411_ENABLE_WLC_DELAY_T));
+		}
 	} else if (ret == -EAGAIN && ln8411_err_is_low_batt(ln8411, &retries) && retries) {
 		ln8411->low_batt_retry_cnt--;
 		mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work,
 				 msecs_to_jiffies(LN8411_ENABLE_WLC_DELAY_T));
 	} else {
 		ln8411_stop_charging(ln8411);
-		if (ret == -EAGAIN && ((ln8411_err_is_ucp(ln8411, &retries) && !retries) ||
+		if (ret == -EAGAIN && ((ln8411_err_is_retry(ln8411, &retries) && !retries) ||
                                        (ln8411_err_is_low_batt(ln8411, &retries) && !retries))) {
 			dev_err(ln8411->dev, "%s: retry failed err:%d\n", __func__, ln8411->error);
 
@@ -4284,7 +4622,7 @@ static int ln8411_hw_init(struct ln8411_charger *ln8411)
 	if (ret)
 		goto error_done;
 
-	if (ln8411->pdata->irq_gpio >= 0) {
+	if (!IS_ERR_OR_NULL(ln8411->pdata->irq_gpio)) {
 		ret = ln8411_irq_init(ln8411);
 		if (ret < 0)
 			dev_warn(ln8411->dev, "%s: failed to initialize IRQ: %d\n", __func__, ret);
@@ -4353,7 +4691,7 @@ static int ln8411_hw_init(struct ln8411_charger *ln8411)
 	ret = regmap_write(ln8411->regmap, LN8411_IBUS_UCP, 0x10);
 	if (ret)
 		goto error_done;
-
+	ln8411->ibus_ucp_disable_timestamp = 0;
 
 	if (ln8411->chip_info.chip_rev == 1) {
 		dev_dbg(ln8411->dev, "%s: pmid2out ovp to 13 for A1%%\n", __func__);
@@ -4454,18 +4792,17 @@ static int ln8411_irq_init(struct ln8411_charger *ln8411)
 	const struct ln8411_platform_data *pdata = ln8411->pdata;
 	int ret, irq;
 
-	irq = gpio_to_irq(pdata->irq_gpio);
-
-	ret = gpio_request_one(pdata->irq_gpio, GPIOF_IN, ln8411->client->name);
-	if (ret < 0)
+	irq = gpiod_to_irq(pdata->irq_gpio);
+	if (irq < 0) {
+		ret = irq;
 		goto fail;
+	}
 
 	ret = request_threaded_irq(irq, NULL, ln8411_interrupt_handler,
 				   IRQF_TRIGGER_LOW | IRQF_ONESHOT,
 				   ln8411->client->name, ln8411);
 	if (ret < 0)
 		goto fail_gpio;
-
 
 	/* Mask all IRQ for the time being */
 	ret = regmap_clear_bits(ln8411->regmap, LN8411_INT_MASK, LN8411_VOUT_INSERT_MASK |
@@ -4479,7 +4816,7 @@ static int ln8411_irq_init(struct ln8411_charger *ln8411)
 fail_write:
 	free_irq(irq, ln8411);
 fail_gpio:
-	gpio_free(pdata->irq_gpio);
+	gpiod_put(pdata->irq_gpio);
 fail:
 	ln8411->client->irq = 0;
 	return ret;
@@ -4554,7 +4891,10 @@ static int ln8411_set_charging_enabled(struct ln8411_charger *ln8411, int index)
 		/* Start Direct Charging on Index */
 		ln8411->dc_start_time = get_boot_sec();
 		ln8411_chg_stats_init(&ln8411->chg_data);
-		ln8411->pps_index = index;
+		if (ln8411->wlc_usb_path)
+			ln8411->pps_index = PPS_INDEX_WLC;
+		else
+			ln8411->pps_index = index;
 
 		dev_info(ln8411->dev, "%s: charging_state=%u->%u\n", __func__,
 			 ln8411->charging_state, DC_STATE_CHECK_VBAT);
@@ -4865,7 +5205,6 @@ static int ln8411_mains_set_property(struct power_supply *psy,
 
 		break;
 
-	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 		ret = ln8411_set_new_vfloat(ln8411, val->intval);
 		break;
@@ -4876,7 +5215,6 @@ static int ln8411_mains_set_property(struct power_supply *psy,
 	 * NOTE: iin should be equivalent to iin = cc_max /2
 	 */
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
 		ret = ln8411_set_new_cc_max(ln8411, val->intval);
 		break;
 
@@ -4890,6 +5228,10 @@ static int ln8411_mains_set_property(struct power_supply *psy,
 		mutex_lock(&ln8411->lock);
 		ret = ln8411_set_new_iin(ln8411, val->intval);
 		mutex_unlock(&ln8411->lock);
+		break;
+
+	case POWER_SUPPLY_PROP_INPUT_POWER_LIMIT:
+		ret = ln8411_set_ta_pwr(ln8411, val->intval);
 		break;
 
 	default:
@@ -4921,7 +5263,6 @@ static int ln8411_mains_get_property(struct power_supply *psy,
 			val->intval = 0;
 		break;
 
-	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 		ret = ln8411_const_charge_voltage(ln8411);
 		if (ret < 0)
@@ -4929,7 +5270,6 @@ static int ln8411_mains_get_property(struct power_supply *psy,
 		val->intval = ret;
 		break;
 
-	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 		ret = get_const_charge_current(ln8411);
 		if (ret < 0)
@@ -5002,8 +5342,6 @@ static int ln8411_mains_get_property(struct power_supply *psy,
 
 /*
  * GBMS not visible
- * POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
- * POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
  * POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
  * POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX,
  */
@@ -5029,9 +5367,9 @@ static int ln8411_mains_is_writeable(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_ONLINE:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
+	case POWER_SUPPLY_PROP_INPUT_POWER_LIMIT:
 		return 1;
 	default:
 		break;
@@ -5055,7 +5393,8 @@ static int ln8411_gbms_mains_set_property(struct power_supply *psy,
 	switch (prop) {
 
 	case GBMS_PROP_CHARGING_ENABLED:
-		ret = ln8411_set_charging_enabled(ln8411, val->prop.intval);
+		if (!ln8411->mpp || val->prop.intval != PPS_INDEX_WLC)
+			ret = ln8411_set_charging_enabled(ln8411, val->prop.intval);
 		break;
 
 	case GBMS_PROP_CHARGE_DISABLE:
@@ -5068,11 +5407,51 @@ static int ln8411_gbms_mains_set_property(struct power_supply *psy,
 				ln8411->charging_state = DC_STATE_NO_CHARGING;
 			ln8411_vote_dc_avail(ln8411, 1, 1);
 
-			ln8411->ibus_ucp_retry_cnt = LN8411_MAX_IBUS_UCP_RETRY_CNT;
-			ln8411->ibus_ucp_debounce_cnt = LN8411_MAX_IBUS_UCP_DEBOUNCE_COUNT;
+			ln8411->eagain_retry_cnt = LN8411_MAX_EAGAIN_RETRY_CNT;
+			ln8411->eagain_debounce_cnt = LN8411_MAX_EAGAIN_DEBOUNCE_CNT;
 			ln8411->error = LN8411_ERROR_NONE;
 			ln8411->low_batt_retry_cnt = LN8411_MAX_LOW_BATT_RETRY_CNT;
+			ln8411->wlc_rx_vol_retry_cnt = LN8411_MAX_RX_VOL_RETRY_CNT;
 		}
+		break;
+
+	case GBMS_PROP_MPP_DPLOSS_CALIBRATION_LIMIT:
+		ret = ln8411_set_ta_cal_pwr(ln8411, val->prop.intval);
+		if (val->prop.intval) {
+			ln8411->cal_mode = true;
+			ln8411->power_cnt = 0;
+
+			if (ln8411->charging_state == DC_STATE_CAL)
+				mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work, 0);
+		} else if (ln8411->cal_mode) {
+			ln8411->cal_mode = false;
+			ln8411->timer_id = TIMER_ADJUST_CCMODE;
+			mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work, 0);
+		}
+		break;
+
+	case GBMS_PROP_ENABLE_SWITCH_CAP:
+		if (val->prop.intval)
+			ln8411_set_charging_enabled(ln8411, PPS_INDEX_WLC);
+		else
+			ln8411_set_charging_enabled(ln8411, 0);
+		break;
+
+	case GBMS_PROP_WLC_LOAD_DECREASE:
+		dev_dbg(ln8411->dev, "%s: GBMS_PROP_WLC_LOAD_DECREASE: %d\n", __func__,
+			 val->prop.intval);
+		if (val->prop.intval) {
+			ln8411->no_inc_ta_vol = 1;
+			ln8411->ta_vol -= val->prop.intval;
+			ln8411->timer_id = TIMER_PDMSG_SEND;
+			mod_delayed_work(ln8411->dc_wq, &ln8411->timer_work, 0);
+		} else {
+			ln8411->no_inc_ta_vol = 0;
+		}
+		break;
+
+	case GBMS_PROP_TA_MAX_VOLTAGE:
+		ln8411->ta_max_vol = val->prop.intval;
 		break;
 
 	default:
@@ -5117,6 +5496,10 @@ static int ln8411_gbms_mains_get_property(struct power_supply *psy,
 		val->int64val = chg_state.v;
 		break;
 
+	case GBMS_PROP_ENABLE_SWITCH_CAP:
+		val->prop.intval = ln8411_check_error(ln8411) == 0;
+		break;
+
 	case GBMS_PROP_CURRENT_NOW:
 		/* return the input current - uA unit */
 		mutex_lock(&ln8411->lock);
@@ -5140,11 +5523,14 @@ static int ln8411_gbms_mains_is_writeable(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_ONLINE:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
-	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 	case GBMS_PROP_CHARGING_ENABLED:
 	case GBMS_PROP_CHARGE_DISABLE:
+	case GBMS_PROP_MPP_DPLOSS_CALIBRATION_LIMIT:
+	case GBMS_PROP_ENABLE_SWITCH_CAP:
+	case GBMS_PROP_WLC_LOAD_DECREASE:
+	case GBMS_PROP_TA_MAX_VOLTAGE:
 		return 1;
 	default:
 		break;
@@ -5179,8 +5565,20 @@ static int of_ln8411_dt(struct device *dev,
 		return -EINVAL;
 
 	/* irq gpio */
-	pdata->irq_gpio = of_get_named_gpio(np_ln8411, "ln8411,irq-gpio", 0);
-	dev_info(dev, "irq-gpio: %d \n", pdata->irq_gpio);
+	pdata->irq_gpio = devm_gpiod_get(dev, "ln8411,irq", GPIOD_IN);
+	dev_info(dev, "irq-gpio: %d \n",
+		 (IS_ERR(pdata->irq_gpio)
+		 ? (int)PTR_ERR(pdata->irq_gpio)
+		 : desc_to_gpio(pdata->irq_gpio)));
+
+	pdata->mpp_gpio = devm_gpiod_get(dev, "ln8411,mpp", GPIOD_OUT_HIGH);
+	if (IS_ERR_OR_NULL(pdata->mpp_gpio)) {
+		dev_info(dev, "mpp-gpio: %d\n",	(IS_ERR(pdata->mpp_gpio)
+			 ? (int)PTR_ERR(pdata->mpp_gpio)
+			 : desc_to_gpio(pdata->mpp_gpio)));
+	}
+	if (PTR_ERR(pdata->mpp_gpio) == -EPROBE_DEFER)
+		return -EPROBE_DEFER;
 
 	/* input current limit */
 	ret = of_property_read_u32(np_ln8411, "ln8411,input-current-limit",
@@ -5230,6 +5628,24 @@ static int of_ln8411_dt(struct device *dev,
 
 	pdata->si_fet_ovp_drive = of_property_read_bool(np_ln8411, "ln8411,si-fet-ovp-drive");
 	dev_info(dev, "ln8411,si-fet-ovp-drive is %d\n", pdata->si_fet_ovp_drive);
+
+	ret = of_property_read_u32(np_ln8411, "ln8411,wcrx-vol-up-step",
+				   &pdata->wcrx_vol_up_step);
+	if (ret)
+		pdata->wcrx_vol_up_step = WCRX_VOL_STEP;
+	dev_info(dev, "ln8411,wcrx_vol_up_step is %u\n", pdata->wcrx_vol_up_step);
+
+	ret = of_property_read_u32(np_ln8411, "ln8411,wcrx-vol-down-step",
+				   &pdata->wcrx_vol_down_step);
+	if (ret)
+		pdata->wcrx_vol_down_step = WCRX_VOL_STEP;
+	dev_info(dev, "ln8411,wcrx_vol_down_step is %u\n", pdata->wcrx_vol_down_step);
+
+	ret = of_property_read_u32(np_ln8411, "ln8411,max-cal-power",
+				   &pdata->max_cal_power);
+	if (ret)
+		pdata->max_cal_power = MAX_CAL_POWER;
+	dev_info(dev, "ln8411,max-cal-power is %u\n", pdata->max_cal_power);
 
 #if IS_ENABLED(CONFIG_THERMAL)
 	/* USBC thermal zone */
@@ -5451,8 +5867,8 @@ static int ln8411_create_fs_entries(struct ln8411_charger *chip)
 		return -ENOENT;
 	}
 
-	debugfs_create_bool("wlc_rampout_iin", 0644, chip->debug_root,
-			     &chip->wlc_ramp_out_iin);
+	debugfs_create_u32("wlc_rampout_iin_target", 0644, chip->debug_root,
+			     &chip->wlc_ramp_out_iin_target);
 	debugfs_create_u32("wlc_rampout_delay", 0644, chip->debug_root,
 			   &chip->wlc_ramp_out_delay);
 	debugfs_create_u32("wlc_rampout_vout_target", 0644, chip->debug_root,
@@ -5483,12 +5899,31 @@ static int ln8411_create_fs_entries(struct ln8411_charger *chip)
 	debugfs_create_file("ftm_mode", 0644, chip->debug_root, chip,
 			    &debug_ftm_mode_ops);
 
+	debugfs_create_u32("mpp_init_ta_vol_mult", 0644, chip->debug_root,
+			   &chip->init_vol_mult);
+	debugfs_create_u32("mpp_init_ta_vol_offset", 0644, chip->debug_root,
+			   &chip->init_vol_offset);
+	debugfs_create_u32("mpp_wlc_usb_path", 0644, chip->debug_root,
+			   &chip->wlc_usb_path);
+	debugfs_create_u32("mpp_prect_target_threshold", 0644, chip->debug_root,
+			   &chip->power_offset);
+	debugfs_create_u32("mpp_prect_stable_cnt_goal", 0644, chip->debug_root,
+			   &chip->power_stable_cnt_goal);
+	debugfs_create_u32("rx_voltage_up_step", 0644, chip->debug_root,
+			   &chip->pdata->wcrx_vol_up_step);
+	debugfs_create_u32("rx_voltage_down_step", 0644, chip->debug_root,
+			   &chip->pdata->wcrx_vol_down_step);
+	debugfs_create_u32("rx_voltage_loop_delay", 0644, chip->debug_root,
+			   &chip->wcrx_vol_delay);
+	debugfs_create_u32("max_cal_power", 0644, chip->debug_root,
+			   &chip->pdata->max_cal_power);
+	debugfs_create_u32("wlc_rx_vol_check", 0644, chip->debug_root,
+			   &chip->wlc_rx_vol_check);
 	return 0;
 }
 
 
-static int ln8411_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int ln8411_probe(struct i2c_client *client)
 {
 	static char *battery[] = { "ln8411-battery" };
 	struct power_supply_config mains_cfg = {};
@@ -5497,7 +5932,9 @@ static int ln8411_probe(struct i2c_client *client,
 	struct device *dev = &client->dev;
 	const char *psy_name = NULL;
 	int ret;
-
+#if IS_ENABLED(CONFIG_GPIOLIB)
+	struct device_node *dp;
+#endif
 	dev_dbg(dev, "%s: =========START=========\n", __func__);
 
 	ln8411_charger = devm_kzalloc(dev, sizeof(*ln8411_charger), GFP_KERNEL);
@@ -5514,6 +5951,11 @@ static int ln8411_probe(struct i2c_client *client,
 
 		ret = of_ln8411_dt(&client->dev, pdata);
 		if (ret < 0){
+			if (ret == -EPROBE_DEFER) {
+				dev_err(&client->dev, "Defer probe due to of_node not ready\n");
+				return -EPROBE_DEFER;
+			}
+
 			dev_err(&client->dev, "Failed to get device of_node \n");
 			return -ENOMEM;
 		}
@@ -5547,13 +5989,24 @@ static int ln8411_probe(struct i2c_client *client,
 	ln8411_charger->dev = &client->dev;
 	ln8411_charger->pdata = pdata;
 	ln8411_charger->charging_state = DC_STATE_NO_CHARGING;
-	ln8411_charger->wlc_ramp_out_iin = true;
+	ln8411_charger->wlc_ramp_out_iin_target = 300000;
 	ln8411_charger->wlc_ramp_out_vout_target = 15300000; /* 15.3V as default */
 	ln8411_charger->wlc_ramp_out_delay = 300; /* 300 ms default */
 	ln8411_charger->hw_init_done = false;
-	ln8411_charger->ibus_ucp_retry_cnt = LN8411_MAX_IBUS_UCP_RETRY_CNT;
-	ln8411_charger->ibus_ucp_debounce_cnt = LN8411_MAX_IBUS_UCP_DEBOUNCE_COUNT;
+	ln8411_charger->eagain_retry_cnt = LN8411_MAX_EAGAIN_RETRY_CNT;
+	ln8411_charger->eagain_debounce_cnt = LN8411_MAX_EAGAIN_DEBOUNCE_CNT;
 	ln8411_charger->low_batt_retry_cnt = LN8411_MAX_LOW_BATT_RETRY_CNT;
+	ln8411_charger->wcrx_vol_delay = LN8411_PDMSG_WLC_WAIT_T;
+	if (!(IS_ERR_OR_NULL(pdata->mpp_gpio))) {
+		ln8411_charger->mpp = 1;
+		ln8411_charger->init_vol_mult = 4040;
+		ln8411_charger->init_vol_offset = 550;
+		ln8411_charger->power_offset = LN8411_POWER_OFFSET;
+		ln8411_charger->power_stable_cnt_goal = LN8411_POWER_STABLE_CNT;
+		ln8411_charger->wlc_rx_vol_retry_cnt = LN8411_MAX_RX_VOL_RETRY_CNT;
+		ln8411_charger->wlc_rx_vol_check = 1;
+		dev_info(&client->dev, "Product supports MPP\n");
+	}
 
 	/* Create a work queue for the direct charger */
 	ln8411_charger->dc_wq = alloc_ordered_workqueue("ln8411_dc_wq", WQ_MEM_RECLAIM);
@@ -5586,7 +6039,7 @@ static int ln8411_probe(struct i2c_client *client,
 	if (ret < 0) {
 		dev_warn(dev, "ln8411: PPS not available (%d)\n", ret);
 	} else {
-		const char *logname = "ln8411";
+		const char *logname = "dc_mains";
 
 		ln8411_charger->log = logbuffer_register(logname);
 		if (IS_ERR(ln8411_charger->log)) {
@@ -5615,11 +6068,10 @@ static int ln8411_probe(struct i2c_client *client,
 #if IS_ENABLED(CONFIG_GPIOLIB)
 	ln8411_gpio_init(ln8411_charger);
 	ln8411_charger->gpio.parent = &client->dev;
-	ln8411_charger->gpio.of_node = of_find_node_by_name(client->dev.of_node,
-							    ln8411_charger->gpio.label);
-	if (!ln8411_charger->gpio.of_node)
+	dp = of_find_node_by_name(client->dev.of_node, ln8411_charger->gpio.label);
+	if (!dp)
 		dev_err(&client->dev, "Failed to find %s DT node\n", ln8411_charger->gpio.label);
-
+	ln8411_charger->gpio.fwnode = of_node_to_fwnode(dp);
 	ret = devm_gpiochip_add_data(&client->dev, &ln8411_charger->gpio, ln8411_charger);
 	dev_info(&client->dev, "%d GPIOs registered ret: %d\n", ln8411_charger->gpio.ngpio, ret);
 #endif
@@ -5627,10 +6079,10 @@ static int ln8411_probe(struct i2c_client *client,
 #if IS_ENABLED(CONFIG_THERMAL)
 	if (pdata->usb_tz_name) {
 		ln8411_charger->usb_tzd =
-			thermal_zone_device_register(pdata->usb_tz_name, 0, 0,
-						     ln8411_charger,
-						     &ln8411_usb_tzd_ops,
-						     NULL, 0, 0);
+			thermal_tripless_zone_device_register(pdata->usb_tz_name,
+							      ln8411_charger,
+							      &ln8411_usb_tzd_ops,
+							      NULL);
 		if (IS_ERR(ln8411_charger->usb_tzd)) {
 			ln8411_charger->usb_tzd = NULL;
 			ret = PTR_ERR(ln8411_charger->usb_tzd);
@@ -5661,7 +6113,7 @@ static void ln8411_remove(struct i2c_client *client)
 
 	if (client->irq) {
 		free_irq(client->irq, ln8411_charger);
-		gpio_free(ln8411_charger->pdata->irq_gpio);
+		gpiod_put(ln8411_charger->pdata->irq_gpio);
 	}
 
 	destroy_workqueue(ln8411_charger->dc_wq);
@@ -5797,8 +6249,7 @@ static int ln8411_resume(struct device *dev)
 #endif
 
 static const struct dev_pm_ops ln8411_pm_ops = {
-	.suspend = ln8411_suspend,
-	.resume = ln8411_resume,
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(ln8411_suspend, ln8411_resume)
 };
 
 static struct i2c_driver ln8411_driver = {

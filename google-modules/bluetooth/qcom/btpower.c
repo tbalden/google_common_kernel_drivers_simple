@@ -847,7 +847,7 @@ static int btpower_chardev_create(struct btpower_platform_data *drvdata)
 	LOGD(drvdata, "registered chardev number %d:%d",
 		MAJOR(drvdata->cdev.dev), MINOR(drvdata->cdev.dev));
 
-	bpcls = class_create(THIS_MODULE, "bt-dev");
+	bpcls = class_create("bt-dev");
 	if (IS_ERR_OR_NULL(bpcls)) {
 		ret = PTR_ERR(bpcls);
 		LOGE(drvdata, "can't create class (%d)", ret);

@@ -258,7 +258,7 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 
 	/* Getting responses from Aoc for the command just sent */
 	count = 0;
-	time_expired = jiffies + msecs_to_jiffies(WAITING_TIME_MS);
+	time_expired = jiffies + msecs_to_jiffies(chip->aoc_waiting_time_in_ms);
 	while (((err = aoc_service_read(dev, buffer, buffer_size,
 					NONBLOCKING)) < 1) &&
 	       time_is_after_jiffies(time_expired)) {
@@ -788,7 +788,7 @@ int aoc_incall_capture_enable_get(struct aoc_chip *chip, int stream, long *val)
 	int err;
 	struct CMD_AUDIO_OUTPUT_TELE_CAPT cmd;
 
-#if IS_ENABLED(CONFIG_SOC_GS101) || IS_ENABLED(CONFIG_SOC_GS201)
+#if !IS_ENABLED(CONFIG_AOC_ALSA_INCALL_CAP_3)
 	if (stream == 3) {
 		*val = chip->incall_capture_state[stream];
 		return 0;
@@ -819,7 +819,7 @@ int aoc_incall_capture_enable_set(struct aoc_chip *chip, int stream, long val)
 	int err;
 	struct CMD_AUDIO_OUTPUT_TELE_CAPT cmd;
 
-#if IS_ENABLED(CONFIG_SOC_GS101) || IS_ENABLED(CONFIG_SOC_GS201)
+#if !IS_ENABLED(CONFIG_AOC_ALSA_INCALL_CAP_3)
 	if (stream == 3) {
 		chip->incall_capture_state[stream] = val;
 		pr_info("%s: Not support stream 3\n", __func__);
@@ -1208,6 +1208,30 @@ int aoc_set_usb_config_v2(struct aoc_chip *chip)
 	return err;
 }
 
+int aoc_set_isoc_tr_info(struct aoc_chip *chip, u16 ep_id, u16 dir, struct xhci_ring *ep_ring)
+{
+	struct CMD_USB_CONTROL_SET_ISOC_TR_INFO cmd;
+	int err = 0;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_USB_CONTROL_SET_ISOC_TR_INFO_ID, sizeof(cmd));
+
+	cmd.ep_id = ep_id;
+	cmd.dir = dir;
+	cmd.type = ep_ring->type;
+	cmd.num_segs = ep_ring->num_segs;
+	cmd.seg_ptr = ep_ring->first_seg->dma;
+	cmd.max_packet = ep_ring->bounce_buf_len;
+	cmd.cycle_state = ep_ring->cycle_state;
+	cmd.num_trbs_free = ep_ring->num_trbs_free;
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd,
+				sizeof(cmd), (uint8_t *)&cmd, chip);
+	if (err < 0)
+		pr_err("ERR:%d in aoc set usb isoc tr info fail\n", err);
+
+	return err;
+}
+
 int aoc_set_usb_feedback_endpoint(struct aoc_chip *chip, struct usb_device *udev,
 			struct usb_host_endpoint *ep)
 {
@@ -1226,28 +1250,27 @@ int aoc_set_usb_feedback_endpoint(struct aoc_chip *chip, struct usb_device *udev
 	cmd.binterval = ep_desc->bInterval;
 	cmd.brefresh = ep_desc->bRefresh;
 
-	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
-		chip);
-	if (err < 0) {
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd,
+				sizeof(cmd), (uint8_t *)&cmd, chip);
+	if (err < 0)
 		pr_err("ERR:%d in aoc set usb feedback endpoint\n", err);
-	}
 
 	return err;
 }
 
-int aoc_set_usb_offload_state(struct aoc_chip *chip, bool offload_enable)
+int aoc_set_usb_offload_state(struct aoc_chip *chip, uint8_t offload_state)
 {
 	struct CMD_USB_CONTROL_SET_OFFLOAD_STATE cmd;
 	int err = 0;
 
 	AocCmdHdrSet(&(cmd.parent), CMD_USB_CONTROL_SET_OFFLOAD_STATE_ID, sizeof(cmd));
 
-	cmd.offloading = offload_enable;
+	cmd.offloading = offload_state;
 
-	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
-		chip);
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd,
+				sizeof(cmd), (uint8_t *)&cmd, chip);
 	if (err < 0) {
-		pr_err("ERR:%d in aoc set usb offload fail\n", err);
+		pr_err("ERR:%d in aoc set usb offload state fail\n", err);
 	}
 
 	return err;
@@ -1645,6 +1668,9 @@ int aoc_audio_path_open(struct aoc_chip *chip, int src, int dest, bool be_on)
 	src_idx = AOC_ID_TO_INDEX(src);
 	dest_idx = AOC_ID_TO_INDEX(dest);
 
+	if (src_idx == IDX_HIFI && src_for_capture)
+		return 0;
+
 	/* voice call capture or playback */
 	if ((src_idx == 3 && src_for_capture) || (src_idx == 4 && !src_for_capture))
 		return aoc_phonecall_path_open(chip, src_idx, dest_idx, dest & AOC_TX);
@@ -1671,6 +1697,9 @@ int aoc_audio_path_close(struct aoc_chip *chip, int src, int dest, bool be_on)
 	src_for_capture = src & AOC_TX;
 	src_idx = AOC_ID_TO_INDEX(src);
 	dest_idx = AOC_ID_TO_INDEX(dest);
+
+	if (src_idx == IDX_HIFI && src_for_capture)
+		return 0;
 
 	/* voice call capture or playback */
 	if ((src_idx == 3 && src_for_capture) || (src_idx == 4 && !src_for_capture))
@@ -2536,7 +2565,7 @@ int aoc_compr_offload_linear_gain_set(struct aoc_chip *chip, long *val)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_SOC_ZUMA)
+#if !IS_ENABLED(CONFIG_SOC_GS101) && !IS_ENABLED(CONFIG_SOC_GS201)
 int aoc_mel_enable(struct aoc_chip *chip, int enable)
 {
 	int err = 0;
@@ -3028,7 +3057,7 @@ int aoc_audio_voip_stop(struct aoc_alsa_stream *alsa_stream)
 /* TODO: this function is modified to deal with the issue where ALSA appl_ptr
  * and the reader pointer in AoC ringer buffer are out-of-sync due to overflow
  */
-int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
+int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, struct iov_iter *dest,
 		   uint32_t count)
 {
 	int err = 0;
@@ -3063,9 +3092,9 @@ int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
 	if (!aoc_online_state(dev))
 		memset(tmp, 0, count);
 
-	err = copy_to_user(dest, tmp, count);
-	if (err != 0) {
-		pr_err("ERR: %d bytes not copied to user space\n", err);
+	err = copy_to_iter(tmp, count, dest);
+	if (err != count) {
+		pr_err("ERR: %d bytes not copied to user space\n", count - err);
 		err = -EFAULT;
 	}
 
@@ -3073,7 +3102,59 @@ out:
 	return err < 0 ? err : 0;
 }
 
-int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
+int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, struct iov_iter *src,
+		    uint32_t count)
+{
+	int err = 0;
+	struct aoc_service_dev *dev = alsa_stream->dev;
+	void *tmp;
+	int avail;
+	uint32_t block_size;
+
+	avail = aoc_ring_bytes_available_to_write(dev->service, AOC_DOWN);
+	if (unlikely(avail < count)) {
+		pr_err("ERR: inconsistent write/read pointers, avail = %d, towrite = %u\n",
+		       avail, count);
+		err = -EFAULT;
+		goto out;
+	}
+
+	if (alsa_stream->substream) {
+		tmp = alsa_stream->substream->runtime->dma_area;
+		block_size = count;
+	} else {
+		tmp = alsa_stream->cstream->runtime->buffer;
+		block_size = alsa_stream->offload_temp_data_buf_size;
+	}
+
+	while (count > 0) {
+		if (count < block_size)
+			block_size = count;
+
+		if (alsa_stream->cstream)
+			pr_debug("compr offload, count: %d, blocksize: %d\n", count, block_size);
+
+		err = copy_from_iter(tmp, block_size, src);
+		if (err != block_size) {
+			pr_err("ERR: %d bytes not read from user space\n", block_size - err);
+			err = -EFAULT;
+			goto out;
+		}
+
+		err = aoc_service_write(dev, tmp, block_size, NONBLOCKING);
+		if (err != block_size) {
+			pr_err("ERR: unwritten data - %d bytes\n", block_size - err);
+			err = -EFAULT;
+		}
+
+		count -= block_size;
+	}
+
+out:
+	return err < 0 ? err : 0;
+}
+
+int aoc_audio_write_user(struct aoc_alsa_stream *alsa_stream, void *src,
 		    uint32_t count)
 {
 	int err = 0;
@@ -3809,14 +3890,16 @@ int prepare_phonecall(struct aoc_alsa_stream *alsa_stream)
 	if (src != 4)
 		return 0;
 
+#if IS_ENABLED(CONFIG_EXYNOS_MODEM_IF)
+	modem_voice_call_notify_event(MODEM_VOICE_CALL_ON, NULL);
+#endif
+
 	/* Binding modem to start audio flow */
 	err = aoc_modem_start(alsa_stream->chip);
 	if (err < 0)
 		pr_err("ERR:%d Telephony modem start fail\n", err);
 
-#if IS_ENABLED(CONFIG_EXYNOS_MODEM_IF)
-	modem_voice_call_notify_event(MODEM_VOICE_CALL_ON, NULL);
-#endif
+	pr_debug("phonecall started\n");
 
 	return err;
 }
@@ -3841,6 +3924,8 @@ int teardown_phonecall(struct aoc_alsa_stream *alsa_stream)
 #if IS_ENABLED(CONFIG_EXYNOS_MODEM_IF)
 	modem_voice_call_notify_event(MODEM_VOICE_CALL_OFF, NULL);
 #endif
+
+	pr_debug("phonecall stopped\n");
 
 	return err;
 }

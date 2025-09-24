@@ -10,7 +10,6 @@
 
 #include <gcip/gcip-common-image-header.h>
 #include <gcip/gcip-image-config.h>
-#include <gcip/gcip-memory.h>
 
 #include "gxp-config.h"
 #include "gxp-firmware-data.h"
@@ -49,11 +48,14 @@ static int gxp_firmware_loader_gsa_auth(struct gxp_dev *gxp)
 	/* Authenticate MCU firmware */
 	header_vaddr = dma_alloc_coherent(gxp->gsa_dev, GCIP_FW_HEADER_SIZE,
 					  &headers_dma_addr, GFP_KERNEL);
-	if (!header_vaddr)
+	if (!header_vaddr) {
+		dev_err(gxp->dev,
+			"Failed to allocate coherent memory for header\n");
 		return -ENOMEM;
-
+	}
 	memcpy(header_vaddr, mgr->mcu_firmware->data, GCIP_FW_HEADER_SIZE);
-	ret = gsa_load_dsp_fw_image(gxp->gsa_dev, headers_dma_addr, mcu_fw->image_buf.phys_addr);
+	ret = gsa_load_dsp_fw_image(gxp->gsa_dev, headers_dma_addr,
+				    mcu_fw->image_buf.paddr);
 	if (ret) {
 		dev_err(gxp->dev, "MCU fw GSA authentication fails");
 		goto err_load_mcu_fw;
@@ -64,7 +66,7 @@ static int gxp_firmware_loader_gsa_auth(struct gxp_dev *gxp)
 		/* Authenticate core firmware */
 		memcpy(header_vaddr, data, GCIP_FW_HEADER_SIZE);
 		ret = gsa_load_dsp_fw_image(gxp->gsa_dev, headers_dma_addr,
-					    gxp->fwbufs[core].phys_addr);
+					    gxp->fwbufs[core].paddr);
 		if (ret) {
 			dev_err(gxp->dev,
 				"Core %u firmware authentication fails", core);
@@ -144,11 +146,13 @@ char *gxp_firmware_loader_get_core_fw_name(struct gxp_dev *gxp)
 static void gxp_firmware_loader_get_core_image_config(struct gxp_dev *gxp)
 {
 	struct gxp_firmware_loader_manager *mgr = gxp->fw_loader_mgr;
-	const struct gcip_image_config *cfg;
+	struct gcip_common_image_header *hdr =
+		(struct gcip_common_image_header *)mgr->core_firmware[0]->data;
+	struct gcip_image_config *cfg;
 
 	if (unlikely(mgr->core_firmware[0]->size < GCIP_FW_HEADER_SIZE))
 		return;
-	cfg = gcip_common_image_get_config_from_hdr(mgr->core_firmware[0]->data, GXP_FW_MAGIC);
+	cfg = get_image_config_from_hdr(hdr);
 	if (cfg)
 		mgr->core_img_cfg = *cfg;
 	else
@@ -248,7 +252,7 @@ err_unload_core:
 int gxp_firmware_loader_load_if_needed(struct gxp_dev *gxp)
 {
 	struct gxp_firmware_loader_manager *mgr = gxp->fw_loader_mgr;
-	struct gcip_memory res = {};
+	struct gxp_mapped_resource res = {};
 	int ret = 0;
 
 	mutex_lock(&mgr->lock);
@@ -286,8 +290,6 @@ void gxp_firmware_loader_unload(struct gxp_dev *gxp)
 		gxp_firmware_loader_unload_core_firmware(gxp);
 	}
 	mgr->is_loaded = false;
-	mgr->is_core_copied = false;
-	mgr->is_mcu_copied = false;
 	mutex_unlock(&mgr->lock);
 }
 

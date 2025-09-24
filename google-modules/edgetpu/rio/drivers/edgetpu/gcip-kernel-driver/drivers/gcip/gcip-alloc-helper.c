@@ -52,8 +52,10 @@ struct sg_table *gcip_alloc_noncontiguous(struct device *dev, size_t size, gfp_t
 		mem = vzalloc(size);
 	else
 		mem = vmalloc(size);
-	if (!mem)
+	if (!mem) {
+		dev_err(dev, "GCIP noncontiguous alloc size=%#zx failed", size);
 		goto err_free_sh;
+	}
 
 	pages = kvmalloc_array(count, sizeof(*pages), gfp);
 	if (!pages)

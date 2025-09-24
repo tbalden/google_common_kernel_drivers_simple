@@ -8,8 +8,6 @@
 #ifndef __EDGETPU_IREMAP_POOL_H_
 #define __EDGETPU_IREMAP_POOL_H_
 
-#include <gcip/gcip-memory.h>
-
 #include "edgetpu-internal.h"
 #include "edgetpu-mmu.h"
 
@@ -37,17 +35,17 @@ void edgetpu_iremap_pool_destroy(struct edgetpu_dev *etdev);
 /*
  * Allocate memory from the instruction remap pool.
  */
-int edgetpu_iremap_alloc(struct edgetpu_dev *etdev, size_t size, struct gcip_memory *mem);
+int edgetpu_iremap_alloc(struct edgetpu_dev *etdev, size_t size, struct edgetpu_coherent_mem *mem);
 
 /*
  * Free memory allocated by the function above.
  */
-void edgetpu_iremap_free(struct edgetpu_dev *etdev, struct gcip_memory *mem);
+void edgetpu_iremap_free(struct edgetpu_dev *etdev, struct edgetpu_coherent_mem *mem);
 
 /*
  * Map memory in the pool to user space.
  */
 int edgetpu_iremap_mmap(struct edgetpu_dev *etdev, struct vm_area_struct *vma,
-			struct gcip_memory *mem);
+			struct edgetpu_coherent_mem *mem);
 
 #endif /* __EDGETPU_IREMAP_POOL_H_ */

@@ -19,24 +19,6 @@
 #include "tcpci_max77759.h"
 #include "google_tcpci_shim.h"
 
-struct bc12_status {
-	struct workqueue_struct *wq;
-	struct max77759_plat *chip;
-	/*
-	 * TODO: set to unknown upon disconnect and roleswap
-	 * Set after ChgTypRun
-	 */
-	enum power_supply_usb_type usb_type;
-	/* Protects changes to this structure. */
-	struct mutex lock;
-	struct power_supply *usb_psy;
-	bool retry_done;
-	/* Tracks whether BC12 is enabled */
-	bool enable;
-	/* Status callback */
-	bc12_status_callback bc12_callback;
-};
-
 struct bc12_update {
 	struct work_struct bc12_work;
 	u8 vendor_alert1_status;
@@ -56,6 +38,8 @@ EXPORT_SYMBOL_GPL(get_usb_type);
  */
 static void vendor_bc12_alert(struct work_struct *work)
 {
+	bool run_cb = false;
+	bool is_bc12_running;
 	struct bc12_update *update = container_of(work, struct bc12_update,
 						  bc12_work);
 	struct bc12_status *bc12 = update->bc12;
@@ -71,8 +55,11 @@ static void vendor_bc12_alert(struct work_struct *work)
 		      , update->vendor_alert1_status, update->vendor_bc_status1,
 		      update->vendor_bc_status2, bc12->enable ? 'y' : 'n');
 
-	if (!bc12->enable)
+	if (!bc12->enable) {
+		mutex_unlock(&bc12->lock);
 		goto exit;
+	}
+
 	/*
 	 * If Data contact Detect timeout interrupt is detected,
 	 * detection could report erroneous charger type,
@@ -118,6 +105,26 @@ static void vendor_bc12_alert(struct work_struct *work)
 			break;
 		}
 		val.intval = bc12->usb_type;
+	}
+
+	if (update->vendor_alert1_status & CHGTYPRUNRINT) {
+		logbuffer_log(plat->log, "BC12: running");
+		run_cb = true;
+		is_bc12_running = true;
+	}
+
+	if (update->vendor_alert1_status & CHGTYPRUNFINT) {
+		logbuffer_log(plat->log, "BC12: not running");
+		run_cb = true;
+		is_bc12_running = false;
+	}
+
+	if (update->vendor_alert1_status & PRCHGTYPINT)
+		logbuffer_log(plat->log, "BC12: Proprietary port");
+
+	mutex_unlock(&bc12->lock);
+
+	if (update->vendor_alert1_status & CHGTYPINT) {
 		if (power_supply_set_property(bc12->usb_psy,
 					      POWER_SUPPLY_PROP_USB_TYPE,
 					      &val))
@@ -127,21 +134,13 @@ static void vendor_bc12_alert(struct work_struct *work)
 			usb_psy_start_sdp_timeout(usb_psy_data);
 	}
 
-	if (update->vendor_alert1_status & CHGTYPRUNRINT) {
-		logbuffer_log(plat->log, "BC12: running");
-		if (bc12->bc12_callback)
-			bc12->bc12_callback(bc12->chip, true);
+	if (run_cb) {
+		logbuffer_log(plat->log, "Invoking bc12_cb, is_bc12_running: %c",
+			      is_bc12_running ? 'y' : 'n');
+		bc12->bc12_callback(bc12->chip, is_bc12_running);
 	}
-	if (update->vendor_alert1_status & CHGTYPRUNFINT) {
-		logbuffer_log(plat->log, "BC12: not running");
-		if (bc12->bc12_callback)
-			bc12->bc12_callback(bc12->chip, false);
-	}
-	if (update->vendor_alert1_status & PRCHGTYPINT)
-		logbuffer_log(plat->log, "BC12: Proprietary port");
 
 exit:
-	mutex_unlock(&bc12->lock);
 	devm_kfree(plat->dev, update);
 }
 
@@ -180,10 +179,18 @@ void bc12_enable(struct bc12_status *bc12, bool enable)
 	struct max77759_plat *plat = bc12->chip;
 	struct regmap *regmap = plat->data.regmap;
 
+	/*
+	 * Hold lock to complete updating enable flag to prevent racing against
+	 * vendor_alert1_status. Disabling CHGDETEN will make the hardware
+	 * report unknown.
+	 */
+	mutex_lock(&bc12->lock);
 	ret = max77759_update_bits8(regmap, VENDOR_BC_CTRL1, CHGDETEN, enable ? CHGDETEN : 0);
-	logbuffer_log(plat->log, "BC12: %s ret: %d", enable ? "enabled" : "disabled", ret);
 	if (!ret)
 		bc12->enable = enable;
+	mutex_unlock(&bc12->lock);
+	logbuffer_logk(plat->log, LOGLEVEL_INFO, "BC12: %s ret: %d",
+		       enable ? "enabled" : "disabled", ret);
 }
 EXPORT_SYMBOL_GPL(bc12_enable);
 
@@ -209,6 +216,24 @@ void bc12_teardown(struct bc12_status *bc12)
 	power_supply_put(bc12->usb_psy);
 }
 EXPORT_SYMBOL_GPL(bc12_teardown);
+
+static void enable_bc12_when_disabled(struct bc12_status *bc12) {
+	struct max77759_plat *chip = bc12->chip;
+	struct regmap *regmap = chip->data.regmap;
+	u8 vendor_bc_ctrl1;
+	int ret;
+
+	ret = max77759_read8(regmap, VENDOR_BC_CTRL1, &vendor_bc_ctrl1);
+	logbuffer_log(chip->log, "BC12: %s: VENDOR_BC_CTRL1 read, val:0x%x ret:%d",
+		      __func__, vendor_bc_ctrl1, ret);
+	if (ret < 0)
+		return;
+
+	if (vendor_bc_ctrl1 & CHGDETEN)
+		return;
+
+	bc12_enable(bc12, true);
+}
 
 struct bc12_status *bc12_init(struct max77759_plat *plat, bc12_status_callback callback)
 {
@@ -260,6 +285,7 @@ struct bc12_status *bc12_init(struct max77759_plat *plat, bc12_status_callback c
 
 	/* Unmask Vendor alert */
 	max77759_write8(regmap, VENDOR_ALERT_MASK1, 0xff);
+	enable_bc12_when_disabled(bc12);
 
 	return bc12;
 

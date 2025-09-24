@@ -10,6 +10,8 @@
 #if !defined(_TRACE_SYSTRACE_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_SYSTRACE_H
 
+#if IS_ENABLED(CONFIG_VH_SYSTRACE)
+
 #include <linux/tracepoint.h>
 
 /* make declarations singleton at recursive inclusion path */
@@ -75,6 +77,14 @@ TRACE_EVENT(0,
 		pid,			\
 		name,			\
 		0)
+
+#else /* CONFIG_VH_SYSTRACE */
+
+static inline void __ATRACE_INT_PID(int pid, const char *name, int64_t value) {}
+static inline void __ATRACE_BEGIN_PID(int pid, const char *name) {}
+static inline void __ATRACE_END_PID(int pid, const char *name) {}
+
+#endif /* CONFIG_VH_SYSTRACE */
 
 #define ATRACE_INT(name, value)		\
 	__ATRACE_INT_PID(current->tgid, name, value)

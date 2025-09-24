@@ -30,14 +30,14 @@ enum ln8411_modes {
 
 enum ln8411_error {
 	LN8411_ERROR_NONE = 0,
-	LN8411_ERROR_UCP,
+	LN8411_ERROR_RETRY,
 	LN8411_ERROR_NOT_ACTIVE,
 	LN8411_ERROR_APDO,
 	LN8411_ERROR_LOW_VBATT,
 };
 
 struct ln8411_platform_data {
-	s32		irq_gpio;	/* GPIO pin that's connected to INT# */
+	struct gpio_desc *irq_gpio;	/* GPIO pin that's connected to INT# */
 	u32		iin_cfg;	/* Input Current Limit - uA unit */
 	u32		iin_cfg_max;	/* from config/dt */
 	u32		iin_topoff;	/* Input Topoff current -uV unit */
@@ -46,6 +46,10 @@ struct ln8411_platform_data {
 	u32		ta_max_vol_2_1;
 	u32		ta_max_vol_4_1;
 	bool		si_fet_ovp_drive;
+	struct gpio_desc	*mpp_gpio;
+	u32		wcrx_vol_up_step;
+	u32		wcrx_vol_down_step;
+	u32		max_cal_power;
 
 #if IS_ENABLED(CONFIG_THERMAL)
 	const char *usb_tz_name;
@@ -199,8 +203,12 @@ struct ln8411_charger {
 	bool			mains_online;
 	u32 			charging_state;
 	u32			ret_state;
+	u32			ret_timer_id;
 
 	u32			iin_cc;
+	u32			power;
+	u32			cal_power;
+	u32			power_cnt;
 
 	u32			ta_cur;
 	u32			ta_vol;
@@ -209,6 +217,8 @@ struct ln8411_charger {
 	/* need for APDO switch test */
 	unsigned int		prev_ta_cur;
 	unsigned int		prev_ta_vol;
+
+	u32			no_inc_ta_vol;
 
 	/* same as pps_data */
 	u32			ta_max_cur;
@@ -225,9 +235,12 @@ struct ln8411_charger {
 
 	enum ln8411_error	error;
 	s32			retry_cnt;
-	s32			ibus_ucp_retry_cnt;
-	u8			ibus_ucp_debounce_cnt;
+	s32			eagain_retry_cnt;
+	u8			eagain_debounce_cnt;
 	s32			low_batt_retry_cnt;
+	u8			wlc_rx_vol_retry_cnt;
+
+	u32			wlc_rx_vol_check;
 
 	struct ln8411_platform_data *pdata;
 
@@ -274,7 +287,7 @@ struct ln8411_charger {
 	s32			debug_adc_channel;
 
 
-	bool 			wlc_ramp_out_iin;
+	u32			wlc_ramp_out_iin_target;
 	u32 			wlc_ramp_out_delay;
 	u32 			wlc_ramp_out_vout_target;
 
@@ -295,6 +308,16 @@ struct ln8411_charger {
 	u32			iin_reg;
 	u32			vfloat_reg;
 	bool			ftm_mode; /* factory test, will ignore usb pps */
+	bool			cal_mode;
+
+	bool			mpp;
+	u32			init_vol_mult;
+	u32			init_vol_offset;
+	u32			wlc_usb_path;
+	ktime_t			ibus_ucp_disable_timestamp;
+	u32			power_offset;
+	u32			power_stable_cnt_goal;
+	u32			wcrx_vol_delay;
 };
 
 /* Direct Charging State */
@@ -310,7 +333,9 @@ enum {
 	DC_STATE_CHARGING_DONE,	/* Charging Done */
 	DC_STATE_ADJUST_TAVOL,	/* Adjust TA voltage, new TA current < 1000mA */
 	DC_STATE_ADJUST_TACUR,	/* Adjust TA current, new TA current < 1000mA */
+	DC_STATE_CAL,		/* Power calibration for MPP */
 	DC_STATE_ERROR,		/* Error encountered, no charging */
+	DC_STATE_ERROR_RECOVER, /* Recovery after error */
 	DC_STATE_MAX,
 };
 
@@ -334,6 +359,13 @@ enum {
 	CHG_2TO1_DC_MODE,
 	CHG_4TO1_DC_MODE,
 	CHG_1TO2_DC_MODE,
+};
+
+/* Messages to WLC for DPLoss calibration */
+enum {
+	WLC_SW_CAP_EN,
+	WLC_CAL_DONE,
+	WLC_CAL_ERROR,
 };
 
 /* PPS timers */
@@ -368,6 +400,8 @@ int ln8411_get_apdo_index(struct ln8411_charger *ln8411, unsigned int *ta_max_vo
 			  unsigned int *ta_max_cur, unsigned int *ta_objpos);
 s32 ln8411_send_rx_voltage(struct ln8411_charger *ln8411, u32 msg_type);
 s32 ln8411_get_rx_max_power(struct ln8411_charger *ln8411);
+int ln8411_get_rx_voltage(struct ln8411_charger *ln8411);
+int ln8411_send_rx_message(struct ln8411_charger *ln8411, int msg_type, int val);
 s32 ln8411_set_ta_type(struct ln8411_charger *ln8411, s32 pps_index);
 
 /* GBMS integration */

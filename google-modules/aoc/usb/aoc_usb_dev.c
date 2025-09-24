@@ -6,6 +6,7 @@
 
 #define pr_fmt(fmt) "aoc_usb_control: " fmt
 
+#include <linux/completion.h>
 #include <linux/device.h>
 #include <linux/init.h>
 #include <linux/jiffies.h>
@@ -14,11 +15,15 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
+#include <linux/usb/google-role-sw.h>
 #include "aoc.h"
 #include "aoc-interface.h"
 #include "aoc_usb.h"
 
 #define AOC_USB_NAME "aoc_usb"
+#define COMPLETION_TIMEOUT_MS 1000
+#define GVOTABLE_POLLING_MS 100
+#define WORK_MAX_RETRIES 3
 
 enum { NONBLOCKING = 0, BLOCKING = 1 };
 
@@ -29,6 +34,8 @@ enum {
 	TYPE_DCBAA
 };
 
+static DECLARE_COMPLETION(work_done);
+static DECLARE_COMPLETION(exit_host);
 static BLOCKING_NOTIFIER_HEAD(aoc_usb_notifier_list);
 
 int register_aoc_usb_notifier(struct notifier_block *nb)
@@ -39,12 +46,6 @@ int register_aoc_usb_notifier(struct notifier_block *nb)
 int unregister_aoc_usb_notifier(struct notifier_block *nb)
 {
 	return blocking_notifier_chain_unregister(&aoc_usb_notifier_list, nb);
-}
-
-int notify_offload_state(bool enabled)
-{
-	blocking_notifier_call_chain(&aoc_usb_notifier_list, SET_OFFLOAD_STATE, &enabled);
-	return 0;
 }
 
 int xhci_set_dcbaa_ptr(u64 aoc_dcbaa_ptr)
@@ -76,24 +77,6 @@ int xhci_sync_conn_stat(unsigned int bus_id, unsigned int dev_num, unsigned int 
 int usb_host_mode_state_notify(enum aoc_usb_state usb_state)
 {
 	return xhci_sync_conn_stat(0, 0, 0, usb_state);
-}
-
-int xhci_set_isoc_tr_info(u16 ep_id, u16 dir, struct xhci_ring *ep_ring)
-{
-	struct get_isoc_tr_info_args tr_info;
-
-	tr_info.ep_id = ep_id;
-	tr_info.dir = dir;
-	tr_info.num_segs = ep_ring->num_segs;
-	tr_info.max_packet = ep_ring->bounce_buf_len;
-	tr_info.type = ep_ring->type;
-	tr_info.seg_ptr = ep_ring->first_seg->dma;
-	tr_info.cycle_state = ep_ring->cycle_state;
-	tr_info.num_trbs_free = ep_ring->num_trbs_free;
-
-	blocking_notifier_call_chain(&aoc_usb_notifier_list, SET_ISOC_TR_INFO, &tr_info);
-
-	return 0;
 }
 
 static ssize_t aoc_usb_send_command(struct aoc_usb_drvdata *drvdata,
@@ -204,67 +187,14 @@ static int aoc_usb_notify_conn_stat(struct aoc_usb_drvdata *drvdata, void *data)
 	cmd->slot_id = args->slot_id;
 	cmd->conn_state = args->conn_stat;
 
-	ret = aoc_usb_send_command(drvdata, cmd, sizeof(*cmd), cmd, sizeof(*cmd));
-	if (ret < 0) {
-		kfree(cmd);
-		return ret;
+	if (cmd->bus_id == 0 && cmd->dev_num == 0 && cmd->slot_id == 0) {
+		drvdata->usb_state = cmd->conn_state;
+		if (drvdata->usb_state == USB_CONNECTED)
+			init_completion(&exit_host);
+		else
+			complete(&exit_host);
 	}
 
-	kfree(cmd);
-
-	return 0;
-}
-
-static int aoc_usb_set_isoc_tr_info(struct aoc_usb_drvdata *drvdata, void *args)
-{
-	int ret;
-	struct get_isoc_tr_info_args *tr_info_args =
-		(struct get_isoc_tr_info_args *)args;
-	struct CMD_USB_CONTROL_SET_ISOC_TR_INFO *cmd;
-
-	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_SET_ISOC_TR_INFO), GFP_KERNEL);
-	if (!cmd)
-		return -ENOMEM;
-
-	AocCmdHdrSet(&cmd->parent,
-		     CMD_USB_CONTROL_SET_ISOC_TR_INFO_ID,
-		     sizeof(*cmd));
-
-	cmd->ep_id = tr_info_args->ep_id;
-	cmd->dir = tr_info_args->dir;
-	cmd->type = tr_info_args->type;
-	cmd->num_segs = tr_info_args->num_segs;
-	cmd->seg_ptr = tr_info_args->seg_ptr;
-	cmd->max_packet = tr_info_args->max_packet;
-	cmd->cycle_state = tr_info_args->cycle_state;
-	cmd->num_trbs_free = tr_info_args->num_trbs_free;
-
-	dev_dbg(&drvdata->adev->dev, "%s: ep_id=%u, dir=%u\n", __func__, cmd->ep_id, cmd->dir);
-	ret = aoc_usb_send_command(drvdata, cmd, sizeof(*cmd), cmd, sizeof(*cmd));
-	if (ret < 0) {
-		kfree(cmd);
-		return ret;
-	}
-
-	kfree(cmd);
-
-	return 0;
-}
-
-static int aoc_usb_set_offload_state(struct aoc_usb_drvdata *drvdata, bool *enabled)
-{
-	int ret = 0;
-	struct CMD_USB_CONTROL_SET_OFFLOAD_STATE *cmd;
-
-	cmd = kzalloc(sizeof(struct CMD_USB_CONTROL_SET_OFFLOAD_STATE), GFP_KERNEL);
-	if (!cmd)
-		return -ENOMEM;
-
-	AocCmdHdrSet(&cmd->parent,
-		     CMD_USB_CONTROL_SET_OFFLOAD_STATE_ID,
-		     sizeof(*cmd));
-
-	cmd->offloading = *enabled;
 	ret = aoc_usb_send_command(drvdata, cmd, sizeof(*cmd), cmd, sizeof(*cmd));
 	if (ret < 0) {
 		kfree(cmd);
@@ -290,14 +220,8 @@ static int aoc_usb_notify(struct notifier_block *this,
 	case SETUP_DONE:
 		ret = aoc_usb_setup_done(drvdata);
 		break;
-	case SET_ISOC_TR_INFO:
-		ret = aoc_usb_set_isoc_tr_info(drvdata, data);
-		break;
 	case SYNC_CONN_STAT:
 		ret = aoc_usb_notify_conn_stat(drvdata, data);
-		break;
-	case SET_OFFLOAD_STATE:
-		ret = aoc_usb_set_offload_state(drvdata, data);
 		break;
 	default:
 		dev_warn(&drvdata->adev->dev, "Code %lu is not supported\n", code);
@@ -310,49 +234,43 @@ static int aoc_usb_notify(struct notifier_block *this,
 	return ret;
 }
 
-static int aoc_usb_match(struct device *dev, void *data)
+static void usb_host_aoc_ready_work(struct work_struct *ws)
 {
-	if (sysfs_streq(dev_driver_string(dev), "xhci-hcd-exynos"))
-		return 1;
+	int ret = 0;
+	struct aoc_usb_drvdata *drvdata =
+				container_of(ws, struct aoc_usb_drvdata, aoc_ready_work.work);
 
-	return 0;
-}
+	drvdata->usb_data_role_votable =
+		gvotable_election_get_handle(VOTABLE_USB_DATA_ROLE);
 
-static bool aoc_usb_is_hcd_working(void)
-{
-	struct device_node *np;
-	struct platform_device *pdev;
-	struct device *udev;
-	int ret;
-
-	np = of_find_node_by_name(NULL, "dwc3");
-	if (!np || !of_device_is_available(np)) {
-		pr_err("Cannot find dwc3 device node\n");
-		return false;
+	if (drvdata->usb_data_role_votable) {
+		ret = gvotable_cast_vote(drvdata->usb_data_role_votable, AOC_VOTER,
+			(void *)(long)(drvdata->aoc_ready ? USB_ROLE_HOST : USB_ROLE_NONE), 1);
+		if (ret < 0) {
+			dev_err(&drvdata->adev->dev,
+				"Fail to cast vote: %s (ret = %d), retry count: %d (%s)\n",
+				drvdata->aoc_ready ? "USB_ROLE_HOST" : "USB_ROLE_NONE", ret,
+				drvdata->aoc_ready_work_retries,
+				drvdata->aoc_ready_work_retries < WORK_MAX_RETRIES ?
+				"retry again later" : "retry limit exceeded");
+			if (drvdata->aoc_ready_work_retries++ < WORK_MAX_RETRIES) {
+				mod_delayed_work(system_wq, &drvdata->aoc_ready_work,
+						 msecs_to_jiffies(GVOTABLE_POLLING_MS));
+			} else {
+				if (!drvdata->aoc_ready)
+					dev_err(&drvdata->adev->dev,
+					"ssr not updated to role-switch driver, might ramdump!\n");
+				complete(&work_done);
+			}
+		} else {
+			complete(&work_done);
+		}
+	} else {
+		dev_info(&drvdata->adev->dev, "gvotable %s doesn't exist, vote again later\n",
+					     VOTABLE_USB_DATA_ROLE);
+		mod_delayed_work(system_wq, &drvdata->aoc_ready_work,
+				 msecs_to_jiffies(GVOTABLE_POLLING_MS));
 	}
-
-	pdev = of_find_device_by_node(np);
-	if (!pdev)
-		return false;
-
-	udev = device_find_child(&pdev->dev, NULL, aoc_usb_match);
-	if (!udev)
-		return false;
-
-	ret = usb_host_mode_state_notify(USB_CONNECTED);
-	if (ret)
-		dev_err(udev, "Notifying AoC for xhci driver status is failed.\n");
-
-	return true;
-}
-
-static struct work_struct usb_host_mode_checking_ws;
-static void usb_host_mode_checking_work(struct work_struct *ws)
-{
-	if (aoc_usb_is_hcd_working())
-		pr_info("USB HCD is working, send notification to AoC\n");
-
-	return;
 }
 
 static int aoc_usb_probe(struct aoc_service_dev *adev)
@@ -368,6 +286,7 @@ static int aoc_usb_probe(struct aoc_service_dev *adev)
 	drvdata->adev = adev;
 
 	mutex_init(&drvdata->lock);
+	INIT_DEFERRABLE_WORK(&drvdata->aoc_ready_work, usb_host_aoc_ready_work);
 
 	drvdata->ws = wakeup_source_register(dev, dev_name(dev));
 	if (!drvdata->ws) {
@@ -377,12 +296,16 @@ static int aoc_usb_probe(struct aoc_service_dev *adev)
 
 	drvdata->service_timeout = msecs_to_jiffies(100);
 	drvdata->nb.notifier_call = aoc_usb_notify;
+	drvdata->aoc_ready = true;
 	register_aoc_usb_notifier(&drvdata->nb);
 	dev_set_drvdata(dev, drvdata);
-	schedule_work(&usb_host_mode_checking_ws);
 
-	/* USB host mode needs support from AoC. */
-	dwc3_otg_host_ready(true);
+	/* AoC is ready to switch to USB data role host. */
+	init_completion(&exit_host);
+	complete(&exit_host);
+	init_completion(&work_done);
+	drvdata->aoc_ready_work_retries = 0;
+	mod_delayed_work(system_wq, &drvdata->aoc_ready_work, 0);
 
 	return 0;
 }
@@ -390,9 +313,33 @@ static int aoc_usb_probe(struct aoc_service_dev *adev)
 static int aoc_usb_remove(struct aoc_service_dev *adev)
 {
 	struct aoc_usb_drvdata *drvdata = dev_get_drvdata(&adev->dev);
+	int ret = 0;
 
-	/* USB host mode needs support from AoC. */
-	dwc3_otg_host_ready(false);
+	drvdata->aoc_ready = false;
+	/* AoC is not ready to switch to USB data role host. */
+	init_completion(&work_done);
+	drvdata->aoc_ready_work_retries = 0;
+	mod_delayed_work(system_wq, &drvdata->aoc_ready_work, 0);
+	ret = wait_for_completion_timeout(&work_done, msecs_to_jiffies(COMPLETION_TIMEOUT_MS));
+	if (!ret) {
+		cancel_delayed_work_sync(&drvdata->aoc_ready_work);
+		dev_err(&drvdata->adev->dev, "Timedout executing aoc_ready_work.\n");
+	}
+
+	/* If device was in USB host mode, system needs to completely exit it before proceed. */
+	/*
+	 * TODO: Race condition exists when system switch to host after this completion check. In
+	 * this case, usb data role will still be host during aoc offtime, leading to possible
+	 * ramdump when xhci driver try to access aoc sram during its offtime. Need to discover
+	 * means for eliminating/shrinking the race window.
+	 */
+	ret = wait_for_completion_timeout(&exit_host, msecs_to_jiffies(COMPLETION_TIMEOUT_MS));
+	if (!ret) {
+		dev_err(&drvdata->adev->dev, "Timedout exiting usb host, ramdump might occur!\n");
+		ret = -ETIMEDOUT;
+	} else {
+		ret = 0;
+	}
 
 	unregister_aoc_usb_notifier(&drvdata->nb);
 	wakeup_source_unregister(drvdata->ws);
@@ -400,8 +347,7 @@ static int aoc_usb_remove(struct aoc_service_dev *adev)
 
 	kfree(drvdata);
 
-
-	return 0;
+	return ret;
 }
 
 static const char *const aoc_usb_service_names[] = {
@@ -420,16 +366,15 @@ static struct aoc_driver aoc_usb_driver = {
 
 static int __init aoc_usb_init(void)
 {
-	xhci_offload_helper_init();
+	usb_offload_helper_init();
 	usb_vendor_helper_init();
-
-	INIT_WORK(&usb_host_mode_checking_ws, usb_host_mode_checking_work);
 
 	return aoc_driver_register(&aoc_usb_driver);
 }
 
 static void __exit aoc_usb_exit(void)
 {
+	usb_offload_helper_exit();
 	aoc_driver_unregister(&aoc_usb_driver);
 }
 

@@ -13,7 +13,7 @@
 	fragment@battery {
 		target-path = "/";
 		__overlay__ {
-			google_mitigation: google,mitigation {
+			google_mitigation: google-mitigation {
 				compatible = "google,google-bcl";
 				#thermal-sensor-cells = <1>;
 				google,charger = <&max77759_chg>;
@@ -44,6 +44,15 @@
 				cpu0_cluster = <0>;
 				cpu1_cluster = <4>;
 				cpu2_cluster = <6>;
+
+				ifpmic_irq_mapping {
+					sys_uvlo1_cnt = <1>;
+					sys_uvlo2_cnt = <1>;
+					bat_oilo1_cnt = <1>;
+					sys_uvlo1 = <IF_VDROOP1>;
+					sys_uvlo2 = <IF_VDROOP2>;
+					bat_oilo1 = <IF_INTB>;
+				};
 
 				irq_config {
 					irq,uvlo1;
@@ -92,33 +101,33 @@
 					ch12 { setting = <106>; };
 				};
 				freq_qos {
-					batoilo {
-						cpucl0 = <955000>;
-						cpucl1 = <1221000>;
-						cpucl2 = <1557000>;
-						gpu = <723000>;
-						tpu = <845000>;
+					oilo1 {
+						cpucl0 = <955000 955000>;
+						cpucl1 = <1221000 1221000>;
+						cpucl2 = <1557000 1557000>;
+						gpu = <723000 723000>;
+						tpu = <845000 845000>;
 					};
-					vdroop1 {
-						cpucl0 = <1704000>;
-						cpucl1 = <1945000>;
-						cpucl2 = <2294000>;
-						gpu = <890000>;
-						tpu = <845000>;
+					uvlo1 {
+						cpucl0 = <1704000 1704000>;
+						cpucl1 = <1945000 1945000>;
+						cpucl2 = <2294000 2294000>;
+						gpu = <890000 890000>;
+						tpu = <845000 845000>;
 					};
-					vdroop2 {
-						cpucl0 = <1704000>;
-						cpucl1 = <1945000>;
-						cpucl2 = <2294000>;
-						gpu = <649000>;
-						tpu = <627000>;
+					uvlo2 {
+						cpucl0 = <1704000 1704000>;
+						cpucl1 = <1945000 1945000>;
+						cpucl2 = <2294000 2294000>;
+						gpu = <649000 649000>;
+						tpu = <627000 627000>;
 					};
-					smpl_gm {
-						cpucl0 = <1704000>;
-						cpucl1 = <1945000>;
-						cpucl2 = <2294000>;
-						gpu = <649000>;
-						tpu = <627000>;
+					smpl_warn {
+						cpucl0 = <1704000 1704000>;
+						cpucl1 = <1945000 1945000>;
+						cpucl2 = <2294000 2294000>;
+						gpu = <649000 649000>;
+						tpu = <627000 627000>;
 					};
 				};
 			};

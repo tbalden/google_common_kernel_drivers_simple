@@ -1,8 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch")
 load("//private/devices/google/common/kleaf:device_build.bzl", "device_build")
 load("//private/devices/google/zuma:constants.bzl", "ZUMA_DPM_DTBOS", "ZUMA_DTBS", "ZUMA_MODULE_OUTS")
 load(":constants.bzl", "SHUSKY_DTBOS")
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
+)
 
 device_build(
     name = "shusky",
@@ -35,7 +41,7 @@ device_build(
         "//private/google-modules/touch/goodix",
         "//private/google-modules/touch/sec",
         "//private/google-modules/uwb/qorvo/qm35/qm35s:uwb.qm35",
-        "//private/google-modules/wlan/bcm4398:bcmdhd4398",
+        "//private/google-modules/wlan/bcmdhd/bcm4398:bcmdhd4398",
         "//private/google-modules/wlan/wlan_ptracker",
     ],
     insmod_cfgs = glob(["insmod_cfg/*.cfg"]),

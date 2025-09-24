@@ -39,9 +39,12 @@ static int lwis_spi_register_io(struct lwis_device *lwis_dev, struct lwis_io_ent
 
 static struct lwis_device_subclass_operations spi_vops = {
 	.register_io = lwis_spi_register_io,
+	.batch_register_io = NULL,
 	.register_io_barrier = NULL,
 	.device_enable = lwis_spi_device_enable,
 	.device_disable = lwis_spi_device_disable,
+	.device_resume = NULL,
+	.device_suspend = NULL,
 	.event_enable = NULL,
 	.event_flags_updated = NULL,
 	.close = NULL,
@@ -159,30 +162,6 @@ static int lwis_spi_device_probe(struct spi_device *spi)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int lwis_spi_device_suspend(struct device *dev)
-{
-	struct lwis_device *lwis_dev = dev_get_drvdata(dev);
-
-	if (lwis_dev->pm_hibernation == 0)
-		return 0;
-
-	if (lwis_dev->enabled != 0) {
-		dev_warn(lwis_dev->dev, "Can't suspend because %s is in use!\n", lwis_dev->name);
-		return -EBUSY;
-	}
-
-	return 0;
-}
-
-static int lwis_spi_device_resume(struct device *dev)
-{
-	return 0;
-}
-
-static SIMPLE_DEV_PM_OPS(lwis_spi_device_ops, lwis_spi_device_suspend, lwis_spi_device_resume);
-#endif
-
 #ifdef CONFIG_OF
 static const struct of_device_id lwis_id_match[] = {
 	{ .compatible = LWIS_SPI_DEVICE_COMPAT },
@@ -196,7 +175,6 @@ static struct spi_driver lwis_driver = {
 		.name = LWIS_DRIVER_NAME,
 		.owner = THIS_MODULE,
 		.of_match_table = lwis_id_match,
-		.pm = &lwis_spi_device_ops,
 	},
 };
 #else /* CONFIG_OF not defined */

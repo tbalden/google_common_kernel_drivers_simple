@@ -2,7 +2,7 @@
  *
  * Synaptics TouchCom touchscreen driver
  *
- * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2017-2024 Synaptics Incorporated. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -34,33 +34,27 @@
 
 #include "syna_tcm2.h"
 
-/*
- * syna_testing_create_dir()
- *
- * Create a directory and register it with sysfs.
- * Then, create all defined sysfs files.
+/**
+ * @brief  Register sysfs attributes for testing.
  *
  * @param
  *    [ in] tcm:  the driver handle
- *    [ in] sysfs_dir: root directory of sysfs nodes
+ *    [ in] sysfs_dir: directory of sysfs attributes
  *
  * @return
- *    on success, 0; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
-int syna_testing_create_dir(struct syna_tcm *tcm,
-		struct kobject *sysfs_dir);
-/*
- *syna_testing_remove_dir()
- *
- * Remove the allocate sysfs directory
+int syna_testing_register_attributes(struct syna_tcm *tcm, struct kobject *sysfs_dir);
+/**
+ * @brief  Remove a directory allocated previously.
  *
  * @param
- *    none
+ *    [ in] sysfs_dir: directory of sysfs attributes
  *
  * @return
- *    on success, 0; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
-void syna_testing_remove_dir(void);
+int syna_testing_remove_attributes(struct kobject *sysfs_dir);
 
 
 #endif /* end of _SYNAPTICS_TCM2_TESTING_H_ */

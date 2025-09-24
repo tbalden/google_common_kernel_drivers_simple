@@ -5,8 +5,10 @@
  * Copyright 2022 Google LLC.
  */
 
+#include "zuma/zuma-usb-role-sw.dtsi"
+
 &udc {
-	extcon = <&max77759tcpc>;
+	extcon = <&goog_usb_role_sw>;
 	force_gen1;
 };
 
@@ -15,7 +17,7 @@
 };
 
 &usbdrd_phy0 {
-	extcon = <&max77759tcpc>;
+	extcon = <&goog_usb_role_sw>;
 };
 
 &pinctrl_12 {
@@ -86,6 +88,6 @@
 		pinctrl-0 = <&eusb_init_state>;
 		repeater_tune_param = <&eusb_repeater_tune>;
 		vdd33-supply = <&m_ldo19_reg>;
-		extcon = <&max77759tcpc>;
+		extcon = <&goog_usb_role_sw>;
        };
 };

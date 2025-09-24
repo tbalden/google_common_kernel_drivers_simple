@@ -57,3 +57,5 @@ u32 _aoc_fw_get_header_version(const struct firmware *fw);
 uint16_t _aoc_fw_bl_size(const struct firmware *fw);
 
 u32 *_aoc_fw_bl(const struct firmware *fw);
+
+bool _aoc_fw_has_legacy_auth_header(const struct firmware *fw);

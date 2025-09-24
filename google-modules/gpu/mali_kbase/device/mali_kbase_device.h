@@ -102,8 +102,10 @@ void kbase_device_term(struct kbase_device *kbdev);
  *
  * Return: 0 if successful or a negative error code on failure.
  */
+#if MALI_USE_CSF
 int kbase_gpu_cache_flush_pa_range_and_busy_wait(struct kbase_device *kbdev, phys_addr_t phys,
 						 size_t nr_bytes, u32 flush_op);
+#endif /* MALI_USE_CSF */
 
 /**
  * kbase_gpu_cache_flush_and_busy_wait - Start a cache flush and busy wait
@@ -194,6 +196,7 @@ void kbase_clean_caches_done(struct kbase_device *kbdev);
  */
 void kbase_gpu_interrupt(struct kbase_device *kbdev, u32 val);
 
+#if MALI_USE_CSF
 /**
  * kbase_pwr_interrupt - GPU power interrupt handler
  * @kbdev: Kbase device pointer
@@ -203,4 +206,5 @@ void kbase_gpu_interrupt(struct kbase_device *kbdev, u32 val);
  * handled.
  */
 void kbase_pwr_interrupt(struct kbase_device *kbdev, u32 val);
+#endif /* MALI_USE_CSF */
 #endif /* _MALI_KBASE_DEVICE_H_ */

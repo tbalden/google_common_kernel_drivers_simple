@@ -407,6 +407,7 @@ static const char *pinctrl_get_group_name(struct pinctrl_dev *pctldev,
 static int s2mpg1x_gpio_probe(struct platform_device *pdev)
 {
 	int ret;
+	struct device_node *dp;
 	struct s2mpg1x_gpio *s2mpg1x_gpio =
 		devm_kzalloc(&pdev->dev,
 			     sizeof(struct s2mpg1x_gpio), GFP_KERNEL);
@@ -446,17 +447,17 @@ static int s2mpg1x_gpio_probe(struct platform_device *pdev)
 	s2mpg1x_gpio->gc.direction_output = s2mpg1x_gpio_direction_output;
 	s2mpg1x_gpio->gc.base = -1;
 	s2mpg1x_gpio->gc.can_sleep = true;
-	s2mpg1x_gpio->gc.of_node =
-		of_find_node_by_name(pdev->dev.parent->of_node, pdev->name);
 	s2mpg1x_gpio->gc.set_config = gpiochip_generic_config;
 	s2mpg1x_gpio->gc.request = gpiochip_generic_request;
 	s2mpg1x_gpio->gc.free = gpiochip_generic_free;
 
-	if (!s2mpg1x_gpio->gc.of_node) {
+	dp = of_find_node_by_name(pdev->dev.parent->of_node, pdev->name);
+	if (!dp) {
 		dev_err(&pdev->dev, "Failed to find %s DT node\n", pdev->name);
 		return -EINVAL;
 	}
-	if (of_property_read_u32(s2mpg1x_gpio->gc.of_node, "ngpios", &ngpios)) {
+	s2mpg1x_gpio->gc.fwnode = of_node_to_fwnode(dp);
+	if (of_property_read_u32(dp, "ngpios", &ngpios)) {
 		dev_err(&pdev->dev, "Failed to get ngpios from %s DT node\n",
 			pdev->name);
 		return -EINVAL;

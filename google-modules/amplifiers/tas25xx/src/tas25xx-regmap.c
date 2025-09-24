@@ -869,8 +869,7 @@ EXIT:
 	return rc;
 }
 
-static int tas25xx_i2c_probe(struct i2c_client *p_client,
-			const struct i2c_device_id *id)
+static int tas25xx_i2c_probe(struct i2c_client *p_client)
 {
 	struct tas25xx_priv *p_tas25xx;
 	struct linux_platform *plat_data;

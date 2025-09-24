@@ -523,7 +523,7 @@ static int __init gsc_init(void)
 		return ret;
 	}
 
-	gsc_class = class_create(THIS_MODULE, "gsc");
+	gsc_class = class_create("gsc");
 	if (IS_ERR(gsc_class)) {
 		unregister_chrdev_region(gsc_devt, 1);
 		return PTR_ERR(gsc_class);

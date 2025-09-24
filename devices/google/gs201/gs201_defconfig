@@ -14,12 +14,6 @@ CONFIG_SPI_SPIDEV=m
 CONFIG_SOFT_WATCHDOG=m
 CONFIG_ARM_DSU_PMU=m
 
-# private/google-modules/soc/gs/drivers/block/zram/Kconfig
-CONFIG_ZRAM_GS=m
-CONFIG_ZCOMP_CPU=m
-CONFIG_ZCOMP_EH=m
-CONFIG_ZRAM_GS_WRITEBACK=y
-
 # private/google-modules/soc/gs/drivers/bts/Kconfig
 CONFIG_EXYNOS_BTS=m
 
@@ -144,9 +138,6 @@ CONFIG_PIXEL_STAT=m
 CONFIG_EXYNOS_SECURE_LOG=m
 CONFIG_EXYNOS_CONTENT_PATH_PROTECTION=m
 CONFIG_GOOGLE_MODEMCTL=m
-CONFIG_GSA=m
-CONFIG_GSA_PKVM=m
-CONFIG_GSA_GSC=m
 CONFIG_DEBUG_SNAPSHOT=m
 CONFIG_DEBUG_SNAPSHOT_DEBUG_KINFO=m
 CONFIG_EXYNOS_EHLD=m
@@ -183,6 +174,13 @@ CONFIG_SYSRQ_HOOK=m
 CONFIG_PKVM_S2MPU=m
 CONFIG_KERNEL_TOP=m
 
+# private/google-modules/soc/gs/drivers/soc/google/gsa/Kconfig
+CONFIG_GSA=m
+CONFIG_GSA_PKVM=m
+CONFIG_GSA_GSC=m
+# FIXME: Not needed. It's here to prevent kleaf build error.
+CONFIG_TZ_PROT=m
+
 # private/google-modules/soc/gs/drivers/spi/Kconfig
 CONFIG_SPI_S3C64XX_GS=m
 
@@ -202,6 +200,7 @@ CONFIG_SCSI_UFS_CRYPTO_SW_KEYS_MODE=y
 CONFIG_SCSI_UFS_PIXEL_FIPS140=m
 
 # private/google-modules/soc/gs/drivers/usb/Kconfig
+CONFIG_GOOGLE_USB_ROLE_SW=m
 CONFIG_USB_XHCI_EXYNOS=m
 CONFIG_USB_DWC3_EXYNOS_GS=m
 CONFIG_USB_CONFIGFS_F_DM=m
@@ -210,6 +209,7 @@ CONFIG_TYPEC_COOLING_DEV=m
 CONFIG_TYPEC_MAX77759=m
 CONFIG_TYPEC_MAX77759_CONTAMINANT=m
 CONFIG_TYPEC_MAX77779_CONTAMINANT=m
+CONFIG_TYPEC_MAX777X9_I2C=m
 
 # private/google-modules/soc/gs/drivers/video/Kconfig
 CONFIG_EXYNOS_GRAPHICS_G2D=m
@@ -221,6 +221,13 @@ CONFIG_BACKLIGHT_RT4539_GS=m
 CONFIG_S3C2410_WATCHDOG_GS=m
 CONFIG_S3C2410_SHUTDOWN_REBOOT=y
 
+# private/google-modules/aoc/Kconfig
+CONFIG_AOC_DRIVER=m
+CONFIG_AOC_V1=y
+
+# private/google-modules/aoc/alsa/Kconfig
+# CONFIG_AOC_ALSA_DP_AUDIO is not set
+
 # private/google-modules/bms/misc/Kconfig
 CONFIG_GOOGLE_LOGBUFFER=m
 
@@ -229,8 +236,8 @@ CONFIG_GS_DRM_PANEL_UNIFIED=m
 
 # private/google-modules/display/samsung/Kconfig
 CONFIG_DRM_SAMSUNG=m
-CONFIG_DRM_SAMSUNG_DP=y
-CONFIG_DRM_SAMSUNG_DP_AUDIO=y
+CONFIG_DRM_SAMSUNG_CAL_9845=y
+CONFIG_DRM_SAMSUNG_CAL_9855=y
 
 # private/google-modules/display/samsung/panel/Kconfig
 CONFIG_DRM_PANEL_GOOGLE_COMMON=m

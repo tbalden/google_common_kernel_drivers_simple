@@ -21,7 +21,6 @@
 	>;
 
 	google,chg-topoff-limits = <250 250 250 500 500 500>;
-	google,pullback-current;
 
 	google,ttf-temp-idx= <2>;
 	google,ttf-adapter = <4500>;
@@ -61,7 +60,6 @@
 		google,fv-uv-resolution = <10000>;
 		google,cv-range-accuracy = <20000>;
 		google,fv-uv-margin-dpct = <1025>;
-		google,fv-dc-ratio = <30>;
 		google,cv-debounce-cnt = <3>;
 		google,cv-tier-ov-cnt = <10>;
 		google,cv-tier-switch-cnt = <3>;
@@ -78,7 +76,6 @@
 		>;
 
 		google,chg-topoff-limits = <250 250 250 500 500 500>;
-		google,pullback-current;
 	};
 };
 

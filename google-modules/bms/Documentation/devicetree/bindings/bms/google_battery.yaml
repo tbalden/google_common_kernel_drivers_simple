@@ -227,6 +227,10 @@ properties:
     description: interval to run battery work
     $ref: /schemas/types.yaml#/definitions/uint32
 
+  google,charging-update-interval:
+    description: interval to run battery work during charging
+    $ref: /schemas/types.yaml#/definitions/uint32
+
   google,update-high-temp-threshold:
     description: temperature threshold to report power supply change
     $ref: /schemas/types.yaml#/definitions/uint32
@@ -284,10 +288,6 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint32
 
   google,dc-irdrop:
-    description:
-    type: boolean
-
-  google,pullback-current:
     description:
     type: boolean
 
@@ -362,3 +362,8 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint16-array
     items:
       maximum: 10
+  google,skip-first-cv:
+    description: skip the CV charging stage after the first vbatt_idx index (0) and switch
+      immediately to the next charge tier. Decreases the charge loop rerun time from the default to
+      5 seconds.
+    type: boolean

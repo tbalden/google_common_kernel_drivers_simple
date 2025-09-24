@@ -17,6 +17,7 @@
 #include <trace/hooks/suspend.h>
 #include <trace/hooks/topology.h>
 #include <trace/hooks/cpufreq.h>
+#include <perf/core/gs_domain_idle.h>
 
 #include "sched_priv.h"
 
@@ -50,9 +51,9 @@ extern void rvh_cpu_cgroup_online_pixel_mod(void *data, struct cgroup_subsys_sta
 extern void rvh_post_init_entity_util_avg_pixel_mod(void *data, struct sched_entity *se);
 extern void rvh_check_preempt_wakeup_pixel_mod(void *data, struct rq *rq, struct task_struct *p,
 			bool *preempt, bool *nopreempt, int wake_flags, struct sched_entity *se,
-			struct sched_entity *pse, int next_buddy_marked, unsigned int granularity);
+			struct sched_entity *pse, int next_buddy_marked);
 extern void vh_sched_uclamp_validate_pixel_mod(void *data, struct task_struct *tsk,
-					       const struct sched_attr *attr, bool user,
+					       const struct sched_attr *attr,
 					       int *ret, bool *done);
 extern void vh_sched_setscheduler_uclamp_pixel_mod(void *data, struct task_struct *tsk,
 						   int clamp_id, unsigned int value);
@@ -117,8 +118,10 @@ extern void rvh_util_fits_cpu_pixel_mod(void *data, unsigned long util, unsigned
 extern void rvh_try_to_wake_up_success_pixel_mod(void *data, struct task_struct *task);
 
 extern int pmu_poll_init(void);
+#if IS_ENABLED(CONFIG_CAL_IF) || IS_ENABLED(CONFIG_GS_DOMAIN_IDLE)
 extern void set_cluster_enabled_cb(int cluster, int enabled);
 extern void register_set_cluster_enabled_cb(void (*func)(int, int));
+#endif
 extern void vh_sched_resume_end(void *data, void *unused);
 extern void vh_set_task_comm_pixel_mod(void *data, struct task_struct *p);
 
@@ -139,6 +142,16 @@ EXPORT_SYMBOL_GPL(pixel_cpu_num);
 EXPORT_SYMBOL_GPL(pixel_cluster_num);
 EXPORT_SYMBOL_GPL(pixel_cluster_start_cpu);
 EXPORT_SYMBOL_GPL(pixel_cpu_init);
+
+#define REGISTER_TRACE_VH(__func, __callback) \
+	ret = register_trace_android_vh_##__func(__callback, NULL); \
+	if (ret) \
+		pr_err("VH registration failed "#__func"\n");
+
+#define REGISTER_TRACE_RVH(__func, __callback) \
+	ret = register_trace_android_rvh_##__func(__callback, NULL); \
+	if (ret) \
+		pr_err("RVH registration failed "#__func"\n");
 
 DEFINE_STATIC_KEY_FALSE(enqueue_dequeue_ready);
 
@@ -283,7 +296,9 @@ static int init_pixel_cpu(void)
 
 	pixel_cpu_init = true;
 
+#if IS_ENABLED(CONFIG_CAL_IF) || IS_ENABLED(CONFIG_GS_DOMAIN_IDLE)
 	register_set_cluster_enabled_cb(set_cluster_enabled_cb);
+#endif
 
 	return 0;
 
@@ -302,9 +317,7 @@ out_no_pixel_cluster_start_cpu:
 static void init_sched_params(void)
 {
 	vh_sched_max_load_balance_interval = max_load_balance_interval;
-	vh_sched_min_granularity_ns = sysctl_sched_min_granularity;
-	vh_sched_wakeup_granularity_ns = sysctl_sched_wakeup_granularity;
-	vh_sched_latency_ns = sysctl_sched_latency;
+	vh_sched_min_granularity_ns = sysctl_sched_base_slice;
 }
 
 static int vh_sched_pm_notify(struct notifier_block *nb,
@@ -336,13 +349,13 @@ static int vh_sched_init(void)
 
 	ret = init_pixel_cpu();
 	if (ret) {
-		pr_err("pixel cpu init failed\n");
+		pr_err("[vh_sched_init] pixel cpu init failed\n");
 		return ret;
 	}
 
 	ret = pmu_poll_init();
 	if (ret) {
-		pr_err("pmu poll init failed\n");
+		pr_err("[vh_sched_init] pmu poll init failed\n");
 		return ret;
 	}
 
@@ -353,8 +366,10 @@ static int vh_sched_init(void)
 	update_auto_fits_capacity();
 
 	ret = create_procfs_node();
-	if (ret)
+	if (ret) {
+		pr_err("[vh_sched_init] creating procfs nodes failed\n");
 		return ret;
+	}
 
 	init_vendor_rt_rq();
 
@@ -374,9 +389,8 @@ static int vh_sched_init(void)
 	 * init_vendor_task_data() should set a flag to enable this function to
 	 * work as soon as we have initialized the task data.
 	 */
-	ret = register_trace_android_vh_dup_task_struct(vh_dup_task_struct_pixel_mod, NULL);
-	if (ret)
-		return ret;
+
+	REGISTER_TRACE_VH(dup_task_struct, vh_dup_task_struct_pixel_mod);
 
 	/*
 	 * Heavy handed, but necessary. We want to initialize our private data
@@ -388,207 +402,81 @@ static int vh_sched_init(void)
 	 */
 	ret = stop_machine(init_vendor_task_data, NULL, cpumask_of(raw_smp_processor_id()));
 	if (ret)
-		return ret;
+		pr_err("[vh_sched_init] stop_machine failed\n");
 
-	ret = register_trace_android_rvh_enqueue_task(rvh_enqueue_task_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_dequeue_task(rvh_dequeue_task_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_can_migrate_task(rvh_can_migrate_task_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_enqueue_task_fair(rvh_enqueue_task_fair_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_dequeue_task_fair(rvh_dequeue_task_fair_pixel_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_RVH(enqueue_task, rvh_enqueue_task_pixel_mod);
+	REGISTER_TRACE_RVH(dequeue_task, rvh_dequeue_task_pixel_mod);
+	REGISTER_TRACE_RVH(can_migrate_task, rvh_can_migrate_task_pixel_mod);
+	REGISTER_TRACE_RVH(enqueue_task_fair, rvh_enqueue_task_fair_pixel_mod);
+	REGISTER_TRACE_RVH(dequeue_task_fair, rvh_dequeue_task_fair_pixel_mod);
 
 	static_branch_enable(&enqueue_dequeue_ready);
 
 #if IS_ENABLED(CONFIG_USE_VENDOR_GROUP_UTIL)
-	ret = register_trace_android_rvh_attach_entity_load_avg(
-		rvh_attach_entity_load_avg_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_detach_entity_load_avg(
-		rvh_detach_entity_load_avg_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_update_load_avg(rvh_update_load_avg_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_remove_entity_load_avg(
-		rvh_remove_entity_load_avg_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_update_blocked_fair(
-		rvh_update_blocked_fair_pixel_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_RVH(attach_entity_load_avg, rvh_attach_entity_load_avg_pixel_mod);
+	REGISTER_TRACE_RVH(detach_entity_load_avg, rvh_detach_entity_load_avg_pixel_mod);
+	REGISTER_TRACE_RVH(update_load_avg, rvh_update_load_avg_pixel_mod);
+	REGISTER_TRACE_RVH(remove_entity_load_avg, rvh_remove_entity_load_avg_pixel_mod);
+	REGISTER_TRACE_RVH(update_blocked_fair, rvh_update_blocked_fair_pixel_mod);
 #endif
 
-	ret = register_trace_android_rvh_rtmutex_prepare_setprio(
-		rvh_rtmutex_prepare_setprio_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_update_rt_rq_load_avg(rvh_update_rt_rq_load_avg_pixel_mod,
-							       NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_set_task_cpu(rvh_set_task_cpu_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_set_iowait(rvh_set_iowait_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_select_task_rq_rt(rvh_select_task_rq_rt_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_vh_scheduler_tick(vh_scheduler_tick_pixel_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_RVH(rtmutex_prepare_setprio, rvh_rtmutex_prepare_setprio_pixel_mod);
+	REGISTER_TRACE_RVH(update_rt_rq_load_avg, rvh_update_rt_rq_load_avg_pixel_mod);
+	REGISTER_TRACE_RVH(set_task_cpu, rvh_set_task_cpu_pixel_mod);
+	REGISTER_TRACE_RVH(set_iowait, rvh_set_iowait_pixel_mod);
+	REGISTER_TRACE_RVH(select_task_rq_rt, rvh_select_task_rq_rt_pixel_mod);
+	REGISTER_TRACE_VH(scheduler_tick, vh_scheduler_tick_pixel_mod);
 
 	ret = register_trace_sched_switch(vh_sched_switch_pixel_mod, NULL);
 	if (ret)
 		return ret;
 
-	ret = register_trace_android_rvh_cpu_overutilized(rvh_cpu_overutilized_pixel_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_RVH(cpu_overutilized, rvh_cpu_overutilized_pixel_mod);
+	REGISTER_TRACE_RVH(uclamp_eff_get, rvh_uclamp_eff_get_pixel_mod);
 
-	ret = register_trace_android_rvh_uclamp_eff_get(rvh_uclamp_eff_get_pixel_mod, NULL);
-	if (ret)
-		return ret;
 
-	ret = register_trace_android_rvh_util_est_update(rvh_util_est_update_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
+	REGISTER_TRACE_RVH(util_est_update, rvh_util_est_update_pixel_mod);
 #if !IS_ENABLED(CONFIG_USE_VENDOR_GROUP_UTIL)
-
-	ret = register_trace_android_rvh_cpu_cgroup_online(
-		rvh_cpu_cgroup_online_pixel_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_RVH(cpu_cgroup_online, rvh_cpu_cgroup_online_pixel_mod);
 #endif
 
-	ret = register_trace_android_rvh_sched_newidle_balance(
-		sched_newidle_balance_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_post_init_entity_util_avg(
-		rvh_post_init_entity_util_avg_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_check_preempt_wakeup(
-		rvh_check_preempt_wakeup_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_select_task_rq_fair(rvh_select_task_rq_fair_pixel_mod,
-							     NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_set_cpus_allowed_by_task(
-		rvh_set_cpus_allowed_by_task, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_RVH(sched_newidle_balance, sched_newidle_balance_pixel_mod);
+	REGISTER_TRACE_RVH(post_init_entity_util_avg, rvh_post_init_entity_util_avg_pixel_mod);
+	REGISTER_TRACE_RVH(check_preempt_wakeup, rvh_check_preempt_wakeup_pixel_mod);
+	REGISTER_TRACE_RVH(select_task_rq_fair, rvh_select_task_rq_fair_pixel_mod);
+	REGISTER_TRACE_RVH(set_cpus_allowed_by_task, rvh_set_cpus_allowed_by_task);
 
 #if IS_ENABLED(CONFIG_VH_SCHED) && IS_ENABLED(CONFIG_PIXEL_EM)
-	ret = register_trace_android_vh_arch_set_freq_scale(vh_arch_set_freq_scale_pixel_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_VH(arch_set_freq_scale, vh_arch_set_freq_scale_pixel_mod);
 #endif
 
-	ret = register_trace_android_vh_uclamp_validate(
-		vh_sched_uclamp_validate_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_vh_setscheduler_uclamp(
-		vh_sched_setscheduler_uclamp_pixel_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_VH(uclamp_validate, vh_sched_uclamp_validate_pixel_mod);
+	REGISTER_TRACE_VH(setscheduler_uclamp, vh_sched_setscheduler_uclamp_pixel_mod);
 
 	ret = cpufreq_register_governor(&sched_pixel_gov);
 	if (ret)
-		return ret;
+		pr_err("[vh_sched_init] cpufreq governor register failed\n");
 
-	ret = register_trace_android_vh_dump_throttled_rt_tasks(vh_dump_throttled_rt_tasks_mod,
-								NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_VH(dump_throttled_rt_tasks, vh_dump_throttled_rt_tasks_mod);
 
 #if IS_ENABLED(CONFIG_RVH_SCHED_LIB)
-
-	ret = register_trace_android_rvh_sched_setaffinity(rvh_sched_setaffinity_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_RVH(sched_setaffinity, rvh_sched_setaffinity_mod);
 #endif /* IS_ENABLED(CONFIG_RVH_SCHED_LIB) */
 
-	ret = register_trace_android_vh_binder_set_priority(
-		vh_binder_set_priority_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_vh_binder_restore_priority(
-		vh_binder_restore_priority_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_vh_binder_proc_transaction_finish(vh_binder_proc_transaction_finish, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_vh_use_amu_fie(android_vh_use_amu_fie_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_set_user_nice_locked(rvh_set_user_nice_locked_pixel_mod,
-		NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_setscheduler_prio(rvh_setscheduler_prio_pixel_mod, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_rvh_find_lowest_rq(rvh_find_lowest_rq_pixel_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_VH(binder_set_priority, vh_binder_set_priority_pixel_mod);
+	REGISTER_TRACE_VH(binder_restore_priority, vh_binder_restore_priority_pixel_mod);
+	REGISTER_TRACE_VH(binder_proc_transaction_finish, vh_binder_proc_transaction_finish);
+	REGISTER_TRACE_VH(use_amu_fie, android_vh_use_amu_fie_pixel_mod);
+	REGISTER_TRACE_RVH(set_user_nice_locked, rvh_set_user_nice_locked_pixel_mod);
+	REGISTER_TRACE_RVH(setscheduler_prio, rvh_setscheduler_prio_pixel_mod);
+	REGISTER_TRACE_RVH(find_lowest_rq, rvh_find_lowest_rq_pixel_mod);
 
 #if IS_ENABLED(CONFIG_VH_PRIO_INHERITANCE)
-	ret = register_trace_android_vh_prio_inheritance(vh_prio_inheritance, NULL);
-	if (ret)
-		return ret;
-
-	ret = register_trace_android_vh_prio_restore(vh_prio_restore, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_VH(prio_inheritance, vh_prio_inheritance);
+	REGISTER_TRACE_VH(prio_restore, vh_prio_restore);
 #endif
 
-	ret = register_trace_android_rvh_util_fits_cpu(rvh_util_fits_cpu_pixel_mod, NULL);
-	if (ret)
-		return ret;
+	REGISTER_TRACE_RVH(util_fits_cpu, rvh_util_fits_cpu_pixel_mod);
 
 	ret = register_trace_android_vh_resume_end(vh_sched_resume_end, NULL);
 	if (ret)

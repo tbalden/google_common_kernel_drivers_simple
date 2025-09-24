@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "ddk_uapi_headers", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_module", "ddk_uapi_headers", "kernel_module_group")
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
+)
 
 ddk_uapi_headers(
     name = "uapi_headers",
@@ -14,23 +19,58 @@ ddk_uapi_headers(
     ],
 )
 
-kernel_module(
-    name = "video.gchips",
+ddk_headers(
+    name = "headers",
+    hdrs = [
+        "include/uapi/linux/bigo.h",
+    ],
+    includes = [
+        "include",
+    ],
+)
+
+ddk_module(
+    name = "bigwave",
     srcs = glob([
-        "**/*.c",
         "**/*.h",
     ]) + [
-        "//private/google-modules/soc/gs:gs_soc_headers",
+        "bigo.c",
+        "bigo_io.c",
+        "bigo_iommu.c",
+        "bigo_of.c",
+        "bigo_pm.c",
+        "bigo_prioq.c",
     ],
-    outs = [
-        "bigwave.ko",
-    ],
+    out = "bigwave.ko",
+    conditional_srcs = {
+        "CONFIG_DEBUG_FS": {
+            True: [
+                "bigo_debug.c",
+            ],
+        },
+        "CONFIG_BIGWAVE_ENABLE_SLC": {
+            True: [
+                "bigo_slc.c",
+            ],
+        },
+    },
+    defconfig = "defconfig",
+    kconfig = "Kconfig",
     kernel_build = "//private/devices/google/common:kernel",
+    deps = [
+        ":headers",
+        "//common:all_headers_aarch64",
+        "//private/google-modules/soc/gs:gs_soc_module",
+        "//private/google-modules/soc/gs:headers",
+    ],
+)
+
+kernel_module_group(
+    name = "video.gchips",
+    srcs = [
+        ":bigwave",
+    ],
     visibility = [
         "//private/devices/google:__subpackages__",
-        "//private/google-modules/soc/gs:__pkg__",
-    ],
-    deps = [
-        "//private/google-modules/soc/gs:gs_soc_module",
     ],
 )

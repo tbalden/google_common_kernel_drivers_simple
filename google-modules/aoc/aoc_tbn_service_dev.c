@@ -78,4 +78,5 @@ EXPORT_SYMBOL_GPL(aoc_tbn_service_ready);
 module_init(aoc_tbn_service_init);
 module_exit(aoc_tbn_service_exit);
 
+MODULE_DESCRIPTION("Google AOC tbn driver");
 MODULE_LICENSE("GPL v2");

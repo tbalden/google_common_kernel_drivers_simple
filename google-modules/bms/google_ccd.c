@@ -15,6 +15,9 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#pragma clang diagnostic ignored "-Wenum-conversion"
+#pragma clang diagnostic ignored "-Wswitch"
+
 #include <linux/debugfs.h>
 #include <linux/kernel.h>
 #include <linux/printk.h>
@@ -52,7 +55,7 @@ struct gccd_drv {
 	bool init_complete;
 	int voltage_max;
 	int current_max;
-	int buck_chg_en;
+	struct gpio_desc *buck_chg_en;
 	bool ftm_mode; /* factory test, force enable buck charger */
 
 };
@@ -266,9 +269,9 @@ set_current_max:
 		pr_info("%s: buck_charger enable=%d\n", __func__, en);
 
 		ret = PSY_SET_PROP(buck_psy, POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
-				   buck_chg_current);
+				buck_chg_current);
 		if (ret == 0)
-			gpio_direction_output(gccd->buck_chg_en, en);
+			gpiod_direction_output(gccd->buck_chg_en, en);
 	}
 
 	return ret;
@@ -279,16 +282,16 @@ set_current_max:
 static int gccd_gpio_init(struct device *dev, struct gccd_drv *gccd)
 {
 	int ret = 0;
-	struct device_node *node = dev->of_node;
 
 	/* BUCK_CHG_EN */
-	ret = of_get_named_gpio(node, "google,buck_chg_en", 0);
-	gccd->buck_chg_en = ret;
-	if (ret < 0)
+	gccd->buck_chg_en = devm_gpiod_get(dev, "google,buck_chg_en", GPIOD_ASIS);
+	if (IS_ERR(gccd->buck_chg_en)) {
+		ret = PTR_ERR(gccd->buck_chg_en);
 		dev_warn(dev, "unable to read google,buck_chg_en from dt: %d\n",
 			 ret);
-	else
-		dev_info(dev, "BUCK_CHG_EN gpio:%d", gccd->buck_chg_en);
+	} else {
+		dev_info(dev, "BUCK_CHG_EN gpio:%d", desc_to_gpio(gccd->buck_chg_en));
+	}
 
 	return (ret < 0) ? ret : 0;
 }
@@ -316,6 +319,8 @@ static enum power_supply_property gccd_psy_properties[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_MAX,		/* compat */
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_STATUS,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX,
 };
 
 static int gccd_psy_get_property(struct power_supply *psy,
@@ -521,7 +526,7 @@ static int gccd_gbms_psy_set_property(struct power_supply *psy,
 		break;
 	case GBMS_PROP_TAPER_CONTROL:
 		if (pval->prop.intval == GBMS_TAPER_CONTROL_ON)
-			gpio_direction_output(gccd->buck_chg_en, 0);
+			gpiod_direction_output(gccd->buck_chg_en, 0);
 		break;
 	default:
 		pr_debug("%s: route to gccd_psy_set_property, psp:%d\n", __func__, psp);

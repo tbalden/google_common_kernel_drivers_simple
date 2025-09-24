@@ -13,7 +13,9 @@
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <linux/io.h>
+#if IS_ENABLED(CONFIG_EXYNOS_DISABLE_IDLE_STATES)
 #include <linux/cpuidle.h>
+#endif
 #include <asm/barrier.h>
 #include <asm/sysreg.h>
 #include <soc/google/debug-snapshot.h>
@@ -374,6 +376,7 @@ static void bdu_etr_disable(void)
 static void exynos_etm_smp_enable(void *ununsed);
 void exynos_etm_trace_start(void);
 
+#if IS_ENABLED(CONFIG_EXYNOS_DISABLE_IDLE_STATES)
 static void smp_disable_idle_states(void *ptr)
 {
 	struct cpuidle_driver *drv;
@@ -404,6 +407,7 @@ static void exynos_disable_idle_states(bool disable)
 		smp_call_function_single(cpu, smp_disable_idle_states, &disable, 1);
 	}
 }
+#endif /* CONFIG_EXYNOS_DISABLE_IDLE_STATES */
 
 int gs_coresight_etm_external_etr_on(u64 buf_addr, u32 buf_size)
 {
@@ -426,7 +430,9 @@ int gs_coresight_etm_external_etr_on(u64 buf_addr, u32 buf_size)
 	etr->aux_buf_addr = buf_addr;
 	ee_info->etr_aux_buf_size = buf_size;
 
+#if IS_ENABLED(CONFIG_EXYNOS_DISABLE_IDLE_STATES)
 	exynos_disable_idle_states(true);
+#endif
 
 	if (!bdu_enable) {
 		for_each_possible_cpu(i) {
@@ -485,7 +491,9 @@ int gs_coresight_etm_external_etr_off(void)
 #endif
 	}
 
+#if IS_ENABLED(CONFIG_EXYNOS_DISABLE_IDLE_STATES)
 	exynos_disable_idle_states(false);
+#endif
 
 	return 0;
 }

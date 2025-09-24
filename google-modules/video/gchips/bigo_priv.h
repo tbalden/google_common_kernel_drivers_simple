@@ -94,7 +94,7 @@ struct bigo_debugfs {
 };
 
 struct bigo_prio_array {
-	spinlock_t lock;
+	struct mutex lock;
 	unsigned long bitmap;
 	struct list_head queue[BO_MAX_PRIO];
 };

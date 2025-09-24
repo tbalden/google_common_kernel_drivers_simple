@@ -270,8 +270,7 @@ static void s2mpg11_get_rev_id(struct s2mpg11_dev *s2mpg11, int id)
 		s2mpg11->pmic_rev = S2MPG11_EVT1;
 }
 
-static int s2mpg11_i2c_probe(struct i2c_client *i2c,
-			     const struct i2c_device_id *dev_id)
+static int s2mpg11_i2c_probe(struct i2c_client *i2c)
 {
 	struct s2mpg11_dev *s2mpg11;
 	struct s2mpg11_platform_data *pdata = i2c->dev.platform_data;

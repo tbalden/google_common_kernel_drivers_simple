@@ -23,6 +23,8 @@
 #define gbms_err(p, fmt, ...)	\
 	pr_err("%s: " fmt, gbms_owner(p), ##__VA_ARGS__)
 
+#pragma clang diagnostic ignored "-Wenum-conversion"
+
 #include <linux/kernel.h>
 #include <linux/printk.h>
 #include <linux/module.h>
@@ -159,8 +161,10 @@ void gbms_init_chg_table(struct gbms_chg_profile *profile,
 
 	/* aact profile is updated from server side */
 	if (profile->aact_init_profile && profile->aact_update_profile) {
-		temp_nb_count = (profile->temp_nb_limits - 1) * GBMS_AACT_NB_LIMITS(profile);
-		cccm_array_size = temp_nb_count * profile->volt_nb_limits;
+		temp_nb_count = (profile->temp_nb_limits - 1) * profile->aact_nb_limits;
+		cccm_array_size = (profile->temp_nb_limits - 1)
+				   * profile->volt_nb_limits
+				   * profile->aact_nb_limits;
 		memcpy(profile->cccm_limits, profile->aact_cccm_limits,
 		       sizeof(s32) * cccm_array_size);
 		goto chg_table;
@@ -172,20 +176,13 @@ void gbms_init_chg_table(struct gbms_chg_profile *profile,
 						 profile->cccm_limits,
 						 cccm_array_size);
 	} else {
-		char *aact_cc_limits;
-
-		temp_nb_count = (profile->temp_nb_limits - 1) * GBMS_AACT_NB_LIMITS(profile);
-		cccm_array_size = temp_nb_count * profile->volt_nb_limits;
-
-		aact_cc_limits = aact_all_limits.cc_limits[GBMS_AACT_IDX(profile)];
-
-		ret = of_property_read_u32_array(gbms_batt_id_node(node), aact_cc_limits,
+		temp_nb_count = (profile->temp_nb_limits - 1) * profile->aact_nb_limits;
+		cccm_array_size = (profile->temp_nb_limits - 1)
+				   * profile->volt_nb_limits
+				   * profile->aact_nb_limits;
+		ret = of_property_read_u32_array(node, "google,aact-cc-limits",
 						 profile->cccm_limits,
 						 cccm_array_size);
-		if (ret < 0)
-			ret = of_property_read_u32_array(node, aact_cc_limits,
-							 profile->cccm_limits,
-							 cccm_array_size);
 	}
 
 	if (ret < 0)
@@ -573,73 +570,14 @@ void gbms_free_chg_profile(struct gbms_chg_profile *profile)
 }
 EXPORT_SYMBOL_GPL(gbms_free_chg_profile);
 
-int gbms_read_chg_aact_ecc(struct gbms_chg_profile *profile, struct device_node *node)
-{
-	int ret;
-
-	profile->aact_support_multiple_profiles =
-		of_property_read_bool(gbms_batt_id_node(node),
-				      "google,aact-support-multiple-profiles");
-	if (!profile->aact_support_multiple_profiles)
-		profile->aact_support_multiple_profiles =
-			of_property_read_bool(node, "google,aact-support-multiple-profiles");
-
-	profile->aact_nb_limits =
-	    of_property_count_elems_of_size(gbms_batt_id_node(node), "google,chg-aact-ecc",
-					    sizeof(u32));
-	if (profile->aact_nb_limits <= 0)
-		profile->aact_nb_limits =
-		    of_property_count_elems_of_size(node, "google,chg-aact-ecc",
-						    sizeof(u32));
-	if (profile->aact_nb_limits <= 0) {
-		ret = profile->aact_nb_limits;
-		gbms_err(profile, "cannot read chg-aact-ecc, ret=%d\n", ret);
-		return -EINVAL;
-	}
-	if (profile->aact_nb_limits > GBMS_AACT_NB_LIMITS_MAX) {
-		gbms_err(profile, "chg-aact-ecc exceeds driver max: %d\n",
-			 GBMS_AACT_NB_LIMITS_MAX);
-		return -EINVAL;
-	}
-	ret = of_property_read_u32_array(gbms_batt_id_node(node), "google,chg-aact-ecc",
-					 (u32 *)profile->aact_limits,
-					 profile->aact_nb_limits);
-	if (ret < 0)
-		ret = of_property_read_u32_array(node, "google,chg-aact-ecc",
-						 (u32 *)profile->aact_limits,
-						 profile->aact_nb_limits);
-	if (ret < 0) {
-		gbms_err(profile, "cannot read aact-cv-limits table, ret=%d\n", ret);
-		return ret;
-	}
-
-	profile->aact_load_chg_ecc = true;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(gbms_read_chg_aact_ecc);
-
 static int gbms_read_aact_cccm_limits(struct gbms_chg_profile *profile,
 				      struct device_node *node)
 {
-	char *aact_temp_limits, *aact_cv_limits;
 	int ret;
 
-	if (!profile->aact_load_chg_ecc) {
-		ret = gbms_read_chg_aact_ecc(profile, node);
-		if (ret < 0)
-			return ret;
-	}
-
-	aact_temp_limits = aact_all_limits.temp_limits[GBMS_AACT_IDX(profile)];
-	aact_cv_limits = aact_all_limits.cv_limits[GBMS_AACT_IDX(profile)];
-
 	profile->aact_temp_nb_limits =
-	    of_property_count_elems_of_size(gbms_batt_id_node(node), aact_temp_limits,
+	    of_property_count_elems_of_size(node, "google,aact-temp-limits",
 					    sizeof(u32));
-	if (profile->aact_temp_nb_limits <= 0)
-		profile->aact_temp_nb_limits =
-		    of_property_count_elems_of_size(node, aact_temp_limits,
-						    sizeof(u32));
 	if (profile->aact_temp_nb_limits <= 0) {
 		ret = profile->aact_temp_nb_limits;
 		gbms_err(profile, "cannot read aact-temp-limits, ret=%d\n", ret);
@@ -650,25 +588,17 @@ static int gbms_read_aact_cccm_limits(struct gbms_chg_profile *profile,
 			 GBMS_CHG_TEMP_NB_LIMITS_MAX);
 		return -EINVAL;
 	}
-	ret = of_property_read_u32_array(gbms_batt_id_node(node), aact_temp_limits,
+	ret = of_property_read_u32_array(node, "google,aact-temp-limits",
 					 (u32 *)profile->aact_temp_limits,
 					 profile->aact_temp_nb_limits);
-	if (ret < 0)
-		ret = of_property_read_u32_array(node, aact_temp_limits,
-						 (u32 *)profile->aact_temp_limits,
-						 profile->aact_temp_nb_limits);
 	if (ret < 0) {
 		gbms_err(profile, "cannot read aact-temp-limits table, ret=%d\n", ret);
 		return ret;
 	}
 
 	profile->aact_volt_nb_limits =
-	    of_property_count_elems_of_size(gbms_batt_id_node(node), aact_cv_limits,
+	    of_property_count_elems_of_size(node, "google,aact-cv-limits",
 					    sizeof(u32));
-	if (profile->aact_volt_nb_limits <= 0)
-		profile->aact_volt_nb_limits =
-		    of_property_count_elems_of_size(node, aact_cv_limits,
-						    sizeof(u32));
 	if (profile->aact_volt_nb_limits <= 0) {
 		ret = profile->aact_volt_nb_limits;
 		gbms_err(profile, "cannot read aact-cv-limits, ret=%d\n", ret);
@@ -679,13 +609,30 @@ static int gbms_read_aact_cccm_limits(struct gbms_chg_profile *profile,
 			 GBMS_CHG_VOLT_NB_LIMITS_MAX);
 		return -EINVAL;
 	}
-	ret = of_property_read_u32_array(gbms_batt_id_node(node), aact_cv_limits,
+	ret = of_property_read_u32_array(node, "google,aact-cv-limits",
 					 (u32 *)profile->aact_volt_limits,
 					 profile->aact_volt_nb_limits);
-	if (ret < 0)
-		ret = of_property_read_u32_array(node, aact_cv_limits,
-						 (u32 *)profile->aact_volt_limits,
-						 profile->aact_volt_nb_limits);
+	if (ret < 0) {
+		gbms_err(profile, "cannot read aact-cv-limits table, ret=%d\n", ret);
+		return ret;
+	}
+
+	profile->aact_nb_limits =
+	    of_property_count_elems_of_size(node, "google,chg-aact-ecc",
+					    sizeof(u32));
+	if (profile->aact_nb_limits <= 0) {
+		ret = profile->aact_nb_limits;
+		gbms_err(profile, "cannot read chg-aact-ecc, ret=%d\n", ret);
+		return -EINVAL;
+	}
+	if (profile->aact_nb_limits > GBMS_AACT_NB_LIMITS_MAX) {
+		gbms_err(profile, "chg-aact-ecc exceeds driver max: %d\n",
+			 GBMS_AACT_NB_LIMITS_MAX);
+		return -EINVAL;
+	}
+	ret = of_property_read_u32_array(node, "google,chg-aact-ecc",
+					 (u32 *)profile->aact_limits,
+					 profile->aact_nb_limits);
 	if (ret < 0) {
 		gbms_err(profile, "cannot read aact-cv-limits table, ret=%d\n", ret);
 		return ret;
@@ -700,7 +647,6 @@ int gbms_init_aact_profile_internal(struct gbms_chg_profile *profile,
 {
 	int ret;
 	u32 cccm_array_size, mem_size;
-	char *aact_cc_limits;
 
 	profile->owner_name = owner_name;
 
@@ -714,22 +660,17 @@ int gbms_init_aact_profile_internal(struct gbms_chg_profile *profile,
 
 	cccm_array_size = (profile->aact_temp_nb_limits - 1)
 			  * profile->aact_volt_nb_limits
-			  * GBMS_AACT_NB_LIMITS(profile);
+			  * profile->aact_nb_limits;
 	mem_size = sizeof(s32) * cccm_array_size;
 
 	profile->aact_cccm_limits = kzalloc(mem_size, GFP_KERNEL);
 	if (!profile->aact_cccm_limits)
 		return -ENOMEM;
 
-	/* load C rates into profile->aact_cccm_limits */
-	aact_cc_limits = aact_all_limits.cc_limits[GBMS_AACT_IDX(profile)];
-	ret = of_property_read_u32_array(gbms_batt_id_node(node), aact_cc_limits,
+	/* load C rates into profile->cccm_limits */
+	ret = of_property_read_u32_array(node, "google,aact-cc-limits",
 					 profile->aact_cccm_limits,
 					 cccm_array_size);
-	if (ret < 0)
-		ret = of_property_read_u32_array(node, aact_cc_limits,
-						 profile->aact_cccm_limits,
-						 cccm_array_size);
 	if (ret < 0) {
 		gbms_err(profile, "cannot read aact-cc-limits table, ret=%d\n", ret);
 		kfree(profile->cccm_limits);
@@ -749,7 +690,7 @@ int gbms_update_chg_profile_from_aact(struct gbms_chg_profile *profile)
 
 	cccm_array_size = (profile->aact_temp_nb_limits - 1)
 			  * profile->aact_volt_nb_limits
-			  * GBMS_AACT_NB_LIMITS(profile);
+			  * profile->aact_nb_limits;
 	mem_size = sizeof(s32) * cccm_array_size;
 
 	profile->cccm_limits = kzalloc(mem_size, GFP_KERNEL);
@@ -773,10 +714,6 @@ EXPORT_SYMBOL_GPL(gbms_update_chg_profile_from_aact);
 int gbms_aact_get_index(const struct gbms_chg_profile *profile, const int cycles)
 {
 	int idx = 0;
-
-	/* ecc list has not been loaded or updated yet */
-	if (!profile->aact_load_chg_ecc && !profile->aact_update_profile)
-		return 0;
 
 	while (idx <= profile->aact_nb_limits - 1 && cycles >= profile->aact_limits[idx])
 		idx++;
@@ -864,25 +801,12 @@ EXPORT_SYMBOL_GPL(gbms_msc_get_last_voltage_idx);
 
 /* skip tiers that have same c-rate */
 int gbms_msc_voltage_idx_merge_tiers(const struct gbms_chg_profile *profile,
-			  int vbatt, int temp_idx)
+			  int vbatt_idx, int temp_idx)
 {
 	int cc_max;
-	int vbatt_idx = 0;
 
 	if (!profile)
 		return 0;
-
-	while (vbatt_idx < profile->volt_nb_limits - 1 &&
-	       vbatt > profile->volt_limits[vbatt_idx])
-		vbatt_idx++;
-
-	if (vbatt_idx != profile->volt_nb_limits - 1) {
-		const int vt = profile->volt_limits[vbatt_idx];
-		const int headr = profile->fv_uv_resolution * 3;
-
-		if ((vt - vbatt) < headr)
-			vbatt_idx += 1;
-	}
 
 	if (temp_idx < 0 || temp_idx >= profile->temp_nb_limits)
 		return vbatt_idx;
@@ -1390,7 +1314,7 @@ int gbms_decode_eeprom_sn(char *decode_sn, const size_t max_len)
 		return ret;
 
 	/* Pack barcode area data in ASCII format */
-	strncpy(decode_sn, sn, pack_barcode_len);
+	memcpy(decode_sn, sn, pack_barcode_len);
 
 	/*
 	 * decode address
@@ -1404,7 +1328,8 @@ int gbms_decode_eeprom_sn(char *decode_sn, const size_t max_len)
 	pcb_sn = (sn[27] << 8) | sn[28];
 	tmp = (sn[25] << 8) | sn[26];
 	date = ((((tmp >> 9) & 0x3f) + 1980) * 10000) + ((tmp >> 5) & 0xf) * 100 + (tmp & 0x1F);
-	count += scnprintf(decode_sn + count, max_len, "%02d%02d%d%04X%c", sn[23], sn[24], date, pcb_sn, sn[29]);
+	count += scnprintf(decode_sn + count, max_len, "%02d%02d%d%04X%c",
+			   sn[23], sn[24], date, pcb_sn, sn[29]);
 	decode_sn[count] = '\0';
 
 	return 0;

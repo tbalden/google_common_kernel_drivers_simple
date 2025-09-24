@@ -10,6 +10,7 @@
 #include <linux/bitops.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
+#include <linux/limits.h>
 #include <linux/slab.h>
 
 #include "lwis_device.h"
@@ -41,17 +42,15 @@ static struct lwis_ioreg *get_block_by_idx(struct lwis_ioreg_device *ioreg_dev, 
 	return block;
 }
 
-static int validate_offset(struct lwis_ioreg_device *ioreg_dev, struct lwis_ioreg *block,
+static int validate_offset(struct lwis_ioreg_device *ioreg_dev, int index, struct lwis_ioreg *block,
 			   uint64_t offset, size_t size_in_bytes, unsigned int alignment)
 {
-	uint64_t max_uint64 = 0xFFFFFFFFFFFFFFFFll;
-
 	if (offset % alignment) {
 		dev_err(ioreg_dev->base_dev.dev, "Accessing invalid address! Alignment error\n");
 		return -EFAULT;
 	}
 
-	if ((offset > max_uint64 - size_in_bytes) || (offset + size_in_bytes > block->size)) {
+	if ((offset > U64_MAX - size_in_bytes) || (offset + size_in_bytes > block->size)) {
 		dev_err(ioreg_dev->base_dev.dev, "Accessing invalid address! Block size is %d.\n",
 			block->size);
 		dev_err(ioreg_dev->base_dev.dev,
@@ -59,7 +58,26 @@ static int validate_offset(struct lwis_ioreg_device *ioreg_dev, struct lwis_iore
 			size_in_bytes);
 		return -EFAULT;
 	}
-	return 0;
+
+	if (ioreg_dev->reg_valid_range_list.count == 0)
+		return 0;
+
+	for (int i = 0; i < ioreg_dev->reg_valid_range_list.count; ++i) {
+		uint64_t range_low_bound = ioreg_dev->reg_valid_range_list.ranges[i].start_addr;
+		uint64_t range_high_bound = ioreg_dev->reg_valid_range_list.ranges[i].start_addr +
+					    ioreg_dev->reg_valid_range_list.ranges[i].size;
+
+		if (ioreg_dev->reg_valid_range_list.ranges[i].block_id != index)
+			continue;
+		if (offset >= range_low_bound && offset <= range_high_bound &&
+		    offset + size_in_bytes <= range_high_bound) {
+			return 0;
+		}
+	}
+	dev_err(ioreg_dev->base_dev.dev,
+		"Index %d, offset %#llx, size_in_bytes %zu, will be out of valid range.\n",
+		index, offset, size_in_bytes);
+	return -EFAULT;
 }
 
 static int validate_access_size(int access_size, int native_value_bitwidth)
@@ -363,7 +381,7 @@ int lwis_ioreg_io_entry_rw(struct lwis_ioreg_device *ioreg_dev, struct lwis_io_e
 			return PTR_ERR(block);
 		}
 
-		ret = validate_offset(ioreg_dev, block, entry->rw_batch.offset,
+		ret = validate_offset(ioreg_dev, index, block, entry->rw_batch.offset,
 				      entry->rw_batch.size_in_bytes,
 				      ioreg_dev->base_dev.native_addr_bitwidth / 8);
 		if (ret) {
@@ -403,7 +421,7 @@ int lwis_ioreg_io_entry_rw(struct lwis_ioreg_device *ioreg_dev, struct lwis_io_e
 			return PTR_ERR(block);
 		}
 
-		ret = validate_offset(ioreg_dev, block, entry->rw_batch.offset,
+		ret = validate_offset(ioreg_dev, index, block, entry->rw_batch.offset,
 				      entry->rw_batch.size_in_bytes,
 				      ioreg_dev->base_dev.native_addr_bitwidth / 8);
 		if (ret) {
@@ -480,9 +498,8 @@ int lwis_ioreg_read(struct lwis_ioreg_device *ioreg_dev, int index, uint64_t off
 		internal_offset = offset & ~offset_mask;
 	}
 
-	// Access_size is bitwidth
-	// and validate_offset expects size of bytes
-	ret = validate_offset(ioreg_dev, block, internal_offset, access_size / 8,
+	/* Access_size is bitwidth and validate_offset expects size of bytes */
+	ret = validate_offset(ioreg_dev, index, block, internal_offset, access_size / 8,
 			      ioreg_dev->base_dev.native_addr_bitwidth / 8);
 	if (ret)
 		return ret;
@@ -542,9 +559,8 @@ int lwis_ioreg_write(struct lwis_ioreg_device *ioreg_dev, int index, uint64_t of
 		value = (value & value_mask) | (read_value & ~value_mask);
 	}
 
-	// Access_size is bitwidth
-	// and validate_offset expects size of bytes
-	ret = validate_offset(ioreg_dev, block, internal_offset, access_size / 8,
+	/* Access_size is bitwidth and validate_offset expects size of bytes */
+	ret = validate_offset(ioreg_dev, index, block, internal_offset, access_size / 8,
 			      ioreg_dev->base_dev.native_addr_bitwidth / 8);
 	if (ret)
 		return ret;

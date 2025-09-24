@@ -9,6 +9,7 @@
 
 #include "gs_panel/drm_panel_funcs_defaults.h"
 #include "gs_panel/gs_panel.h"
+#include "trace/panel_trace.h"
 
 #define drm_to_gs_panel(panel) container_of(panel, struct gs_panel, base)
 
@@ -17,6 +18,7 @@ int gs_panel_disable(struct drm_panel *panel)
 	struct gs_panel *ctx = drm_to_gs_panel(panel);
 
 	dev_dbg(ctx->dev, "%s+\n", __func__);
+	PANEL_ATRACE_BEGIN(__func__);
 	ctx->hbm_mode = GS_HBM_OFF;
 	ctx->dimming_on = false;
 	ctx->idle_data.self_refresh_active = false;
@@ -35,6 +37,7 @@ int gs_panel_disable(struct drm_panel *panel)
 	gs_panel_disable_normal_feat_locked(ctx);
 	gs_panel_send_cmdset(ctx, ctx->desc->off_cmdset);
 	mutex_unlock(&ctx->mode_lock); /*TODO(b/267170999): MODE*/
+	PANEL_ATRACE_END(__func__);
 	dev_dbg(ctx->dev, "%s\n", __func__);
 	return 0;
 }
@@ -44,24 +47,59 @@ int gs_panel_unprepare(struct drm_panel *panel)
 {
 	struct gs_panel *ctx = drm_to_gs_panel(panel);
 
+	PANEL_ATRACE_BEGIN("gs_panel_unprepare");
 	dev_dbg(ctx->dev, "%s +\n", __func__);
 	gs_panel_set_power_helper(ctx, false);
 	dev_dbg(ctx->dev, "%s -\n", __func__);
+	PANEL_ATRACE_END("gs_panel_unprepare");
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(gs_panel_unprepare);
 
+/**
+ * gs_panel_prepare() - powers on the panel
+ * @panel: reference to base drm_panel device
+ *
+ * Called during the pre-atomic-enable sequence by drm_panel_prepare().
+ *
+ * Return: Always 0
+ */
 int gs_panel_prepare(struct drm_panel *panel)
 {
 	struct gs_panel *ctx = drm_to_gs_panel(panel);
 
+	PANEL_ATRACE_BEGIN("gs_panel_prepare");
 	dev_dbg(ctx->dev, "%s +\n", __func__);
 	gs_panel_set_power_helper(ctx, true);
 	dev_dbg(ctx->dev, "%s -\n", __func__);
+	PANEL_ATRACE_END("gs_panel_prepare");
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(gs_panel_prepare);
+
+/**
+ * gs_panel_prepare_with_reset() - powers on the panel, performs reset sequence
+ * @panel: reference to base drm_panel device
+ *
+ * Called during the pre-atomic-enable sequence by drm_panel_prepare().
+ * This variant performs a reset-toggle as well, for cases where the panel
+ * needs to go through its reset sequence earlier than in the enable sequence
+ * (for instance, to align better with other components like DSI receiving power)
+ *
+ * Return: Always 0
+ */
+int gs_panel_prepare_with_reset(struct drm_panel *panel)
+{
+	struct gs_panel *ctx = drm_to_gs_panel(panel);
+
+	gs_panel_prepare(panel);
+	gs_panel_reset_helper_pre_enable(ctx);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(gs_panel_prepare_with_reset);
 
 static void gs_panel_mode_set_name(struct drm_display_mode *mode)
 {

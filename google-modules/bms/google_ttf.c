@@ -12,6 +12,8 @@
  * GNU General Public License for more details.
  */
 
+#pragma clang diagnostic ignored "-Wformat"
+
 #include <linux/kernel.h>
 #include <linux/printk.h>
 #include <linux/of.h>
@@ -20,7 +22,7 @@
 #include "google_psy.h"
 #include "qmath.h"
 
-#ifdef CONFIG_DEBUG_FS
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 #include <linux/debugfs.h>
 #endif
 
@@ -700,8 +702,7 @@ static int ttf_tier_sscan(struct batt_ttf_stats *stats, const char *buff, size_t
 		len++;
 
 	for (j = 0; j < GBMS_STATS_TIER_COUNT; j++) {
-		sscanf(&buff[len], TTF_STATS_FMT,
-		       &stats->tier_stats[j].soc_in,
+		sscanf(&buff[len], TTF_STATS_FMT, &stats->tier_stats[j].soc_in,
 		       &stats->tier_stats[j].cc_in,
 		       &stats->tier_stats[j].cc_total,
 		       &stats->tier_stats[j].avg_time);
@@ -924,14 +925,18 @@ static int ttf_init_soc_parse_dt(struct batt_ttf_stats *stats, struct device_nod
 				 int capacity_ma)
 {
 	const int cc = (capacity_ma * 100) / GBMS_SOC_STATS_LEN;
-	int table_count, ret, i, table_i = 0;
+	int table_count, ret, i, table_i = 0, elap_table_count;
 	struct ttf_adapter_stats as;
 
 	table_count = of_property_count_elems_of_size(node, "google,ttf-soc-table", sizeof(u32));
+	elap_table_count = of_property_count_elems_of_size(node, "google,ttf-elap-table",
+							   sizeof(u32));
 	if (table_count <= 0)
 		return -EINVAL;
-	if (table_count % 2)
+	if (table_count != elap_table_count) {
+		pr_err("ttf soc and elap table sizes do not match\n");
 		return -EINVAL;
+	}
 
 	as.soc_table = kzalloc(table_count * 2 * sizeof(u32), GFP_KERNEL);
 	if (!as.soc_table)

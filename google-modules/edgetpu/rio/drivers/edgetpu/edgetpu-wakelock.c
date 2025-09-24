@@ -14,7 +14,6 @@
 #include <linux/time64.h>
 #include <linux/timekeeping.h>
 
-#include "edgetpu.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-wakelock.h"
 
@@ -128,7 +127,7 @@ void edgetpu_wakelock_unlock(struct edgetpu_wakelock *wakelock)
 	mutex_unlock(&wakelock->lock);
 }
 
-int edgetpu_wakelock_acquire(struct edgetpu_wakelock *wakelock, u32 flags)
+int edgetpu_wakelock_acquire(struct edgetpu_wakelock *wakelock)
 {
 	int ret;
 
@@ -140,8 +139,6 @@ int edgetpu_wakelock_acquire(struct edgetpu_wakelock *wakelock, u32 flags)
 	}
 	if (!ret)
 		ktime_get_ts64(&wakelock->current_acquire_timestamp);
-	if (flags & EDGETPU_ACQUIRE_WAKELOCK_FLAG_SUSPEND)
-		wakelock->suspendable = true;
 	return ret;
 }
 
@@ -165,8 +162,6 @@ int edgetpu_wakelock_release(struct edgetpu_wakelock *wakelock)
 		ktime_get_ts64(&curr);
 		curr = timespec64_sub(curr, wakelock->current_acquire_timestamp);
 		wakelock->total_acquired_time = timespec64_add(wakelock->total_acquired_time, curr);
-		/* Clear "suspendable" flag on last release. */
-		wakelock->suspendable = false;
 	}
 
 	return --wakelock->req_count;

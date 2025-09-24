@@ -171,27 +171,26 @@ struct base_fence {
 /**
  * struct base_mem_aliasing_info - Memory aliasing info
  *
- * @gpu_va: GPU VA of an allocation to be aliased, can be a special value
- *          BASEP_MEM_WRITE_ALLOC_PAGES_HANDLE
- * @offset: Offset within the allocation to start aliasing from, in pages.
- *          Not used with BASEP_MEM_WRITE_ALLOC_PAGES_HANDLE.
- * @length: Length to alias, in pages. For BASEP_MEM_WRITE_ALLOC_PAGES_HANDLE
+ * @handle: Handle to alias, can be BASE_MEM_WRITE_ALLOC_PAGES_HANDLE
+ * @offset: Offset within the handle to start aliasing from, in pages.
+ *          Not used with BASE_MEM_WRITE_ALLOC_PAGES_HANDLE.
+ * @length: Length to alias, in pages. For BASE_MEM_WRITE_ALLOC_PAGES_HANDLE
  *          specifies the number of times the special page is needed.
  *
- * Describes a GPU memory allocation to be aliased.
- * A subset of the allocation can be chosen for aliasing, given an offset and a
+ * Describes a memory handle to be aliased.
+ * A subset of the handle can be chosen for aliasing, given an offset and a
  * length.
- * A special value BASEP_MEM_WRITE_ALLOC_PAGES_HANDLE is used to represent a
+ * A special handle BASE_MEM_WRITE_ALLOC_PAGES_HANDLE is used to represent a
  * region where a special page is mapped with a write-alloc cache setup,
  * typically used when the write result of the GPU isn't needed, but the GPU
  * must write anyway.
  *
  * Offset and length are specified in pages.
- * Offset must be within the size of the allocation.
- * Offset+length must not overrun the size of the allocation.
+ * Offset must be within the size of the handle.
+ * Offset+length must not overrun the size of the handle.
  */
 struct base_mem_aliasing_info {
-	__u64 gpu_va;
+	struct base_mem_handle handle;
 	__u64 offset;
 	__u64 length;
 };
@@ -272,7 +271,10 @@ struct base_external_resource {
  */
 struct base_external_resource_list {
 	__u64 count;
-	struct base_external_resource ext_res[1];
+	union {
+		struct base_external_resource __padding;
+		__DECLARE_FLEX_ARRAY(struct base_external_resource, ext_res);
+	};
 };
 
 struct base_jd_debug_copy_buffer {
@@ -492,13 +494,11 @@ struct mali_base_gpu_coherent_group_info {
 	struct mali_base_gpu_coherent_group group[BASE_MAX_COHERENT_GROUPS];
 };
 
-/* [Pixel-Mod Begin] Keeping for JM compatibility */
 #if MALI_USE_CSF
 #include "csf/mali_base_csf_kernel.h"
 #else
 #include "jm/mali_base_jm_kernel.h"
 #endif
-/* [Pixel-Mod End] */
 
 /**
  * struct gpu_raw_gpu_props - A complete description of the GPU's Hardware

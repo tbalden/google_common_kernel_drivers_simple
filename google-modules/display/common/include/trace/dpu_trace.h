@@ -90,6 +90,35 @@ TRACE_EVENT(dsi_label_scope,
 #define PANEL_SEQ_LABEL_BEGIN(name) trace_dsi_label_scope(name, true)
 #define PANEL_SEQ_LABEL_END(name) trace_dsi_label_scope(name, false)
 
+TRACE_EVENT(reg_dump_header, TP_PROTO(const char *desc, u32 offset, u32 size),
+	TP_ARGS(desc, offset, size),
+	TP_STRUCT__entry(
+			__string(desc, desc)
+			__field(u32, offset)
+			__field(u32, size)
+		),
+	TP_fast_assign(
+			__assign_str(desc, desc);
+			__entry->offset = offset;
+			__entry->size = size;
+		),
+	TP_printk("%s offset:%u size:%u", __get_str(desc), __entry->offset, __entry->size)
+);
+
+TRACE_EVENT(reg_dump_line,
+	TP_PROTO(u32 offset, const char *line_buf),
+	TP_ARGS(offset, line_buf),
+	TP_STRUCT__entry(
+		__field(u32, offset)
+		__string(line_buf, line_buf)
+	),
+	TP_fast_assign(
+		__entry->offset = offset;
+		__assign_str(line_buf, line_buf);
+	),
+	TP_printk("%08X: %s", __entry->offset, __get_str(line_buf))
+);
+
 TRACE_EVENT(tracing_mark_write,
 	TP_PROTO(char type, int pid, struct va_format *vaf, int value),
 	TP_ARGS(type, pid, vaf, value),
@@ -107,6 +136,40 @@ TRACE_EVENT(tracing_mark_write,
 	),
 	TP_printk("%c|%d|%s|%d",
 		__entry->type, __entry->pid, __get_str(name), __entry->value)
+);
+
+TRACE_EVENT(disp_dpu_underrun,
+	TP_PROTO(int id, int frames_pending, int vsync_count),
+	TP_ARGS(id, frames_pending, vsync_count),
+	TP_STRUCT__entry(
+		__field(int, id)
+		__field(int, frames_pending)
+		__field(int, vsync_count)
+	),
+	TP_fast_assign(
+		__entry->id = id;
+		__entry->frames_pending = frames_pending;
+		__entry->vsync_count = vsync_count;
+	),
+	TP_printk("id: %d frames_pending: %d vsync_count: %d",
+		__entry->id, __entry->frames_pending, __entry->vsync_count)
+);
+
+TRACE_EVENT(disp_vblank_irq_enable,
+	TP_PROTO(int id, int output_id, bool enable),
+	TP_ARGS(id, output_id, enable),
+	TP_STRUCT__entry(
+		__field(int, id)
+		__field(int, output_id)
+		__field(int, enable)
+	),
+	TP_fast_assign(
+		__entry->id = id;
+		__entry->output_id = output_id;
+		__entry->enable = enable;
+	),
+	TP_printk("id: %d output_id: %d %s",
+		__entry->id, __entry->output_id, __entry->enable ? "enable" : "disable")
 );
 
 /* extra define flag for the case TRACE_HEAD_MULTI_READ & _DPU_TRACE_H both set */
@@ -128,6 +191,16 @@ static inline void _tracing_mark_write(char type, int pid, int value, const char
 }
 
 /**
+ * DPU_ATRACE_INT_PID_FMT() - used to trace an integer value for a formatted variable
+ * @value: Value of variable to trace
+ * @pid: Attach trace log to specific process ID
+ *
+ * Used to trace a formatted variable or counter with an integer value
+ */
+#define DPU_ATRACE_INT_PID_FMT(value, pid, ...) \
+	_tracing_mark_write('C', pid, value, __VA_ARGS__)
+
+/**
  * DPU_ATRACE_INT_PID() - used to trace an integer value
  * @name: Name of variable to trace; does not support format string
  * @value: Value of variable to trace
@@ -136,7 +209,7 @@ static inline void _tracing_mark_write(char type, int pid, int value, const char
  * Used to trace a variable or counter with an integer value
  */
 #define DPU_ATRACE_INT_PID(name, value, pid) \
-	_tracing_mark_write('C', pid, value, name)
+	DPU_ATRACE_INT_PID_FMT(value, pid, name)
 
 /**
  * DPU_ATRACE_INT() - used to trace an integer value
@@ -169,6 +242,15 @@ static inline void _tracing_mark_write(char type, int pid, int value, const char
 	_tracing_mark_write('E', current->tgid, 0, "")
 
 /**
+ * DPU_ATRACE_INSTANT_PID_FMT() - used to trace an instantaneous formatted event
+ * @pid: Attach trace log to specific process ID
+ *
+ * Used to trace an instantaneous formatted event with a string value
+ */
+#define DPU_ATRACE_INSTANT_PID_FMT(pid, ...) \
+	_tracing_mark_write('I', pid, 0, __VA_ARGS__)
+
+/**
  * DPU_ATRACE_INSTANT_PID() - used to trace an instantaneous event
  * @name: Name of variable to trace; does not support format string
  * @value: Value of variable to trace
@@ -177,7 +259,7 @@ static inline void _tracing_mark_write(char type, int pid, int value, const char
  * Used to trace an instantaneous event with a string value
  */
 #define DPU_ATRACE_INSTANT_PID(name, pid) \
-	_tracing_mark_write('I', pid, 0, name)
+	DPU_ATRACE_INSTANT_PID_FMT(pid, name)
 
 /**
  * DPU_ATRACE_INSTANT() - used to trace an instantaneous event

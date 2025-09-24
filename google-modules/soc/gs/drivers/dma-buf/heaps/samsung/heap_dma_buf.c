@@ -102,6 +102,7 @@ static struct dma_iovm_map *dma_find_iovm_map(struct dma_buf_attachment *a,
 	struct dma_iovm_map *iovm_map;
 	unsigned long attrs;
 
+#if IS_ENABLED(CONFIG_SAMSUNG_IOMMU) || IS_ENABLED(CONFIG_SAMSUNG_IOMMU_V9)
 	if (dma_heap_flags_uncached(buffer->flags)) {
 		/*
 		 * If the device of sharable domain would access non-cachable
@@ -113,6 +114,7 @@ static struct dma_iovm_map *dma_find_iovm_map(struct dma_buf_attachment *a,
 		 */
 		a->dma_map_attrs |= (DMA_ATTR_PRIVILEGED | DMA_ATTR_SKIP_CPU_SYNC);
 	}
+#endif
 	attrs = DMA_MAP_ATTRS(a->dma_map_attrs);
 
 	list_for_each_entry(iovm_map, &buffer->attachments, list) {

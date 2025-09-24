@@ -12,22 +12,20 @@
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
 #include <soc/google/bts.h>
+#include <soc/google/pt.h>
 
 #include "lwis_commands.h"
 #include "lwis_device_dpm.h"
 #include "lwis_debug.h"
 #include "lwis_platform.h"
 
-/*
- * module_param macro defines the parameter name, type and permission bits
- * in sysfs file system. 0644 represents that the owner can read and write the kernel
- * parameter using command line while other users can read it.
- */
-bool lwis_busan_debug;
-module_param(lwis_busan_debug, bool, 0644);
-
 /* Uncomment to let kernel panic when IOMMU hits a page fault. */
 /* #define ENABLE_PAGE_FAULT_PANIC */
+
+int lwis_platform_unprobe(struct lwis_device *lwis_dev)
+{
+	return 0;
+}
 
 int lwis_platform_probe(struct lwis_device *lwis_dev)
 {
@@ -252,16 +250,14 @@ int lwis_platform_update_qos(struct lwis_device *lwis_dev, int value, int32_t cl
 	else
 		exynos_pm_qos_update_request(qos_req, value);
 
-	if (lwis_busan_debug) {
-		dev_info(lwis_dev->dev, "Updating clock for clock_family %d, freq to %u\n",
-			 clock_family, value);
-	}
+	dev_info(lwis_dev->dev, "Updating clock for clock_family %d, freq to %u\n", clock_family,
+		 value);
 
 	return 0;
 }
 
 static int find_bts_block(struct lwis_device *lwis_dev, struct lwis_device *target_dev,
-			  struct lwis_qos_setting_v3 *qos_setting)
+			  struct lwis_qos_setting *qos_setting)
 {
 	int i;
 
@@ -285,7 +281,7 @@ static int find_bts_block(struct lwis_device *lwis_dev, struct lwis_device *targ
 }
 
 int lwis_platform_dpm_update_qos(struct lwis_device *lwis_dev, struct lwis_device *target_dev,
-				 struct lwis_qos_setting_v3 *qos_setting)
+				 struct lwis_qos_setting *qos_setting)
 {
 	int ret = 0;
 
@@ -405,7 +401,7 @@ int lwis_platform_update_bts(struct lwis_device *lwis_dev, int block, unsigned i
 	ret = bts_update_bw(bts_index, bts_request);
 	if (ret < 0) {
 		dev_err(lwis_dev->dev, "Failed to update bandwidth to bts, ret: %d\n", ret);
-	} else if (lwis_busan_debug) {
+	} else {
 		dev_info(
 			lwis_dev->dev,
 			"Updated bandwidth to bts for device %s block %s: peak: %u, read: %u, write: %u, rt: %u\n",
@@ -414,9 +410,65 @@ int lwis_platform_update_bts(struct lwis_device *lwis_dev, int block, unsigned i
 	return ret;
 }
 
-int lwis_plaform_set_default_irq_affinity(unsigned int irq)
+int lwis_platform_set_default_irq_affinity(unsigned int irq)
 {
 	const int cpu = 0x2;
 
-	return irq_set_affinity_and_hint(irq, cpumask_of(cpu));
+	return irq_set_affinity_hint(irq, cpumask_of(cpu));
+}
+
+int lwis_platform_get_default_pt_id(void)
+{
+	return PT_PTID_INVALID;
+}
+
+int lwis_platform_dpm_sync_update_qos(struct lwis_device *lwis_dev, int sync_update)
+{
+	return 0;
+}
+
+int lwis_platform_dpm_devfreq_sync_update_qos(struct lwis_device *lwis_dev, int devfreq_sync_update)
+{
+	return 0;
+}
+
+int lwis_platform_query_irm_register_verify(struct lwis_device *lwis_dev, int sync_update)
+{
+	return 0;
+}
+
+int lwis_platform_query_devfreq_verify(struct lwis_device *lwis_dev, int devfreq_sync_update)
+{
+	return 0;
+}
+
+void lwis_get_sync_update_device_mask(struct lwis_device *lwis_dev,
+				      struct lwis_qos_setting *qos_setting, int *sync_update)
+{
+}
+
+void lwis_get_devfreq_sync_update_device_mask(struct lwis_device *lwis_dev,
+					      struct lwis_qos_setting *qos_setting,
+					      int *devfreq_sync_update)
+{
+}
+
+void lwis_platform_refresh_expected_qos_settings(struct lwis_device *lwis_dev,
+						 struct lwis_qos_setting *qos_setting)
+{
+}
+
+int lwis_platform_check_qos_box_probed(struct device *dev, const char *lwis_device_name)
+{
+	return 0;
+}
+
+void lwis_platform_set_device_state(struct lwis_device *lwis_dev, bool camera_up)
+{
+}
+
+int lwis_platform_update_top_dev(struct lwis_device *top_dev, struct lwis_device *lwis_dev,
+				 bool *qos_box_probed)
+{
+	return 0;
 }

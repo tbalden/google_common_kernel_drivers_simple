@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
+#include <linux/platform_device.h>
 #include <performance/gs_perf_mon/gs_perf_mon.h>
 #include <soc/google/exynos-devfreq.h>
 #include <trace/events/power.h>

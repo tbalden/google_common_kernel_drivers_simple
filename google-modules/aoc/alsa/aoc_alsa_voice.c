@@ -132,6 +132,7 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 
 	alsa_stream->entry_point_idx = substream->pcm->device;
 
+	update_google_cdd_audio_stat_ext(chip, CCD_AUDIO_VOICE, true);
 	mutex_unlock(&chip->audio_mutex);
 
 	return 0;
@@ -203,6 +204,7 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 
 	chip->opened &= ~(1 << alsa_stream->idx);
 
+	update_google_cdd_audio_stat_ext(chip, CCD_AUDIO_VOICE, false);
 	mutex_unlock(&chip->audio_mutex);
 
 	return 0;

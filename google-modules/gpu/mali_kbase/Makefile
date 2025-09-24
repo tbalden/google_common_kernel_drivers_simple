@@ -61,7 +61,8 @@ ifeq ($(MALI_KCONFIG_EXT_PREFIX),)
         CONFIG_MALI_PLATFORM_NAME ?= "devicetree"
         CONFIG_MALI_TRACE_POWER_GPU_WORK_PERIOD ?= y
         CONFIG_MALI_GATOR_SUPPORT ?= y
-        CONFIG_MALI_KUTF_PTM_TESTS ?= n
+        CONFIG_MALI_ARBITRATION ?= n
+        CONFIG_MALI_PARTITION_MANAGER ?= n
 
 
         ifneq ($(CONFIG_MALI_NO_MALI),y)
@@ -162,6 +163,7 @@ ifeq ($(MALI_KCONFIG_EXT_PREFIX),)
         endif
     else
         # Prevent misuse when CONFIG_MALI_MIDGARD=n
+        CONFIG_MALI_ARBITRATION = n
         CONFIG_MALI_KUTF = n
         CONFIG_MALI_KUTF_IRQ_TEST = n
         CONFIG_MALI_KUTF_CLK_RATE_TRACE = y
@@ -172,7 +174,8 @@ ifeq ($(MALI_KCONFIG_EXT_PREFIX),)
     CONFIGS += \
         CONFIG_MALI_MIDGARD \
         CONFIG_MALI_GATOR_SUPPORT \
-        CONFIG_MALI_KUTF_PTM_TESTS \
+        CONFIG_MALI_ARBITRATION \
+        CONFIG_MALI_PARTITION_MANAGER \
         CONFIG_MALI_REAL_HW \
         CONFIG_MALI_DEVFREQ \
         CONFIG_MALI_MIDGARD_DVFS \
@@ -251,11 +254,18 @@ include $(KDIR)/../private/google-modules/soc/gs/Makefile.include
 #
 # KBUILD_EXTRA_SYMBOLS to prevent warnings about unknown functions
 #
-BASE_SYMBOLS = $(OUT_DIR)/../private/google-modules/gpu/mali_pixel/Module.symvers
+# TODO(b/361346732): This should be only used during a transient migration phase. Support for this
+# may be discontinued without notice. It is recommended that all kernel_module's are converted to
+# ddk_module.
+BASE_SYMBOLS = $(OUT_DIR)/../private/google-modules/gpu/mali_pixel/mali_pixel_Module.symvers
 
 EXTRA_SYMBOLS += \
     $(BASE_SYMBOLS)
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/power/mitigation/Module.symvers
+
+# TODO(b/361346732): This should be only used during a transient migration phase. Support for this
+# may be discontinued without notice. It is recommended that all kernel_module's are converted to
+# ddk_module.
+EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/power/mitigation/google_bcl_Module.symvers
 
 CFLAGS_MODULE += -Wall -Werror
 

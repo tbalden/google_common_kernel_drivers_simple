@@ -47,6 +47,7 @@ kernel_build(
         "drivers/hwtracing/coresight/coresight-funnel.ko",
         "drivers/hwtracing/coresight/coresight-replicator.ko",
         "drivers/hwtracing/coresight/coresight-tmc.ko",
+        "drivers/hwtracing/coresight/coresight-trbe.ko",
     ],
     strip_modules = True,
 )

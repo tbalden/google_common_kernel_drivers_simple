@@ -10,9 +10,14 @@
 #include <linux/sched/cputime.h>
 #include <kernel/sched/sched.h>
 
+#if IS_ENABLED(CONFIG_SOC_GS101) || IS_ENABLED(CONFIG_SOC_GS201) || IS_ENABLED(CONFIG_SOC_ZUMA)
+#include <performance/gs_perf_mon/gs_perf_mon.h>
+#else
+#include <perf/core/gs_perf_mon.h>
+#endif
+
 #include "sched_priv.h"
 #include "sched_events.h"
-#include <performance/gs_perf_mon/gs_perf_mon.h>
 
 struct vendor_group_list vendor_group_list[VG_MAX];
 
@@ -206,8 +211,7 @@ void rvh_enqueue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p
 
 	if (static_branch_likely(&auto_dvfs_headroom_enable)) {
 		if (vg[get_vendor_group(p)].disable_util_est) {
-			p->se.avg.util_est.enqueued = 0;
-			p->se.avg.util_est.ewma = 0;
+			p->se.avg.util_est = 0;
 		}
 	}
 
@@ -353,7 +357,8 @@ static void set_performance_inheritance(struct task_struct *p, struct task_struc
 		if (!!get_preempt_wakeup(pi_task))
 			vi_set_preempt_wakeup(vi, type, 1);
 
-		if (__get_prefer_high_cap(pi_task) || task_cpu(pi_task) >= pixel_cluster_start_cpu[1])
+		if (__get_prefer_high_cap(pi_task) ||
+			task_cpu(pi_task) >= pixel_cluster_start_cpu[1])
 			vi_set_prefer_high_cap(vi, type, 1);
 	} else {
 		vi->uclamp[type][UCLAMP_MIN] = uclamp_none(UCLAMP_MIN);
@@ -379,8 +384,7 @@ static void set_performance_inheritance(struct task_struct *p, struct task_struc
 void vh_binder_set_priority_pixel_mod(void *data, struct binder_transaction *t,
 	struct task_struct *p)
 {
-	if (!t->is_nested)
-		get_vendor_task_struct(p)->is_binder_task = true;
+	get_vendor_task_struct(p)->is_binder_task = true;
 
 	if (!t->from)
 		return;

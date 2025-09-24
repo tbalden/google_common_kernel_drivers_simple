@@ -11,6 +11,8 @@
 
 #include <asm/kvm_mmu.h>
 
+#include <kvm/iommu.h>
+
 #define S2MPU_MMIO_SIZE				SZ_64K
 #define SYSMMU_SYNC_MMIO_SIZE			SZ_64K
 #define SYSMMU_SYNC_S2_OFFSET			SZ_32K
@@ -438,6 +440,23 @@ struct fmpt {
 
 struct mpt {
 	struct fmpt fmpt[NR_GIGABYTES];
+};
+
+struct s2mpu_drv_data {
+	u32 version;
+	u32 context_cfg_valid_vid;
+};
+
+struct pkvm_iommu {
+	struct kvm_hyp_iommu iommu;
+	struct pkvm_iommu *parent;
+	struct list_head children;
+	struct list_head siblings;
+	phys_addr_t pa;
+	void *va;
+	size_t size;
+	u8 flags;
+	struct s2mpu_drv_data data;
 };
 
 /* Compile time configuration for S2MPU. */

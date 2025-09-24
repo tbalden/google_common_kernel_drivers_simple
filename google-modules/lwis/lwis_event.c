@@ -658,10 +658,17 @@ int lwis_client_event_states_clear(struct lwis_client *lwis_client)
 	list_for_each_safe(it_event, it_tmp, &events_to_clear) {
 		state = list_entry(it_event, struct lwis_client_event_state, clearance_node);
 		list_del(&state->clearance_node);
+
+		if (EVENT_OWNER_DEVICE_ID(state->event_control.event_id) !=
+			    lwis_client->lwis_dev->id &&
+		    state->event_control.flags) {
+			client_event_unsubscribe(lwis_client, state->event_control.event_id);
+		}
+
 		/* Update the device state with zero flags */
 		lwis_device_event_flags_updated(lwis_client->lwis_dev,
 						state->event_control.event_id,
-						state->event_control.flags, 0);
+						state->event_control.flags, /*new_flags=*/0);
 		/* Free the object */
 		kfree(state);
 	}
@@ -868,7 +875,8 @@ static int device_event_emit_impl(struct lwis_device *lwis_dev, int64_t event_id
 	if (has_subscriber) {
 		top_dev = container_of(lwis_dev->top_dev, struct lwis_top_device, base_dev);
 		top_dev->subscribe_ops.notify_event_subscriber(lwis_dev->top_dev, event_id,
-							       event_counter, timestamp);
+							       event_counter, timestamp, payload,
+							       payload_size);
 	}
 
 	/* Run internal handler if any */
@@ -1042,7 +1050,8 @@ out:
 }
 
 void lwis_device_external_event_emit(struct lwis_device *lwis_dev, int64_t event_id,
-				     int64_t event_counter, int64_t timestamp)
+				     int64_t event_counter, int64_t timestamp, void *payload,
+				     size_t payload_size)
 {
 	struct lwis_client_event_state *client_event_state;
 	struct lwis_device_event_state *device_event_state;
@@ -1090,15 +1099,22 @@ void lwis_device_external_event_emit(struct lwis_device *lwis_dev, int64_t event
 		spin_unlock_irqrestore(&lwis_client->event_lock, event_flags);
 
 		if (emit) {
-			event = kmalloc(sizeof(struct lwis_event_entry), GFP_ATOMIC);
+			event = kmalloc(sizeof(struct lwis_event_entry) + payload_size, GFP_ATOMIC);
 			if (!event)
 				return;
 
 			event->event_info.event_id = event_id;
 			event->event_info.event_counter = event_counter;
 			event->event_info.timestamp_ns = timestamp;
-			event->event_info.payload_size = 0;
-			event->event_info.payload_buffer = NULL;
+			event->event_info.payload_size = payload_size;
+			if (payload_size > 0) {
+				event->event_info.payload_buffer =
+					(void *)((uint8_t *)event +
+						 sizeof(struct lwis_event_entry));
+				memcpy(event->event_info.payload_buffer, payload, payload_size);
+			} else {
+				event->event_info.payload_buffer = NULL;
+			}
 			if (client_event_push_back(lwis_client, event)) {
 				lwis_dev_err_ratelimited(
 					lwis_dev->dev,

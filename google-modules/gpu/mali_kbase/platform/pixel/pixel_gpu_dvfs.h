@@ -63,7 +63,9 @@ struct gpu_dvfs_clk {
  */
 struct gpu_dvfs_utlization {
 	int util;
+#if MALI_USE_CSF
 	int mcu_util;
+#endif
 	int util_gl;
 	int util_cl;
 };
@@ -110,8 +112,10 @@ enum gpu_dvfs_governor_type {
 	 */
 	GPU_DVFS_GOVERNOR_BASIC = 0,
 	GPU_DVFS_GOVERNOR_QUICKSTEP,
+#if MALI_USE_CSF
 	GPU_DVFS_GOVERNOR_QUICKSTEP_USE_MCU,
 	GPU_DVFS_GOVERNOR_CAPACITY_USE_MCU,
+#endif
 	/* Insert new governors here */
 	GPU_DVFS_GOVERNOR_COUNT,
 	GPU_DVFS_GOVERNOR_INVALID,

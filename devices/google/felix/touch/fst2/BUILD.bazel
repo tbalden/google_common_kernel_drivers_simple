@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
 
 filegroup(
     name = "fst2.kconfig",
@@ -13,28 +13,30 @@ filegroup(
     ],
 )
 
-kernel_module(
+ddk_module(
     name = "fst2",
     srcs = glob([
-        "**/*.c",
         "**/*.h",
     ]) + [
-        "Kbuild",
-        "//private/google-modules/display/samsung:headers",
-        "//private/google-modules/display/samsung/include:headers",
-        "//private/google-modules/soc/gs:gs_soc_headers",
-        "//private/google-modules/touch/common:headers",
+        "fts.c",
+        "fts_lib/fts_flash.c",
+        "fts_lib/fts_io.c",
+        "fts_lib/fts_test.c",
+        "fts_proc.c",
     ],
-    outs = [
-        "fst2.ko",
-    ],
+    out = "fst2.ko",
     kernel_build = "//private/devices/google/common:kernel",
+    local_defines = [
+        "DYNAMIC_DEBUG_MODULE",
+    ],
     visibility = [
         "//private/devices/google:__subpackages__",
-        "//private/google-modules/soc/gs:__pkg__",
     ],
     deps = [
-        "//private/google-modules/soc/gs:gs_soc_module",
+        "//common:all_headers_aarch64",
+        "//private/google-modules/display/samsung:headers",
+        "//private/google-modules/soc/gs:headers",
+        "//private/google-modules/touch/common:ddk_headers",
         "//private/google-modules/touch/common:touch.common",
     ],
 )

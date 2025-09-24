@@ -100,6 +100,7 @@ extra/private/google-modules/soc/gs/drivers/ufs/ufs-exynos-gs.ko
 extra/private/google-modules/soc/gs/drivers/ufs/ufs-pixel-fips140.ko
 extra/private/google-modules/soc/gs/drivers/spi/spi-s3c64xx.ko
 extra/private/google-modules/soc/gs/drivers/usb/dwc3/dwc3-exynos-usb.ko
+extra/private/google-modules/soc/gs/drivers/usb/dwc3/google-role-sw.ko
 extra/private/google-modules/soc/gs/drivers/usb/host/xhci-exynos.ko
 extra/private/google-modules/soc/gs/drivers/usb/gadget/function/usb_f_dm.ko
 extra/private/google-modules/soc/gs/drivers/usb/gadget/function/usb_f_dm1.ko
@@ -113,6 +114,7 @@ extra/private/google-modules/soc/gs/drivers/usb/typec/tcpm/google/bc_max77759.ko
 extra/private/google-modules/soc/gs/drivers/usb/typec/tcpm/google/max777x9_contaminant.ko
 extra/private/google-modules/soc/gs/drivers/usb/typec/tcpm/google/max77759_contaminant.ko
 extra/private/google-modules/soc/gs/drivers/usb/typec/tcpm/google/max77779_contaminant.ko
+extra/private/google-modules/soc/gs/drivers/usb/typec/tcpm/google/tcpci_max777x9_i2c.ko
 extra/private/google-modules/soc/gs/drivers/usb/typec/tcpm/google/usbc_cooling_dev.ko
 extra/private/google-modules/soc/gs/drivers/input/fingerprint/goodixfp.ko
 extra/private/google-modules/soc/gs/drivers/input/keycombo.ko

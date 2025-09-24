@@ -36,100 +36,28 @@ static int lwis_fence_file_release(struct inode *node, struct file *fp)
 }
 
 /*
- *  dma_to_lwis_fence_status: Gets the DMA fence status and convert it back to
- *  LWIS fence status API.
- */
-static int dma_to_lwis_fence_status(int dma_fence_status)
-{
-	/* Coming from the dma_fence_get_status doc. */
-	switch (dma_fence_status) {
-	case LWIS_FENCE_STATUS_NOT_SIGNALED:
-		return LWIS_FENCE_V0_STATUS_NOT_SIGNALED;
-	case LWIS_FENCE_STATUS_SUCCESSFULLY_SIGNALED:
-		return 0;
-	default:
-		return dma_fence_status == -ECANCELED ? 1 : dma_fence_status;
-	}
-}
-
-/*
- *  lwis_fence_get_status: Read the LWIS fence's status
- */
-static ssize_t lwis_fence_read_status_legacy(struct file *fp, char __user *user_buffer, size_t len,
-					     loff_t *offset)
-{
-	int status = 0;
-	struct lwis_fence *lwis_fence = fp->private_data;
-	int max_len, read_len;
-
-	if (!lwis_fence)
-		return -EFAULT;
-
-	max_len = sizeof(status) - *offset;
-	if (len > max_len)
-		len = max_len;
-
-	if (WARN_ON(!lwis_fence->legacy_lwis_fence)) {
-		dev_err(lwis_fence->lwis_top_dev->dev,
-			"Not using legacy fence. This must be a bug.");
-		return -EBADFD;
-	}
-	status = dma_to_lwis_fence_status(dma_fence_get_status(&lwis_fence->dma_fence));
-	read_len = len - copy_to_user((void __user *)user_buffer, (void *)&status + *offset, len);
-
-	return read_len;
-}
-
-/*
- *  lwis_status_to_errno: Gets a LWIS fence status and converts it to an errno value.
- */
-static int lwis_status_to_errno(int lwis_fence_status)
-{
-	if (lwis_fence_status == 1) {
-		return -ECANCELED;
-	} else if (lwis_fence_status > 0) {
-		/* If we got any other C++ canonical error value, lets convert it to an error. */
-		return -ERANGE;
-	} else {
-		return lwis_fence_status;
-	}
-}
-
-/*
  *  lwis_fence_write_status: Signal fence with the error code from user
  */
 static ssize_t lwis_fence_write_status(struct file *fp, const char __user *user_buffer, size_t len,
 				       loff_t *offset)
 {
 	int ret = 0;
-	int status = 0;
 	int errno;
 	struct lwis_fence *lwis_fence = fp->private_data;
 
 	if (!lwis_fence)
 		return -EFAULT;
 
-	if (len != sizeof(status)) {
+	if (len != sizeof(errno)) {
 		dev_err(lwis_fence->lwis_top_dev->dev,
 			"Signal lwis_fence %p with incorrect buffer length\n", lwis_fence);
 		return -EINVAL;
 	}
 
-	if (copy_from_user(&status, (void __user *)user_buffer, len)) {
+	if (copy_from_user(&errno, (void __user *)user_buffer, len)) {
 		dev_err(lwis_fence->lwis_top_dev->dev,
 			"Failed to copy all the status from user space\n");
 		return -EFAULT;
-	}
-
-	if (lwis_fence->legacy_lwis_fence) {
-		if (status == LWIS_FENCE_V0_STATUS_NOT_SIGNALED) {
-			dev_err(lwis_fence->lwis_top_dev->dev,
-				"Cannot signal lwis_fence with 'not signaled' status.");
-			return -EINVAL;
-		}
-		errno = lwis_status_to_errno(status);
-	} else {
-		errno = status;
 	}
 
 	if (errno > 0 || errno < -MAX_ERRNO) {
@@ -146,34 +74,11 @@ static ssize_t lwis_fence_write_status(struct file *fp, const char __user *user_
 	return len;
 }
 
-/*
- *  lwis_fence_poll: Poll status function of LWIS fence
- */
-static unsigned int lwis_fence_poll_legacy(struct file *fp, poll_table *wait)
-{
-	struct lwis_fence *lwis_fence = fp->private_data;
-
-	if (!lwis_fence)
-		return POLLERR;
-
-	poll_wait(fp, &lwis_fence->status_wait_queue, wait);
-
-	return dma_fence_is_signaled(&lwis_fence->dma_fence) ? POLLIN : 0;
-}
-
 int lwis_dma_fence_signal_with_status(struct dma_fence *fence, int errno)
 {
-	struct lwis_fence *lwis_fence = container_of(fence, struct lwis_fence, dma_fence);
-	int ret;
-
 	if (errno != 0)
 		dma_fence_set_error(fence, errno);
-	ret = dma_fence_signal(fence);
-
-	if (unlikely(ret == 0 && lwis_fence->legacy_lwis_fence))
-		wake_up_interruptible(&lwis_fence->status_wait_queue);
-
-	return ret;
+	return dma_fence_signal(fence);
 }
 
 static const char *lwis_fence_get_driver_name(struct dma_fence *fence)
@@ -213,12 +118,13 @@ static struct lwis_fence *fence_create(struct lwis_device *lwis_dev)
 	if (!new_fence)
 		return ERR_PTR(-ENOMEM);
 
+	spin_lock_init(&new_fence->lock);
+	new_fence->lwis_top_dev = lwis_dev->top_dev;
+
 	/* Init DMA fence */
 	dma_fence_init(&new_fence->dma_fence, &lwis_fence_dma_fence_ops, &new_fence->lock,
 		       dma_fence_context_alloc(1), atomic64_inc_return(&dma_fence_sequence));
 
-	new_fence->lwis_top_dev = lwis_dev->top_dev;
-	spin_lock_init(&new_fence->lock);
 	return new_fence;
 }
 
@@ -260,13 +166,11 @@ struct lwis_fence_fds lwis_fence_create(struct lwis_device *lwis_dev)
 	ret = anon_inode_getfd("lwis_fence_file", &fence_file_ops, new_fence, O_RDWR | O_CLOEXEC);
 	if (ret < 0)
 		goto error_put_fd;
-
 	signal_fd = ret;
 
 	/* We install the sync_file only after we know there won't be errors. */
 	fd_install(fd, sync_file->file);
 
-	new_fence->legacy_lwis_fence = false;
 	lwis_debug_dev_info(lwis_dev->dev, "new lwis_fence=%p created fd=%d signal_fd=%d",
 			    new_fence, fd, signal_fd);
 	return (struct lwis_fence_fds){
@@ -285,89 +189,6 @@ error:
 		.fd = -1,
 		.signal_fd = -1,
 	};
-}
-
-static const struct file_operations fence_file_ops_legacy = {
-	.owner = THIS_MODULE,
-	.release = lwis_fence_file_release,
-	.read = lwis_fence_read_status_legacy,
-	.write = lwis_fence_write_status,
-	.poll = lwis_fence_poll_legacy,
-};
-
-struct lwis_fence_fds lwis_fence_legacy_create(struct lwis_device *lwis_dev)
-{
-	struct lwis_fence *new_fence;
-	int fd_or_err;
-
-	new_fence = fence_create(lwis_dev);
-	if (IS_ERR(new_fence)) {
-		return (struct lwis_fence_fds){
-			.error = PTR_ERR(new_fence),
-			.fd = -1,
-			.signal_fd = -1,
-		};
-	}
-
-	/* Open a new fd for the new fence */
-	fd_or_err = anon_inode_getfd("lwis_fence_file", &fence_file_ops_legacy, new_fence,
-				     O_RDWR | O_CLOEXEC);
-	if (fd_or_err < 0) {
-		kfree(new_fence);
-		dev_err(lwis_dev->dev, "Failed to create a new file instance for lwis_fence\n");
-		return (struct lwis_fence_fds){
-			.error = fd_or_err,
-			.fd = -1,
-			.signal_fd = -1,
-		};
-	}
-
-	new_fence->legacy_lwis_fence = true;
-	init_waitqueue_head(&new_fence->status_wait_queue);
-
-	lwis_debug_dev_info(lwis_dev->dev, "legacy lwis_fence created new LWIS fence fd: %d",
-			    fd_or_err);
-	return (struct lwis_fence_fds){
-		.error = 0,
-		.fd = fd_or_err,
-		.signal_fd = -1,
-	};
-}
-
-static struct dma_fence *lwis_fence_get_legacy(int fd)
-{
-	struct file *fence_fp;
-	struct lwis_fence *fence;
-
-	fence_fp = fget(fd);
-	if (fence_fp == NULL)
-		return ERR_PTR(-EEXIST);
-
-	if (fence_fp->f_op != &fence_file_ops_legacy) {
-		fput(fence_fp);
-		return ERR_PTR(-EINVAL);
-	}
-
-	fence = fence_fp->private_data;
-
-	dma_fence_get(&fence->dma_fence);
-
-	fput(fence_fp);
-
-	return &fence->dma_fence;
-}
-
-struct dma_fence *lwis_dma_fence_get(int fd)
-{
-	struct dma_fence *dma_fence;
-
-	dma_fence = sync_file_get_fence(fd);
-	if (unlikely(dma_fence == NULL)) {
-		/* If we don't have it, lets try older versions. */
-		return lwis_fence_get_legacy(fd);
-	}
-
-	return dma_fence;
 }
 
 static int trigger_event_add_transaction(struct lwis_client *client,
@@ -390,7 +211,7 @@ static int trigger_event_add_transaction(struct lwis_client *client,
 		 * precondition fence associated with the event.
 		 */
 		if (event->precondition_fence_fd >= 0) {
-			struct dma_fence *fence = lwis_dma_fence_get(event->precondition_fence_fd);
+			struct dma_fence *fence = sync_file_get_fence(event->precondition_fence_fd);
 
 			if (IS_ERR_OR_NULL(fence)) {
 				dev_err(client->lwis_dev->dev, "Unable to get fence with fd=%d\n",
@@ -439,11 +260,11 @@ static int trigger_fence_add_transaction(int fence_fd, struct lwis_client *clien
 	struct lwis_pending_transaction_id *pending_transaction_id;
 	int ret = 0;
 
-	pending_transaction_id = kmalloc(sizeof(struct lwis_pending_transaction_id), GFP_ATOMIC);
+	pending_transaction_id = kmalloc(sizeof(struct lwis_pending_transaction_id), GFP_KERNEL);
 	if (!pending_transaction_id)
 		return -ENOMEM;
 
-	fence = lwis_dma_fence_get(fence_fd);
+	fence = sync_file_get_fence(fence_fd);
 	if (IS_ERR_OR_NULL(fence)) {
 		kfree(pending_transaction_id);
 		dev_err(client->lwis_dev->dev, "Unable to get fence with error fd=%d\n", fence_fd);
@@ -649,16 +470,6 @@ int lwis_initialize_transaction_fences(struct lwis_client *client,
 	struct lwis_device *lwis_dev = client->lwis_dev;
 	int i;
 
-	if (!transaction || !client)
-		return -EINVAL;
-
-	if (info->trigger_condition.num_nodes > LWIS_TRIGGER_NODES_MAX_NUM) {
-		dev_err(lwis_dev->dev,
-			"Trigger condition contains %lu node, more than the limit of %d\n",
-			info->trigger_condition.num_nodes, LWIS_TRIGGER_NODES_MAX_NUM);
-		return -EINVAL;
-	}
-
 	/* If triggered by trigger_condition */
 	if (lwis_triggered_by_condition(transaction)) {
 		/* Initialize all placeholder fences in the trigger_condition */
@@ -670,12 +481,9 @@ int lwis_initialize_transaction_fences(struct lwis_client *client,
 				continue;
 			}
 
-			fence_fds = transaction->legacy_lwis_fence ?
-					    lwis_fence_legacy_create(lwis_dev) :
-					    lwis_fence_create(lwis_dev);
+			fence_fds = lwis_fence_create(lwis_dev);
 			if (fence_fds.error != 0)
 				return fence_fds.error;
-
 			info->trigger_condition.trigger_nodes[i].fence_fd = fence_fds.fd;
 			info->trigger_condition.trigger_nodes[i].fence_signal_fd =
 				fence_fds.signal_fd;
@@ -684,12 +492,9 @@ int lwis_initialize_transaction_fences(struct lwis_client *client,
 
 	/* Initialize completion fence if one is requested */
 	if (info->create_completion_fence_fd == LWIS_CREATE_COMPLETION_FENCE) {
-		struct lwis_fence_fds fence_fds = transaction->legacy_lwis_fence ?
-							  lwis_fence_legacy_create(lwis_dev) :
-							  lwis_fence_create(lwis_dev);
+		struct lwis_fence_fds fence_fds = lwis_fence_create(lwis_dev);
 		if (fence_fds.error != 0)
 			return fence_fds.error;
-
 		info->create_completion_fence_fd = fence_fds.fd;
 		info->create_completion_fence_signal_fd = fence_fds.signal_fd;
 	}
@@ -703,7 +508,6 @@ static struct lwis_fence_pending_signal *fence_pending_signal_create(struct dma_
 		kmalloc(sizeof(struct lwis_fence_pending_signal), GFP_ATOMIC);
 	if (!pending_fence_signal)
 		return NULL;
-
 	pending_fence_signal->fence = fence;
 	pending_fence_signal->pending_status = LWIS_FENCE_STATUS_NOT_SIGNALED;
 	return pending_fence_signal;
@@ -718,7 +522,7 @@ static int add_completion_fence(struct lwis_client *client, struct lwis_transact
 	struct dma_fence *fence;
 	struct lwis_fence_pending_signal *fence_pending_signal;
 
-	fence = lwis_dma_fence_get(fence_fd);
+	fence = sync_file_get_fence(fence_fd);
 	if (IS_ERR_OR_NULL(fence)) {
 		dev_err(client->lwis_dev->dev, "Unable to get fence with fd=%d\n", fence_fd);
 		return -EBADF;
@@ -799,6 +603,11 @@ void lwis_pending_fences_move_all(struct lwis_device *lwis_device,
 				  struct list_head *pending_fences, int error_code)
 {
 	struct lwis_fence_pending_signal *pending_fence, *temp;
+
+	if (!transaction) {
+		dev_err(lwis_device->dev, "%s called with NULL transaction\n", __func__);
+		return;
+	}
 
 	/* For each fence in transaction's signal list, move to pending_fences for signaling */
 	list_for_each_entry_safe(pending_fence, temp, &transaction->completion_fence_list, node) {

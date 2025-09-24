@@ -124,7 +124,7 @@ int32_t nvt_mp_parse_dt(struct device_node *root,
 		seq_printf(m, str, ##str_args);	\
 } while (0)
 
-#if SPI_FLASH
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 /*******************************************************
 Description:
 	Novatek touchscreen set mp settings mode.
@@ -173,7 +173,7 @@ int32_t nvt_mp_settings(uint8_t tvcl_mode, uint8_t ibias_mode)
 
 	return 0;
 }
-#endif // SPI_FLASH
+#endif // IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 
 /*******************************************************
 Description:
@@ -2118,7 +2118,7 @@ int32_t nvt_selftest(void)
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 
-#if SPI_FLASH
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 	nvt_clear_fw_reset_state();
 	nvt_bootloader_reset();
 	if (nvt_check_fw_reset_state(RESET_STATE_NORMAL_RUN))
@@ -2126,7 +2126,7 @@ int32_t nvt_selftest(void)
 #else
 	//---Download MP FW---
 	nvt_update_firmware(get_mp_fw_name(), 1);
-#endif // !SPI_FLASH
+#endif // !IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 
 	if (nvt_get_fw_info()) {
 		NVT_ERR("get fw info failed!\n");
@@ -2149,10 +2149,10 @@ int32_t nvt_selftest(void)
 			  "novatek-mp-criteria-%04X", ts->nvt_pid);
 
 		if (nvt_mp_parse_dt(np, mpcriteria)) {
-#if !SPI_FLASH
+#if !IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 			//---Download Normal FW---
 			nvt_update_firmware(get_fw_name(), 1);
-#endif // !SPI_FLASH
+#endif // !IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 			mutex_unlock(&ts->lock);
 			NVT_ERR("mp parse device tree failed!\n");
 			ts->selftest_in_process = false;
@@ -2164,19 +2164,19 @@ int32_t nvt_selftest(void)
 		nvt_print_criteria();
 	}
 
-#if SPI_FLASH
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 	if (nvt_check_fw_reset_state(RESET_STATE_NORMAL_RUN)) {
 #else
 	if (nvt_check_fw_reset_state(RESET_STATE_REK)) {
-#endif // SPI_FLASH
+#endif // IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 		NVT_ERR("check fw reset state failed!\n");
 		goto failed_out;
 	}
 
-#if SPI_FLASH
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 	if (nvt_mp_settings(ts->mp_tvcl_mode, ts->mp_ibias_mode))
 		goto failed_out;
-#endif // SPI_FLASH
+#endif // IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 	if (nvt_switch_FreqHopEnDis(FREQ_HOP_DISABLE)) {
 		NVT_ERR("switch frequency hopping disable failed!\n");
 		goto failed_out;
@@ -2466,7 +2466,7 @@ failed_out:
 	}
 
 	ts->selftest_in_process = false;
-#if SPI_FLASH
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 	//---Reset IC---
 	nvt_clear_fw_reset_state();
 	nvt_bootloader_reset();
@@ -2475,7 +2475,7 @@ failed_out:
 #else
 	//---Download Normal FW---
 	nvt_update_firmware(get_fw_name(), 1);
-#endif // SPI_FLASH
+#endif // IS_ENABLED(CONFIG_TOUCHSCREEN_SPI_FLASH)
 	mutex_unlock(&ts->lock);
 
 	NVT_LOGD("--\n");

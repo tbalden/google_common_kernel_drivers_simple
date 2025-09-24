@@ -221,7 +221,7 @@ static int allocate_fixed_pages(struct gcma_heap *gcma_heap, unsigned long len,
 }
 
 static struct dma_buf *gcma_heap_allocate(struct dma_heap *heap, unsigned long len,
-					    unsigned long fd_flags, unsigned long heap_flaga)
+					    u32 fd_flags, u64 heap_flaga)
 {
 	struct samsung_dma_heap *samsung_dma_heap = dma_heap_get_drvdata(heap);
 	struct gcma_heap *gcma_heap = samsung_dma_heap->priv;

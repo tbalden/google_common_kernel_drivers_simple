@@ -41,7 +41,6 @@
 };
 
 &udc {
-	extcon = <&max77759tcpc &google_pogo>;
 	force_gen1;
 };
 

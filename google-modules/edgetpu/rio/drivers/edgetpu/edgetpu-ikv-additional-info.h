@@ -11,8 +11,6 @@
 
 #include <linux/types.h>
 
-#include <gcip/gcip-memory.h>
-
 #include "edgetpu-internal.h"
 #include "edgetpu-iremap-pool.h"
 
@@ -110,10 +108,10 @@ void edgetpu_ikv_additional_info_fill(struct edgetpu_ikv_additional_info *info, 
  */
 ssize_t edgetpu_ikv_additional_info_alloc_and_copy(struct edgetpu_dev *etdev,
 						   struct edgetpu_ikv_additional_info *info,
-						   struct gcip_memory *mem);
+						   struct edgetpu_coherent_mem *mem);
 
 static inline void edgetpu_ikv_additional_info_free(struct edgetpu_dev *etdev,
-						    struct gcip_memory *mem)
+						    struct edgetpu_coherent_mem *mem)
 {
 	edgetpu_iremap_free(etdev, mem);
 }

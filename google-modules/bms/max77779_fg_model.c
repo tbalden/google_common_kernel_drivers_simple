@@ -29,7 +29,7 @@
 #include "max77779_fg.h"
 #include "maxfg_common.h"
 
-#ifdef CONFIG_DEBUG_FS
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 #include <linux/debugfs.h>
 #endif
 

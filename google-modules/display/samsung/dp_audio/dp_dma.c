@@ -19,6 +19,7 @@
 #include <linux/extcon-provider.h>
 #include <linux/sysfs.h>
 
+#include <extcon.h>
 #include <sound/soc.h>
 #include <sound/pcm_params.h>
 
@@ -27,12 +28,11 @@
 #include <linux/switch.h>
 #endif /* CONFIG_SWITCH */
 
+#include <exynos_drm_dp.h>
 #include <soc/google/exynos-cpupm.h>
 
 #include "dp_audio.h"
 #include "dp_dma.h"
-#include "../../../../drivers/extcon/extcon.h"
-#include "../exynos_drm_dp.h"
 
 #ifdef USE_AOC
 #include "google-aoc-enum.h"

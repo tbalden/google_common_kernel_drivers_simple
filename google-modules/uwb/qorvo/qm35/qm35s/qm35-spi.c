@@ -173,9 +173,7 @@ static long uci_ioctl(struct file *filp, unsigned int cmd, unsigned long args)
 			       0;
 	}
 	case QM35_CTRL_RESET: {
-		if (!qm35_hsspi_stop(qm35_hdl))
-			/* Must be running before the reset for it to be OK */
-			return -EINVAL;
+		qm35_hsspi_stop(qm35_hdl);
 
 		ret = qm35_reset(qm35_hdl, QM_RESET_LOW_MS, true);
 
@@ -192,21 +190,13 @@ static long uci_ioctl(struct file *filp, unsigned int cmd, unsigned long args)
 			       0;
 	}
 	case QM35_CTRL_FW_UPLOAD: {
-		bool was_running;
-
-		was_running = qm35_hsspi_stop(qm35_hdl);
+		qm35_hsspi_stop(qm35_hdl);
 
 		ret = qm_firmware_load(qm35_hdl);
 
 		msleep(QM_BOOT_MS);
 
-		/*
-		 * qm_firmware_load() (above) can run fine even if we weren't
-		 * running originally, but only restore to running state if
-		 * we were running.
-		 */
-		if (was_running)
-			qm35_hsspi_start(qm35_hdl);
+		qm35_hsspi_start(qm35_hdl);
 
 		if (ret)
 			return ret;
@@ -470,28 +460,17 @@ void qm35_hsspi_start(struct qm35_ctx *qm35_hdl)
 	hsspi_start(&qm35_hdl->hsspi);
 }
 
-/**
- * qm35_hsspi_stop() - Move the driver into stopped state.
- * @qm35_hdl - Context pointer.
- *
- * Note that moving the driver into stopped state doesn't power off
- * regulators.
- *
- * Return: true if we stopped; false if we were already stopped
- */
-bool qm35_hsspi_stop(struct qm35_ctx *qm35_hdl)
+void qm35_hsspi_stop(struct qm35_ctx *qm35_hdl)
 {
 	/* nothing to do as HSSPI is already stopped */
 	if (qm35_hdl->hsspi.state == HSSPI_STOPPED)
-		return false;
+		return;
 
 	hsspi_stop(&qm35_hdl->hsspi);
 
 	disable_irq_nosync(qm35_hdl->ss_rdy_irq);
 
 	clear_bit(HSSPI_FLAGS_SS_READY, qm35_hdl->hsspi.flags);
-
-	return true;
 }
 
 int qm35_reset_sync(struct qm35_ctx *qm35_hdl)
@@ -1111,9 +1090,7 @@ static int qm35_pm_suspend(struct device *dev)
 {
 	struct qm35_ctx *qm35_hdl = dev_get_drvdata(dev);
 
-	if (qm35_hsspi_stop(qm35_hdl))
-		/* Adjust state to "suspended" so we know to power back on. */
-		qm35_hdl->hsspi.state = HSSPI_SUSPENDED;
+	qm35_hsspi_stop(qm35_hdl);
 
 	return 0;
 }
@@ -1122,8 +1099,7 @@ static int qm35_pm_resume(struct device *dev)
 {
 	struct qm35_ctx *qm35_hdl = dev_get_drvdata(dev);
 
-	if (qm35_hdl->hsspi.state == HSSPI_SUSPENDED)
-		qm35_hsspi_start(qm35_hdl);
+	qm35_hsspi_start(qm35_hdl);
 
 	return 0;
 }

@@ -13,6 +13,7 @@
 #include <video/mipi_display.h>
 
 #include "gs_panel/gs_panel.h"
+#include "gs_drm/gs_drm_connector.h"
 
 /* Private Structs */
 
@@ -37,6 +38,21 @@ static int gs_dsi_name_show(struct seq_file *m, void *data)
 }
 DEFINE_SHOW_ATTRIBUTE(gs_dsi_name);
 
+static int gs_allowed_hs_clks_show(struct seq_file *m, void *data)
+{
+	struct gs_panel *ctx = m->private;
+
+	for (int i = 0; i < MAX_ALLOWED_MIPI_CLOCK_NUM; i++) {
+		if (!ctx->allowed_hs_clks.clks[i])
+			break;
+		seq_printf(m, "%u ", ctx->allowed_hs_clks.clks[i]);
+	}
+	seq_puts(m, "\n");
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(gs_allowed_hs_clks);
+
 static ssize_t gs_debugfs_reset_panel(struct file *file, const char __user *user_buf, size_t count,
 				      loff_t *ppos)
 {
@@ -52,8 +68,10 @@ static ssize_t gs_debugfs_reset_panel(struct file *file, const char __user *user
 	if (ret)
 		return ret;
 
-	if (reset_panel)
-		gs_panel_reset_helper(ctx);
+	if (reset_panel) {
+		if (!gs_panel_gpio_set(ctx, DISP_RESET_GPIO, 0))
+			pr_info("reset_panel: pull reset_gpio to low to reset panel\n");
+	}
 
 	return count;
 }
@@ -61,6 +79,48 @@ static ssize_t gs_debugfs_reset_panel(struct file *file, const char __user *user
 static const struct file_operations gs_reset_panel_fops = {
 	.open = simple_open,
 	.write = gs_debugfs_reset_panel,
+};
+
+static ssize_t gs_te2_irq_en_write(struct file *file, const char __user *user_buf, size_t count,
+				   loff_t *ppos)
+{
+	struct seq_file *m = file->private_data;
+	struct gs_panel *ctx = m->private;
+	int ret;
+	bool en;
+
+	ret = kstrtobool_from_user(user_buf, count, &en);
+	if (ret)
+		return ret;
+
+	if (en != ctx->te2.irq_en) {
+		gs_panel_enable_te2_irq(ctx, en);
+		ctx->te2.irq_en = en;
+	}
+
+	return count;
+}
+
+static int gs_te2_irq_en_show(struct seq_file *m, void *data)
+{
+	struct gs_panel *ctx = m->private;
+
+	seq_printf(m, "%d\n", ctx->te2.irq_en);
+
+	return 0;
+}
+
+static int gs_te2_irq_en_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, gs_te2_irq_en_show, inode->i_private);
+}
+
+static const struct file_operations gs_te2_irq_en_fops = {
+	.open = gs_te2_irq_en_open,
+	.read = seq_read,
+	.write = gs_te2_irq_en_write,
+	.llseek = seq_lseek,
+	.release = seq_release,
 };
 
 static ssize_t parse_byte_buf(u8 *out, size_t len, char *src)
@@ -91,7 +151,8 @@ static ssize_t gs_dsi_payload_write(struct file *file, const char __user *user_b
 	char *buf;
 	char *payload;
 	size_t len;
-	int ret;
+	ssize_t bytes_to_send;
+	ssize_t ret = 0;
 
 	buf = memdup_user_nul(user_buf, count);
 	if (IS_ERR(buf))
@@ -105,14 +166,24 @@ static ssize_t gs_dsi_payload_write(struct file *file, const char __user *user_b
 		return -ENOMEM;
 	}
 
-	ret = parse_byte_buf(payload, len, buf);
-	if (ret <= 0)
+	bytes_to_send = parse_byte_buf(payload, len, buf);
+	if (bytes_to_send > 0) {
+		ssize_t bytes_sent;
+		if (reg_data->type)
+			bytes_sent = gs_dsi_dcs_transfer(reg_data->dsi, reg_data->type, payload,
+							 bytes_to_send, reg_data->flags);
+		else
+			bytes_sent = gs_dsi_dcs_write_buffer(reg_data->dsi, payload, bytes_to_send,
+							     reg_data->flags);
+		if (bytes_sent != bytes_to_send) {
+			ret = -EIO;
+			if (bytes_sent > 0)
+				pr_warn("%s: request to send %zd bytes, actual sent %zd bytes\n",
+					__func__, bytes_to_send, bytes_sent);
+		}
+	} else {
 		ret = -EINVAL;
-	else if (reg_data->type)
-		ret = gs_dsi_dcs_transfer(reg_data->dsi, reg_data->type, payload, ret,
-					  reg_data->flags);
-	else
-		ret = gs_dsi_dcs_write_buffer(reg_data->dsi, payload, ret, reg_data->flags);
+	}
 
 	kfree(buf);
 	kfree(payload);
@@ -138,11 +209,12 @@ static int gs_dsi_payload_show(struct seq_file *m, void *data)
 		seq_hex_dump(m, "", DUMP_PREFIX_NONE, 16, 1, buf, rc, false);
 		rc = 0;
 	} else if (rc == 0) {
-		pr_debug("no response back\n");
+		dev_warn(&reg_data->dsi->dev, "no response back, addr(%#x)\n", reg_data->address);
+		rc = -ENODATA;
 	}
 	kfree(buf);
 
-	return 0;
+	return rc;
 }
 
 static int gs_dsi_payload_open(struct inode *inode, struct file *file)
@@ -336,11 +408,14 @@ static int debugfs_add_cmdset_folder(struct gs_panel *ctx, struct gs_panel_debug
  */
 static int debugfs_add_misc_panel_entries(struct gs_panel *ctx, struct dentry *panel_entry)
 {
-	debugfs_create_u32("rev", 0600, panel_entry, &ctx->panel_rev);
+	debugfs_create_u32("rev", 0600, panel_entry, &ctx->panel_rev_id.id);
 	debugfs_create_bool("lhbm_postwork_disabled", 0600, panel_entry,
 			    &ctx->lhbm.post_work_disabled);
-	debugfs_create_u32("normal_mode_work_delay_ms", 0600, panel_entry,
-			   &ctx->normal_mode_work_delay_ms);
+	debugfs_create_u32("common_work_delay_ms", 0600, panel_entry,
+			   &ctx->common_work.delay_ms);
+	debugfs_create_file("te2_irq_en", 0600, panel_entry, ctx, &gs_te2_irq_en_fops);
+	debugfs_create_file("allowed_hs_clks", 0400, panel_entry, ctx, &gs_allowed_hs_clks_fops);
+
 	/*
 	 * TODO(tknelms)
 	const struct gs_panel_desc *desc = ctx->desc;
@@ -351,6 +426,61 @@ static int debugfs_add_misc_panel_entries(struct gs_panel *ctx, struct dentry *p
 	if (funcs->print_gamma)
 		debugfs_create_file("gamma", 0600, panel_entry, ctx, &panel_gamma_fops);
 	*/
+	return 0;
+}
+
+/* Regulators */
+static int regulator_voltage_show(struct seq_file *m, void *data)
+{
+	struct regulator *regulator = m->private;
+
+	seq_printf(m, "%u\n", regulator_get_voltage(regulator));
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(regulator_voltage);
+
+static int regulator_enabled_show(struct seq_file *m, void *data)
+{
+	struct regulator *regulator = m->private;
+
+	seq_printf(m, "%d\n", regulator_is_enabled(regulator));
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(regulator_enabled);
+
+static int debugfs_add_regulator_details(struct dentry *parent,
+				  const char *regulator_name, struct regulator *reg)
+{
+	struct dentry *regulator_details;
+
+	if (!reg)
+		return -EINVAL;
+
+	regulator_details = debugfs_create_dir(regulator_name, parent);
+	debugfs_create_file("voltage", 0400, regulator_details, reg, &regulator_voltage_fops);
+	debugfs_create_file("enable", 0400, regulator_details, reg, &regulator_enabled_fops);
+
+	return 0;
+}
+
+static int debugfs_add_regulator_folder(struct gs_panel *ctx, struct dentry *panel_entry)
+{
+	struct dentry *regulator_root;
+	struct gs_panel_regulator *gs_reg = &ctx->regulator;
+
+	regulator_root = debugfs_create_dir("regulator", panel_entry);
+
+#define add_regulator_debugfs(name) \
+	debugfs_add_regulator_details(regulator_root, #name, gs_reg->name)
+
+	add_regulator_debugfs(vci);
+	add_regulator_debugfs(vddi);
+	add_regulator_debugfs(vddd);
+	add_regulator_debugfs(vddr_en);
+	add_regulator_debugfs(vddr);
+	add_regulator_debugfs(avdd);
+	add_regulator_debugfs(avee);
+
 	return 0;
 }
 
@@ -371,6 +501,7 @@ int gs_panel_create_debugfs_entries(struct gs_panel *ctx, struct dentry *parent)
 	if (ret)
 		return ret;
 	debugfs_add_driver_specific_entries(ctx, parent);
+	debugfs_add_regulator_folder(ctx, ctx->debugfs_entries.panel);
 
 	return 0;
 }
