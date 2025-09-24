@@ -54,7 +54,6 @@
 
 #define EXYNOS_DRM_WAIT_FENCE_TIMEOUT_MS 250
 
-EXPORT_TRACEPOINT_SYMBOL(tracing_mark_write);
 EXPORT_TRACEPOINT_SYMBOL(dsi_label_scope);
 
 static void exynos_drm_drv_set_lhbm_hist_helper(struct histogram_channel_config *cfg,

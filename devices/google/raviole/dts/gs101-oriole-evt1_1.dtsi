@@ -7,4 +7,4 @@
  */
 
 #define RAVIOLE_EVT1_1_AND_OLDER 1
-#include "gs101-oriole.dts"
+#include "gs101-oriole.dtso"

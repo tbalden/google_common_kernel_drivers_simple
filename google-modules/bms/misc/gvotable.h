@@ -19,6 +19,7 @@ typedef int (*gvotable_cmp_fn)(void *a, void *b);
 typedef int (*gvotable_callback_fn)(struct gvotable_election *el,
 				    const char *reason,
 				    void *vote);
+typedef int (*gvotable_post_election_cb)(struct gvotable_election *el, void *data, int ret);
 
 struct gvotable_election *
 gvotable_create_election(const char *name, int vote_size,
@@ -35,6 +36,13 @@ struct gvotable_election *
 gvotable_create_int_election(const char *name, gvotable_cmp_fn cmp_fn,
 			     gvotable_callback_fn callback_fn,
 			     void *data);
+
+static inline struct gvotable_election *
+gvotable_create_compound_election(const char *name, gvotable_cmp_fn cmp_fn,
+				  gvotable_callback_fn cb_fn, void *data)
+{
+	return gvotable_create_election(name, sizeof(void *), cmp_fn, cb_fn, data);
+}
 
 struct gvotable_election *
 gvotable_create_bool_election(const char *name, gvotable_callback_fn cb_fn,
@@ -61,12 +69,23 @@ int gvotable_get_current_reason(struct gvotable_election *el, char *reason,
 int gvotable_set_default(struct gvotable_election *el, void *default_val);
 int gvotable_get_default(struct gvotable_election *el, void **default_val);
 
+int gvotable_set_default_compound(struct gvotable_election *el, int default_hi, int default_lo);
+int gvotable_get_default_compound(struct gvotable_election *el, int *default_hi, int *default_lo);
+
 int gvotable_election_set_name(struct gvotable_election *el, const char *name);
 
 int gvotable_use_default(struct gvotable_election *el, bool default_is_enabled);
 
 int gvotable_cast_vote(struct gvotable_election *el, const char *reason,
 		       void *vote, bool enabled);
+
+static inline int gvotable_cast_compound_vote(struct gvotable_election *el, const char *reason,
+					      int vote_hi, int vote_lo, bool enabled)
+{
+	return gvotable_cast_vote(el, reason,
+				  (void *)((((long)vote_hi) << 32) | vote_lo), enabled);
+}
+
 static inline int gvotable_cast_int_vote(struct gvotable_election *el,
 					 const char *reason, int vote,
 					 bool enabled)
@@ -92,6 +111,10 @@ int gvotable_run_election(struct gvotable_election *el, bool force_callback);
 
 int gvotable_get_vote(struct gvotable_election *el, const char *reason,
 		      void **vote);
+
+int gvotable_get_compound_vote(struct gvotable_election *el, const char *reason,
+			       int *vote_hi, int *vote_lo);
+
 int gvotable_get_int_vote(struct gvotable_election *el, const char *reason);
 
 int gvotable_is_enabled(struct gvotable_election *el, const char *reason,
@@ -99,6 +122,10 @@ int gvotable_is_enabled(struct gvotable_election *el, const char *reason,
 
 int gvotable_get_current_int_vote(struct gvotable_election *el);
 int gvotable_get_current_vote(struct gvotable_election *el, const void **vote);
+
+int gvotable_get_current_compound_vote(struct gvotable_election *el,
+				       int *vote_hi, int *vote_lo);
+
 int gvotable_copy_current_result(struct gvotable_election *el, void *vote,
 				 int vote_size);
 
@@ -117,5 +144,8 @@ int gvotable_v2s_uint_hex(char *str, size_t len, const void *vote);
 void gvotable_set_vote2str(struct gvotable_election *el,
 			   gvotable_v2sfn_t vote2str);
 int gvotable_disable_force_int_entry(struct gvotable_election *el);
-
+void *gvotable_get_most_recent_vote(struct gvotable_election *el);
+char *gvotable_get_most_recent_reason(struct gvotable_election *el);
+void gvotable_register_post_election_work(struct gvotable_election *el, void *data,
+					  gvotable_post_election_cb cb);
 #endif /* __GOOGLE_GVOTABLE_H_*/

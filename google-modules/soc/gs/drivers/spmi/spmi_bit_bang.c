@@ -477,7 +477,7 @@ static int spmi_bb_read_cmd(struct spmi_controller *ctrl,
 		ret = -EIO;
 	}
 	spmi_disable(info);
-	return 0;
+	return ret;
 }
 
 static int spmi_bb_dt_init(struct spmi_bb_info *info)

@@ -11,6 +11,7 @@
 #include "gs201-common-gps.dtsi"
 #include "gs201-common-touch.dtsi"
 #include "gs201-common-typec.dtsi"
+#include "gs201-common-usb-role-sw.dtsi"
 #include "gs201-ldaf.dtsi"
 #include "gs201-pmic.dtsi"
 
@@ -67,7 +68,7 @@
 	adj-sof-accuracy = <1>;
 	samsung,no-extra-delay;
 	usb_host_device_timeout = <0x7ff>; /* Max value */
-	extcon = <&max77759tcpc>;
+	extcon = <&goog_usb_role_sw>;
 
 	u1u2_exitfail_quirk;
 	/* ux_exit_in_px should be defined in MK, LT */
@@ -329,7 +330,7 @@
 
 	hs_tune_param = <&usb_hs_tune>;
 	ss_tune_param = <&usb_ss_tune>;
-	extcon = <&max77759tcpc>;
+	extcon = <&goog_usb_role_sw>;
 };
 
 &sub_pd_hsi0 {

@@ -262,11 +262,18 @@ include $(KDIR)/../private/google-modules/soc/gs/Makefile.include
 #
 # KBUILD_EXTRA_SYMBOLS to prevent warnings about unknown functions
 #
-BASE_SYMBOLS = $(OUT_DIR)/../private/google-modules/gpu/mali_pixel/Module.symvers
+# TODO(b/361346732): This should be only used during a transient migration phase. Support for this
+# may be discontinued without notice. It is recommended that all kernel_module's are converted to
+# ddk_module.
+BASE_SYMBOLS = $(OUT_DIR)/../private/google-modules/gpu/mali_pixel/mali_pixel_Module.symvers
 
 EXTRA_SYMBOLS += \
     $(BASE_SYMBOLS)
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/power/mitigation/Module.symvers
+
+# TODO(b/361346732): This should be only used during a transient migration phase. Support for this
+# may be discontinued without notice. It is recommended that all kernel_module's are converted to
+# ddk_module.
+EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/power/mitigation/google_bcl_Module.symvers
 
 CFLAGS_MODULE += -Wall -Werror
 

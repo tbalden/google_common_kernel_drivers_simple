@@ -786,8 +786,7 @@ static int hotword_tap_enable_ctl_set(struct snd_kcontrol *kcontrol,
 
 		mutex_unlock(&chip->audio_mutex);
 		return err;
-	}
-	 else {
+	} else {
 		pr_err("WARN:hotword is not supported on this device\n");
 		return 0;
 	}
@@ -1217,6 +1216,37 @@ static int aoc_compr_offload_playback_rate_ctl_set(struct snd_kcontrol *kcontrol
 }
 #endif
 
+static int aoc_waiting_time_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->aoc_waiting_time_in_ms;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int aoc_waiting_time_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int val = ucontrol->value.integer.value[0];
+
+	if (val < 0 || val > MAX_AOC_WAITING_TIME_IN_MSECS)
+		return -EINVAL;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->aoc_waiting_time_in_ms = val;
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
 static int pcm_wait_time_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
@@ -1311,7 +1341,7 @@ static int multichannel_processor_ctl_set(struct snd_kcontrol *kcontrol,
 	return err;
 }
 
-#if IS_ENABLED(CONFIG_SOC_ZUMA)
+#if !IS_ENABLED(CONFIG_SOC_GS101) && !IS_ENABLED(CONFIG_SOC_GS201)
 static int audio_mel_enable_ctl_get(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_value *ucontrol)
 {
@@ -2002,7 +2032,7 @@ static int usb_cfg_v2_ctl_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 		chip->usb_direction = val;
 		break;
 	case USB_MEM_CFG:
-		aoc_set_usb_mem_config(chip);
+		/* TODO: HAL still in use this ctrl, remove after b/402379515 migration */
 		break;
 	default:
 		err = -EINVAL;
@@ -2451,8 +2481,7 @@ static const char *bt_mode_texts[] = { "Unconfigured", "SCO",
 				       "A2DP_ENC_SBC", "A2DP_ENC_AAC",
 				       "A2DP_ENC_LC3", "BLE_ENC_LC3",
 				       "BLE_CONVERSATION", "A2DP_ENC_OPUS",
-				       "A2DP_RAW",     "ESCO_LC3",
-				       "A2DP_ENC", "BLE_MEDIA" };
+				       "A2DP_RAW",     "ESCO_LC3" };
 static SOC_ENUM_SINGLE_DECL(bt_mode_enum, 1, SINK_BT, bt_mode_texts);
 
 static const char *usb_mode_texts[] = { "Unconfigured", "USB",
@@ -2893,6 +2922,9 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_SINGLE_EXT("Voice PCM Stream Wait Time in MSec", SND_SOC_NOPM, 0, 10000, 0,
 		voice_pcm_wait_time_get, voice_pcm_wait_time_set),
 
+	SOC_SINGLE_EXT("AoC Wait Time in MSec", SND_SOC_NOPM, 0, MAX_AOC_WAITING_TIME_IN_MSECS, 0,
+			aoc_waiting_time_get, aoc_waiting_time_set),
+
 	SOC_SINGLE_EXT("Displayport Audio Start Threshold", SND_SOC_NOPM, 0,
 			MAX_DP_START_THRESHOLD, 0,
 			dp_start_threshold_get, dp_start_threshold_set),
@@ -2900,7 +2932,7 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_SINGLE_EXT("MultiChannel Processor Switch", SND_SOC_NOPM, 0, INT_MAX, 0,
 			multichannel_processor_ctl_get, multichannel_processor_ctl_set),
 
-#if IS_ENABLED(CONFIG_SOC_ZUMA)
+#if !IS_ENABLED(CONFIG_SOC_GS101) && !IS_ENABLED(CONFIG_SOC_GS201)
 	SOC_SINGLE_EXT("Mel Processor Enable", SND_SOC_NOPM, 0, 1, 0,
 		       audio_mel_enable_ctl_get, audio_mel_enable_ctl_set),
 	SOC_SINGLE_EXT("Mel Processor RS2", SND_SOC_NOPM, 0, INT_MAX, 0,

@@ -192,6 +192,10 @@ static u32 _aoc_ring_write_buffer(u8 *ring,
 
 	u32 to_write = size;
 
+	/* If wp is outside the bounds of the ring, it's probably corrupted */
+	if (wp < 0 || wp > r->size)
+		return to_write;
+
 	if (to_write > sz) {
 		/* Allow the write, but only commit the beginning */
 		to_write = sz;
@@ -636,14 +640,14 @@ bool aoc_service_read_message(aoc_service *service, void *base,
 		ptr = aoc_service_current_read_pointer(service, base, dir);
 		hdr = (struct aoc_ipc_message_header *)ptr;
 		ptr += sizeof(struct aoc_ipc_message_header);
-
+		u32 length = hdr->length;
 		/* Validate length */
-		if (*size < hdr->length)
+		if (*size < length)
 			return false;
 
 		/* TODO: Length should always be little endian */
-		copy_from_buffer(buffer, ptr, hdr->length);
-		*size = hdr->length;
+		copy_from_buffer(buffer, ptr, length);
+		*size = length;
 
 		aoc_service_increment_read_index(service, dir);
 	}

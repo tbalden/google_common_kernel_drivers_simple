@@ -2,11 +2,20 @@
  *
  * Copyright (C) 2020 Google LLC
  */
+
+/* This header is internal only.
+ *
+ * Public APIs are in //private/google-modules/soc/gs/include/linux/gsa/
+ *
+ * Include via //private/google-modules/soc/gs:gs_soc_headers
+ */
+
 #ifndef __LINUX_GSA_MBOX_H
 #define __LINUX_GSA_MBOX_H
 
 #include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
+#include <linux/mailbox_client.h>
 
 /**
  * enum gsa_mbox_cmd - mailbox commands
@@ -60,9 +69,16 @@ enum gsa_mbox_cmd {
 	GSA_MB_CMD_SJTAG_ENABLE = 105,
 	GSA_MB_CMD_SJTAG_FINISH = 106,
 
+	/* gsa misc */
+	GSA_MB_CMD_GET_GSA_VERSION = 130,
+	GSA_MB_CMD_GET_GSA_ROM_PATCH_VERSION = 140,
+
 	/* PM commands */
 	GSA_MB_CMD_WAKELOCK_ACQUIRE = 150,
 	GSA_MB_CMD_WAKELOCK_RELEASE = 151,
+	GSA_MB_CMD_AP_SUSPEND_HINT = 152,
+	GSA_MB_CMD_AP_RESUME_HINT = 153,
+	GSA_MB_CMD_GET_PM_STATS = 154,
 
 	/* App Loading */
 	GSA_MB_CMD_LOAD_APP_PKG = 180,
@@ -71,6 +87,10 @@ enum gsa_mbox_cmd {
 	GSA_MB_CMD_LOAD_DSP_FW_IMG = 240,
 	GSA_MB_CMD_DSP_CMD = 241,
 	GSA_MB_CMD_UNLOAD_DSP_FW_IMG = 242,
+
+	/* Retrieve trace data */
+	GSA_MB_CMD_RUN_TRACE_DUMP = 270,
+	GSA_MB_CMD_RUN_TRACE_PING = 271,
 };
 
 /**
@@ -144,6 +164,31 @@ enum kdn_set_op_mode_req_args {
 };
 
 /**
+ * enum gsa_version_req_args - parameter layout for gsa version command
+ * @GSA_VERSION_ARG_ADDR_LO_IDX: index of low word of data buffer address
+ * @GSA_VERSION_ARG_ADDR_HI_IDX: index of high word of data buffer address
+ * @GSA_VERSION_ARG_BUFF_SIZE: index of data buffer size
+ * @GSA_VERSION_ARG_COUNT: total argument count
+ **/
+enum gsa_version_req_args {
+	GSA_VERSION_ARG_ADDR_LO_IDX = 0,
+	GSA_VERSION_ARG_ADDR_HI_IDX,
+	GSA_VERSION_ARG_BUFF_SIZE,
+	GSA_VERSION_ARG_COUNT
+};
+
+/**
+ * enum gsa_rom_patch_version_req_args - parameter layout for gsa rom patch
+ * version command.
+ * @READ_GSA_ROM_PATCH_VERSION_IDX: index of rom patch version parameter
+ * @READ_LCS_RSP_ARGC: number of parameters
+ */
+enum gsa_rom_patch_version_req_args {
+    READ_GSA_ROM_PATCH_VERSION_IDX = 0,
+    READ_GSA_ROM_PATCH_VERSION_ARGC,
+};
+
+/**
  * enum sjtag_data_req_args - parameters layout for SJTAG related calls
  * @SJTAG_DATA_BUF_ADDR_LO_IDX: index of low word of SJTAG data buffer address
  * @SJTAG_DATA_BUF_ADDR_HI_IDX: index of high word of SJTAG data buffer address
@@ -187,6 +232,79 @@ enum sjtag_status_rsp_args {
 };
 
 /**
+ * enum get_pm_stats_req_args - parameter layout to get pm_stats request
+ * @GET_PM_STATS_REQ_DATA_BUF_ADDR_LO_IDX: low word of data buffer address
+ * @GET_PM_STATS_REQ_DATA_BUF_ADDR_HI_IDX: high word of data buffer address
+ * @GET_PM_STATS_REQ_DATA_BUF_SIZE_IDX:- size of data buffer
+ * @GET_PM_STATS_REQ_ARGC: number of arguments expected in request
+ */
+enum get_pm_stats_req_args {
+	GET_PM_STATS_REQ_DATA_BUF_ADDR_LO_IDX = 0,
+	GET_PM_STATS_REQ_DATA_BUF_ADDR_HI_IDX = 1,
+	GET_PM_STATS_REQ_DATA_BUF_SIZE = 2,
+	GET_PM_STATS_REQ_ARGC,
+};
+
+/**
+ * enum get_pm_stats_req_args - param layout to get pm_stats request
+ * @GET_PM_STATS_RSP_DATA_LEN_IDX: data length returned by call
+ * @GET_PM_STATS_RSP_ARGC: number of arguments expected in response
+ */
+enum get_pm_stats_rsp_args {
+	GET_PM_STATS_RSP_DATA_LEN_IDX = 0,
+	GET_PM_STATS_RSP_ARGC,
+};
+
+enum gsa_pm_stats_ver {
+	GSA_PM_STATS_V1 = 1,
+};
+
+/**
+ * MAX_WAKELOCK_NUM  - max number of wakelock sources supported
+ */
+#define MAX_WAKELOCK_NUM 8
+
+/**
+ * struct gsa_pm_stats - GSA PM stats
+ * @ver:            current version (@enum gsa_pm_stats_ver)
+ * @tick_freq:      timer tick frequency.
+ * @uptime_ticks:   uptime (ticks)
+ * @idle_ticks:     total time (ticks) spent in idle state
+ * @idle_cnt:       number of times GSA entered idle state
+ * @pg_ticks:       total time (ticks) spent in power gated (PG) state
+ * @pg_cnt:         number of times GSA attempted entering PG state
+ * @pg_wakeup_cnt:  number of times GSA woke up from PG state
+ * @pg_abort_cnt:   number of times GSA aborted entering PG state
+ * @longest_awake:  longest time GSA has not attempted PG transition
+ * @longest_sleep:  longest time GSA has stayed in low power mode
+ * @ap_suspend_cnt: number of times GSA has received AP suspend hint
+ * @ap_resume_cnt:  number of times GSA has received AP resume hint
+ * @wakelock_state: current aggregate wakelock state
+ * @wakelock_acquire_cnt: number of times each wakelock has been acquired
+ * @wakelock_release_cnt: number of times each wakelock has been release
+ *
+ * Note: Each GSA wakelock is associated with GSA mailbox
+ */
+struct gsa_pm_stats {
+	uint32_t ver;
+	uint32_t tick_freq;
+	uint64_t uptime_ticks;
+	uint64_t idle_ticks;
+	uint64_t idle_cnt;
+	uint64_t pg_ticks;
+	uint64_t pg_cnt;
+	uint64_t pg_wakeup_cnt;
+	uint64_t pg_abort_cnt;
+	uint64_t longest_awake;
+	uint64_t longest_sleep;
+	uint32_t ap_suspend_cnt;
+	uint32_t ap_resume_cnt;
+	uint32_t wakelock_state;
+	uint32_t wakelock_acquire_cnt[MAX_WAKELOCK_NUM];
+	uint32_t wakelock_release_cnt[MAX_WAKELOCK_NUM];
+};
+
+/**
  * enum app_pkg_load_req_args - parameters layout for APP package request
  * @APP_PKG_ADDR_LO_IDX: index of low word of APP package address
  * @APP_PKG_ADDR_HI_IDX: index of high word of APP package address
@@ -201,12 +319,108 @@ enum app_pkg_load_req_args {
 	APP_PKG_LOAD_REQ_ARGC,
 };
 
-struct gsa_mbox;
+/**
+ * enum gsa_trace_dump_req_args - parameters layout for SJTAG related calls
+ * @GSA_TRACE_DUMP_BUF_ADDR_LO_IDX: index of low word of SJTAG data buffer address
+ * @GSA_TRACE_DUMP_BUF_ADDR_HI_IDX: index of high word of SJTAG data buffer address
+ * @GSA_TRACE_DUMP_BUF_BUF_SIZE_IDX: index of SJTAG data buffer size parameter
+ * @GSA_TRACE_DUMP_REQ_ARGC: total number of parameters expected by trace dump service
+ */
+enum gsa_trace_dump_req_args {
+	GSA_TRACE_DUMP_BUF_ADDR_LO_IDX = 0,
+	GSA_TRACE_DUMP_BUF_ADDR_HI_IDX,
+	GSA_TRACE_DUMP_BUF_SIZE_IDX,
+	GSA_TRACE_DUMP_REQ_ARGC,
+};
+
+/**
+ * enum gsa_trace_dump_rsp_args - parameters layout for SJTAG response calls
+ * @GSA_TRACE_DUMP_RSP_SENT_DATA_IDX: index of status word returned by SJTAG service
+ * @GSA_TRACE_DUMP_RSP_TOTAL_DATA_IDX: index of parameters contining number of bytes
+ *                               returned in SJTAG data buffer by GSA
+ * @GSA_TRACE_DUMP_RSP_DATA_ARGC: total number of parameters returned by SJTAG
+ *                            data request
+ */
+enum gsa_trace_dump_rsp_args {
+	GSA_TRACE_DUMP_RSP_SENT_DATA_IDX = 0,
+	GSA_TRACE_DUMP_RSP_TOTAL_DATA_IDX,
+	GSA_TRACE_DUMP_RSP_ARGC,
+};
+
+/*
+ * GSA specific mailbox protocol support
+ */
+
+/* Command response bit */
+#define GSA_MB_CMD_RSP	BIT(31)
+
+/* Mailbox error codes */
+enum gsa_mb_error {
+	/* Defined by GSA ROM */
+	GSA_MB_OK = 0U,
+	GSA_MB_ERR_INVALID_ARGS = 1U,
+	GSA_MB_ERR_AUTH_FAILED = 2U,
+	GSA_MB_ERR_BUSY = 3U,
+	GSA_MB_ERR_ALREADY_RUNNING = 4U,
+	GSA_MB_ERR_OUT_OF_RESOURCES = 5U,
+	GSA_MB_ERR_BAD_HANDLE = 6U,
+
+	/* Extended by GSA firmware */
+	GSA_MB_ERR_GENERIC = 128U,
+	GSA_MB_ERR_INTERNAL = 129U,
+	GSA_MB_ERR_TIMED_OUT = 130U,
+	GSA_MB_ERR_BAD_STATE = 131U,
+};
+
+#if IS_ENABLED(CONFIG_GSA_LINUX_MAILBOX)
+#define GSA_MBOX_COUNT 1
+
+struct mbox_slot {
+	struct mbox_client client; /* Linux mailbox framework client */
+	struct mbox_chan *channel; /* Linux mailbox framework channel */
+	u32 *rsp_buffer; /* Buffer for responses.  See rx_callback. */
+	/* Signals response received.  See rx_callback. */
+	struct completion mbox_cmd_completion;
+};
+
+struct gsa_mbox {
+	struct device *dev; /* back-reference to device */
+	struct mutex share_reg_lock; /* protects access to SRs */
+	/* Wake lock must be held until all GSA commands have completed. */
+#if IS_ENABLED(CONFIG_GSA_PKVM)
+	u32 wake_ref_cnt;
+	struct device *s2mpu;
+#endif
+	/* Slot for each mailbox.  Only support 1 at the moment. */
+	struct mbox_slot slots[GSA_MBOX_COUNT];
+	int (*send_mbox_msg)(struct mbox_chan *chan, void *mssg);
+};
+
+#else
+struct gsa_mbox {
+	struct device *dev;
+	void __iomem *base;
+	int irq;
+	spinlock_t slock; /* protects RMW like access to some registers */
+	struct mutex mbox_lock; /* protects access to SRs */
+	struct completion mbox_cmd_completion;
+	u32 exp_intmr0;
+	u32 wake_ref_cnt;
+	struct device *s2mpu;
+};
+
+#endif
 
 struct gsa_mbox *gsa_mbox_init(struct platform_device *pdev);
+
+void gsa_mbox_destroy(struct gsa_mbox *mb);
 
 int gsa_send_mbox_cmd(struct gsa_mbox *mb, u32 cmd,
 		      u32 *req_args, u32 req_argc,
 		      u32 *rsp_args, u32 rsp_argc);
+
+void mbox_tx_prepare(struct mbox_client *cl, void *mssg);
+void mbox_tx_done(struct mbox_client *cl, void *mssg, int r);
+void mbox_rx_callback(struct mbox_client *cl, void *mssg);
 
 #endif /* __LINUX_GSA_MBOX_H */

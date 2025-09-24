@@ -169,6 +169,9 @@
 /* I2C_WRITE_BYTE_COUNT + 1 when TX_BUF_BYTE_x is only accessible I2C_WRITE_BYTE_COUNT */
 #define TCPC_TRANSMIT_BUFFER_MAX_LEN		31
 
+#define	PD_RETRY_COUNT_DEFAULT			3
+#define	PD_RETRY_COUNT_3_0_OR_HIGHER		2
+
 #define tcpc_presenting_rd(REGVAL, CCNUM) \
 	(!(TCPC_ROLE_CTRL_DRP & (REGVAL)) && \
 	 (((REGVAL) & (TCPC_ROLE_CTRL_## CCNUM ##_MASK << TCPC_ROLE_CTRL_## CCNUM ##_SHIFT)) == \
@@ -210,6 +213,14 @@ struct google_shim_tcpci {
  *		then it indicates vbus not present and > 0 will indicate
  *		presence. Error value will be returned < 0, with corresponding
  *		error num.
+ * @rx:
+ *		Required; Rx callback to execute bus specific handling for receiving data from
+ *		TCPCI_RECEIVE_BUFFER.The allocated buffer size should be guaranteed
+ *		"pd_msg_size + 2" by the caller. This is to accommodate the RX buffer metadata
+ *		(byte count & sop* frame type).
+ * @tx:
+ *		Optional; Tx callback to execute bus specific handling for
+ *		transmitting data to TCPCI_TRANSMIT_BUFFER.
  */
 struct google_shim_tcpci_data {
 	struct regmap *regmap;
@@ -231,6 +242,11 @@ struct google_shim_tcpci_data {
 	void (*check_contaminant)(struct google_shim_tcpci *tcpci,
 				  struct google_shim_tcpci_data *data);
 	int (*get_vbus)(struct google_shim_tcpci *tcpci, struct google_shim_tcpci_data *data);
+	int (*rx)(struct google_shim_tcpci *tcpci, u8 *rx_buf, size_t pd_msg_size);
+	int (*tx)(struct google_shim_tcpci *tcpci, enum tcpm_transmit_type type,
+		  const struct pd_message *msg, unsigned int negotiated_rev);
+	bool (*is_vbus_vsafe0v)(struct google_shim_tcpci *tcpci,
+				struct google_shim_tcpci_data *data);
 };
 
 struct google_shim_tcpci *google_tcpci_shim_register_port(struct device *dev,

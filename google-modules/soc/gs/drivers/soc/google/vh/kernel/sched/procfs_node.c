@@ -989,9 +989,9 @@ static int update_prefer_fit(const char *buf, bool val)
 static int update_adpf(const char *buf, bool val)
 {
 	struct vendor_task_struct *vp;
-	struct task_struct *p;
 	struct rq_flags rf;
 	struct rq *rq;
+	struct task_struct *p;
 	pid_t pid;
 	bool old_adpf;
 
@@ -1025,7 +1025,9 @@ static int update_adpf(const char *buf, bool val)
 
 	update_adpf_counter(p, old_adpf);
 
+
 	task_rq_unlock(rq, p, &rf);
+
 	put_task_struct(p);
 	rcu_read_unlock();
 
@@ -1241,7 +1243,8 @@ static int update_rampup_multiplier_clear(const char *buf, int count)
 /*
  * sched qos profiles that need to take effect immediately.
  */
-static void __update_sched_qos_profiles(struct task_struct *p, struct vendor_task_struct *vp, bool old_adpf)
+static void __update_sched_qos_profiles(struct task_struct *p, struct vendor_task_struct *vp,
+	bool old_adpf)
 {
 	bool old, new;
 
@@ -2542,7 +2545,7 @@ PROC_OPS_RW(max_load_balance_interval);
 
 static int min_granularity_ns_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "%d\n", sysctl_sched_min_granularity);
+	seq_printf(m, "%d\n", sysctl_sched_base_slice);
 	return 0;
 }
 static ssize_t min_granularity_ns_store(struct file *filp,
@@ -2564,43 +2567,11 @@ static ssize_t min_granularity_ns_store(struct file *filp,
 		return -EINVAL;
 
 	vh_sched_min_granularity_ns = val;
-	vh_sched_wakeup_granularity_ns = val;
-	sysctl_sched_min_granularity = val;
-	sysctl_sched_wakeup_granularity = val;
+	sysctl_sched_base_slice = val;
 
 	return count;
 }
 PROC_OPS_RW(min_granularity_ns);
-
-static int latency_ns_show(struct seq_file *m, void *v)
-{
-	seq_printf(m, "%d\n", sysctl_sched_latency);
-	return 0;
-}
-static ssize_t latency_ns_store(struct file *filp,
-				const char __user *ubuf,
-				size_t count, loff_t *pos)
-{
-	unsigned int val;
-	char buf[MAX_PROC_SIZE];
-
-	if (count >= sizeof(buf))
-		return -EINVAL;
-
-	if (copy_from_user(buf, ubuf, count))
-		return -EFAULT;
-
-	buf[count] = '\0';
-
-	if (kstrtouint(buf, 0, &val))
-		return -EINVAL;
-
-	vh_sched_latency_ns = val;
-	sysctl_sched_latency = val;
-
-	return count;
-}
-PROC_OPS_RW(latency_ns);
 
 static int enable_hrtick_show(struct seq_file *m, void *v)
 {
@@ -3655,7 +3626,6 @@ static struct pentry entries[] = {
 	// load balance
 	PROC_ENTRY(max_load_balance_interval),
 	PROC_ENTRY(min_granularity_ns),
-	PROC_ENTRY(latency_ns),
 	PROC_ENTRY(enable_hrtick),
 	// auto migration margins
 	PROC_ENTRY(auto_migration_margins_enable),

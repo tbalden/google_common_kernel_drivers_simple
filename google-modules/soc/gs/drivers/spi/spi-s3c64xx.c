@@ -21,6 +21,7 @@
 #include <linux/of_gpio.h>
 #include <linux/mfd/syscon.h>
 #include <linux/regmap.h>
+#include <linux/pinctrl/consumer.h>
 
 #include <linux/platform_data/spi-s3c64xx-gs.h>
 

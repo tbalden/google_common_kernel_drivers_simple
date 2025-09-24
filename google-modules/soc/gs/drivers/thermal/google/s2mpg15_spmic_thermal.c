@@ -385,6 +385,7 @@ static void s2mpg15_spmic_temp_update(
 	s->log_ct = (s->log_ct + 1) % SPMIC_TEMPERATURE_BUF_LEN;
 }
 
+#if IS_ENABLED(CONFIG_PIXEL_METRICS)
 /**
  * dump_thermal_history() - Dump the last TEMPERATURE_BUF_LEN readings.
  * @s: s2mpg15_spmic_thermal_sensor with abnormality
@@ -454,14 +455,19 @@ static int get_filtered_temp(const struct s2mpg15_spmic_thermal_sensor *s)
 				s->tzd->type, SPMIC_ERR_READING_IGNORE_TIME_MSEC);
 	return s->temp_log[last_temp_idx].temperature;
 }
+#endif  /* CONFIG_PIXEL_METRICS */
+
 /*
  * Get temperature for given tz.
  */
 static int s2mpg15_spmic_thermal_get_temp(struct thermal_zone_device *tz, int *temp)
 {
-	struct s2mpg15_spmic_thermal_sensor *s = tz->devdata;
+	struct s2mpg15_spmic_thermal_sensor *s = thermal_zone_device_priv(tz);
 	struct s2mpg15_spmic_thermal_chip *s2mpg15_spmic_thermal = s->chip;
-	int raw, ret = 0, metrics_ret = 0;
+	int raw, ret = 0;
+#if IS_ENABLED(CONFIG_PIXEL_METRICS)
+	int metrics_ret = 0;
+#endif
 	u8 mask = 0x1;
 	u8 data_buf[S2MPG15_METER_NTC_BUF];
 	u8 reg = S2MPG15_METER_LPF_DATA_NTC0_1 +
@@ -518,7 +524,7 @@ err_exit:
 static int s2mpg15_spmic_thermal_set_trips(struct thermal_zone_device *tz, int low_temp,
 					 int high_temp)
 {
-	struct s2mpg15_spmic_thermal_sensor *s = tz->devdata;
+	struct s2mpg15_spmic_thermal_sensor *s = thermal_zone_device_priv(tz);
 	struct s2mpg15_spmic_thermal_chip *s2mpg15_spmic_thermal = s->chip;
 	struct device *dev = s2mpg15_spmic_thermal->dev;
 	int emul_temp, low_volt, high_volt, ret = 0;
@@ -577,21 +583,21 @@ s2mpg15_spmic_thermal_set_hot_trip(struct s2mpg15_spmic_thermal_sensor *s, int t
  * Set temperature threshold for given tz, only critical threshold will be
  * programmed as shutdown threshold.
  */
-static int s2mpg15_spmic_thermal_set_trip_temp(struct thermal_zone_device *tz, int trip, int temp)
+static int s2mpg15_spmic_thermal_set_trip_temp(struct thermal_zone_device *tz, int trip_id, int temp)
 {
-	struct s2mpg15_spmic_thermal_sensor *s = tz->devdata;
-	const struct thermal_trip *trip_points;
+	struct s2mpg15_spmic_thermal_sensor *s = thermal_zone_device_priv(tz);
+	struct thermal_trip trip;
 	int ret = 0;
 
 	if (!s->chip->sensors_ready)
 		return -EAGAIN;
 
-	trip_points = of_thermal_get_trip_points(s->tzd);
-	if (!trip_points)
+	ret = __thermal_zone_get_trip(s->tzd, trip_id, &trip);
+	if (ret)
 		return -EINVAL;
 
-	if (trip_points[trip].type != THERMAL_TRIP_HOT)
-		return ret;
+	if (trip.type != THERMAL_TRIP_HOT)
+		return 0;
 
 	/* Use THERMAL_TRIP_HOT for HW thermal shutdown */
 	ret = s2mpg15_spmic_thermal_set_hot_trip(s, temp);
@@ -604,7 +610,7 @@ static int s2mpg15_spmic_thermal_set_trip_temp(struct thermal_zone_device *tz, i
  */
 static int s2mpg15_spmic_thermal_set_emul_temp(struct thermal_zone_device *tz, int temp)
 {
-	struct s2mpg15_spmic_thermal_sensor *sensor = tz->devdata;
+	struct s2mpg15_spmic_thermal_sensor *sensor = thermal_zone_device_priv(tz);
 	int ret = 0;
 	u8 value = 0, mask = 0x1;
 
@@ -672,20 +678,17 @@ static DEVICE_ATTR_RO(tz_temp);
 static int s2mpg15_spmic_thermal_get_hot_temp(struct thermal_zone_device *tzd)
 {
 	int ntrips;
-	const struct thermal_trip *trips;
+	struct thermal_trip trip;
 	int i;
 
-	ntrips = of_thermal_get_ntrips(tzd);
+	ntrips = thermal_zone_get_num_trips(tzd);
 	if (ntrips <= 0)
 		return THERMAL_TEMP_INVALID;
 
-	trips = of_thermal_get_trip_points(tzd);
-	if (!trips)
-		return THERMAL_TEMP_INVALID;
-
 	for (i = 0; i < ntrips; i++) {
-		if (of_thermal_is_trip_valid(tzd, i) && trips[i].type == THERMAL_TRIP_HOT)
-			return trips[i].temperature;
+		if (!thermal_zone_get_trip(tzd, i, &trip)
+		    && trip.type == THERMAL_TRIP_HOT)
+			return trip.temperature;
 	}
 
 	return THERMAL_TEMP_INVALID;

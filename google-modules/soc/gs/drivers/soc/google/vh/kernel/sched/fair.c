@@ -44,7 +44,6 @@ extern unsigned int vendor_sched_util_post_init_scale;
 extern bool vendor_sched_npi_packing;
 extern bool vendor_sched_boost_adpf_prio;
 extern unsigned int sysctl_sched_min_granularity;
-extern unsigned int sysctl_sched_wakeup_granularity;
 extern unsigned int sysctl_sched_idle_min_granularity;
 extern struct cpumask skip_prefer_prev_mask;
 
@@ -80,7 +79,6 @@ bool in_suspend_resume;
 unsigned int vh_sched_max_load_balance_interval;
 unsigned int vh_sched_min_granularity_ns;
 unsigned int vh_sched_wakeup_granularity_ns;
-unsigned int vh_sched_latency_ns;
 
 unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
 				 unsigned long max, enum cpu_util_type type,
@@ -180,55 +178,6 @@ static inline void update_load_add(struct load_weight *lw, unsigned long inc)
 	lw->inv_weight = 0;
 }
 
-#define WMULT_CONST	(~0U)
-#define WMULT_SHIFT	32
-
-static void __update_inv_weight(struct load_weight *lw)
-{
-	unsigned long w;
-
-	if (likely(lw->inv_weight))
-		return;
-
-	w = scale_load_down(lw->weight);
-
-	if (BITS_PER_LONG > 32 && unlikely(w >= WMULT_CONST))
-		lw->inv_weight = 1;
-	else if (unlikely(!w))
-		lw->inv_weight = WMULT_CONST;
-	else
-		lw->inv_weight = WMULT_CONST / w;
-}
-
-static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight *lw)
-{
-	u64 fact = scale_load_down(weight);
-	u32 fact_hi = (u32)(fact >> 32);
-	int shift = WMULT_SHIFT;
-	int fs;
-
-	__update_inv_weight(lw);
-
-	if (unlikely(fact_hi)) {
-		fs = fls(fact_hi);
-		shift -= fs;
-		fact >>= fs;
-	}
-
-	fact = mul_u32_u32(fact, lw->inv_weight);
-
-	fact_hi = (u32)(fact >> 32);
-	if (fact_hi) {
-		fs = fls(fact_hi);
-		shift -= fs;
-		fact >>= fs;
-	}
-
-	return mul_u64_u32_shr(delta_exec, fact, shift);
-}
-
-static u64 __sched_period(unsigned long nr_running);
-
 #define for_each_sched_entity(se) \
 		for (; se; se = se->parent)
 
@@ -256,51 +205,9 @@ static int se_is_idle(struct sched_entity *se)
 }
 #endif
 
-static bool sched_idle_cfs_rq(struct cfs_rq *cfs_rq)
-{
-	return cfs_rq->nr_running &&
-		cfs_rq->nr_running == cfs_rq->idle_nr_running;
-}
-
 u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
-	unsigned int nr_running = cfs_rq->nr_running;
-	struct sched_entity *init_se = se;
-	unsigned int min_gran;
-	u64 slice;
-
-	if (sched_feat(ALT_PERIOD))
-		nr_running = rq_of(cfs_rq)->cfs.h_nr_running;
-
-	slice = __sched_period(nr_running + !se->on_rq);
-
-	for_each_sched_entity(se) {
-		struct load_weight *load;
-		struct load_weight lw;
-		struct cfs_rq *qcfs_rq;
-
-		qcfs_rq = cfs_rq_of(se);
-		load = &qcfs_rq->load;
-
-		if (unlikely(!se->on_rq)) {
-			lw = qcfs_rq->load;
-
-			update_load_add(&lw, se->load.weight);
-			load = &lw;
-		}
-		slice = __calc_delta(slice, se->load.weight, load);
-	}
-
-	if (sched_feat(BASE_SLICE)) {
-		if (se_is_idle(init_se) && !sched_idle_cfs_rq(cfs_rq))
-			min_gran = sysctl_sched_idle_min_granularity;
-		else
-			min_gran = sysctl_sched_min_granularity;
-
-		slice = max_t(u64, slice, min_gran);
-	}
-
-	return slice;
+	return sysctl_sched_base_slice;
 }
 
 void set_next_buddy(struct sched_entity *se)
@@ -538,6 +445,23 @@ static inline unsigned long cfs_rq_load_avg(struct cfs_rq *cfs_rq)
 static inline unsigned long cpu_load(struct rq *rq)
 {
 	return cfs_rq_load_avg(&rq->cfs);
+}
+
+/* Copied from 6.1 GKI, which is effectively the same as the refactored one on 6.6 */
+unsigned long cpu_util_cfs(int cpu)
+{
+	struct cfs_rq *cfs_rq;
+	unsigned long util;
+
+	cfs_rq = &cpu_rq(cpu)->cfs;
+	util = READ_ONCE(cfs_rq->avg.util_avg);
+
+	if (sched_feat(UTIL_EST)) {
+		util = max_t(unsigned long, util,
+			     READ_ONCE(cfs_rq->avg.util_est));
+	}
+
+	return min(util, capacity_orig_of(cpu));
 }
 
 /*****************************************************************************/
@@ -959,7 +883,7 @@ unsigned long cpu_util_cfs_group_mod(int cpu)
 		// TODO: right now the limit of util_est is per task
 		// consider to make it per group.
 		util = max_t(unsigned long, util,
-			     READ_ONCE(rq->cfs.avg.util_est.enqueued));
+			     READ_ONCE(rq->cfs.avg.util_est));
 	}
 
 	return util;
@@ -1091,7 +1015,7 @@ static unsigned long cpu_util_without(int cpu, struct task_struct *p, unsigned l
 	 */
 	if (sched_feat(UTIL_EST)) {
 		unsigned int estimated =
-			READ_ONCE(cfs_rq->avg.util_est.enqueued);
+			READ_ONCE(cfs_rq->avg.util_est);
 
 		/*
 		 * Despite the following checks we still have a small window
@@ -1261,7 +1185,7 @@ static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
 		util = max_t(long, READ_ONCE(rq->cfs.avg.util_avg) - unclamped_util + util, 0);
 
 	if (sched_feat(UTIL_EST)) {
-		util_est = READ_ONCE(rq->cfs.avg.util_est.enqueued);
+		util_est = READ_ONCE(rq->cfs.avg.util_est);
 
 		if (dst_cpu == cpu)
 			util_est += _task_util_est(p);
@@ -1350,7 +1274,8 @@ static inline unsigned long em_cpu_energy_pixel_mod(struct em_perf_domain *pd,
 				unsigned long max_util, unsigned long sum_util, bool count_idle,
 				int dst_cpu)
 {
-	unsigned long freq, scale_cpu;
+	unsigned long freq, scale_cpu, ret;
+	struct em_perf_state *table;
 	struct em_perf_state *ps;
 	int i, cpu;
 
@@ -1414,16 +1339,22 @@ static inline unsigned long em_cpu_energy_pixel_mod(struct em_perf_domain *pd,
 #endif
 
 	scale_cpu = arch_scale_cpu_capacity(cpu);
-	ps = &pd->table[pd->nr_perf_states - 1];
+
+	rcu_read_lock();
+	table = em_perf_state_from_pd(pd);
+	ps = &table[pd->nr_perf_states - 1];
 	freq = map_util_freq_pixel_mod(max_util, ps->frequency, scale_cpu, cpu);
 
 	for (i = 0; i < pd->nr_perf_states; i++) {
-		ps = &pd->table[i];
+		ps = &table[i];
 		if (ps->frequency >= freq && !(ps->flags & EM_PERF_STATE_INEFFICIENT))
 			break;
 	}
 
-	return ps->cost * sum_util / scale_cpu;
+	ret = ps->cost * sum_util / scale_cpu;
+	rcu_read_unlock();
+
+	return ret;
 }
 
 static long
@@ -1608,17 +1539,6 @@ static void get_uclamp_on_nice(struct task_struct *p, enum uclamp_id clamp_id,
  * This part of code is vendor hook functions, which modify or extend the original
  * functions.
  */
-
-static u64 __sched_period(unsigned long nr_running)
-{
-	unsigned int sched_nr_latency = DIV_ROUND_UP(sysctl_sched_latency,
-					sysctl_sched_min_granularity);
-
-	if (unlikely(nr_running > sched_nr_latency))
-		return nr_running * sysctl_sched_min_granularity;
-	else
-		return sysctl_sched_latency;
-}
 
 int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		cpumask_t *valid_mask)
@@ -2167,7 +2087,17 @@ unsigned long map_util_freq_pixel_mod(unsigned long util, unsigned long freq,
 						efficient = !opp->inefficient;
 
 					if (static_branch_likely(&use_em_for_freq_mapping)) {
-						if (opp->capacity >= util && efficient)
+						unsigned long capacity = opp->capacity;
+
+						/*
+						 * Due to a rounding error the time to reach SCHED_CAPACITY_SCALE is
+						 * too high and inaccurate. Reduce it by 1 which should be more
+						 * representative value.
+						 */
+						if (TICK_USEC > USEC_PER_MSEC && capacity == SCHED_CAPACITY_SCALE)
+							capacity -= 1;
+
+						if (capacity >= util && efficient)
 							break;
 					} else {
 						if (opp->freq >= freq && efficient)
@@ -2370,7 +2300,7 @@ void initialize_vendor_group_property(void)
 
 void rvh_check_preempt_wakeup_pixel_mod(void *data, struct rq *rq, struct task_struct *p,
 			bool *preempt, bool *nopreempt, int wake_flags, struct sched_entity *se,
-			struct sched_entity *pse, int next_buddy_marked, unsigned int granularity)
+			struct sched_entity *pse, int next_buddy_marked)
 {
 	if (!entity_is_task(se) || !entity_is_task(pse))
 		return;
@@ -2388,21 +2318,21 @@ void rvh_check_preempt_wakeup_pixel_mod(void *data, struct rq *rq, struct task_s
 void rvh_util_est_update_pixel_mod(void *data, struct cfs_rq *cfs_rq, struct task_struct *p,
 				    bool task_sleep, int *ret)
 {
-	long last_ewma_diff, last_enqueued_diff;
-	struct util_est ue;
+	unsigned int ewma, dequeued, last_ewma_diff;
+	unsigned int rampup_multiplier;
 
 	*ret = 1;
 
 	if (!sched_feat(UTIL_EST))
 		return;
 
+	rampup_multiplier = get_rampup_multiplier(p);
+
 	if (static_branch_likely(&auto_dvfs_headroom_enable)) {
 		struct vendor_task_struct *vp = get_vendor_task_struct(p);
-		unsigned int rampup_multiplier = get_rampup_multiplier(p);
 
 		if (vg[get_vendor_group(p)].disable_util_est) {
-			p->se.avg.util_est.enqueued = 0;
-			p->se.avg.util_est.ewma = 0;
+			p->se.avg.util_est = 0;
 			return;
 		}
 
@@ -2417,77 +2347,86 @@ void rvh_util_est_update_pixel_mod(void *data, struct cfs_rq *cfs_rq, struct tas
 	if (!task_sleep)
 		return;
 
+	/* Get current estimate of utilization */
+	ewma = READ_ONCE(p->se.avg.util_est);
+
 	/*
 	 * If the PELT values haven't changed since enqueue time,
 	 * skip the util_est update.
 	 */
-	ue = p->se.avg.util_est;
 	if (!static_branch_likely(&auto_dvfs_headroom_enable)) {
-		if (ue.enqueued & UTIL_AVG_UNCHANGED)
+		if (ewma & UTIL_AVG_UNCHANGED)
 			return;
 	} else {
-		ue.enqueued = ue.enqueued & ~UTIL_AVG_UNCHANGED;
+		ewma = ewma & ~UTIL_AVG_UNCHANGED;
 	}
 
-	last_enqueued_diff = ue.enqueued;
+	/* Get utilization at dequeue */
+	dequeued = task_util(p);
 
 	/*
 	 * Reset EWMA on utilization increases, the moving average is used only
 	 * to smooth utilization decreases.
 	 */
-	ue.enqueued = task_util(p);
-	if (sched_feat(UTIL_EST_FASTUP)) {
-		if (ue.ewma < ue.enqueued) {
-			ue.ewma = ue.enqueued;
-			goto done;
-		}
+	if (ewma <= dequeued) {
+		ewma = dequeued;
+		goto done;
 	}
 
 	/*
 	 * Skip update of task's estimated utilization when its members are
 	 * already ~1% close to its last activation value.
 	 */
-	last_ewma_diff = ue.enqueued - ue.ewma;
-	last_enqueued_diff -= ue.enqueued;
-	if (within_margin(last_ewma_diff, UTIL_EST_MARGIN)) {
-		if (!within_margin(last_enqueued_diff, UTIL_EST_MARGIN))
-			goto done;
-
-		return;
-	}
+	last_ewma_diff = ewma - dequeued;
+	if (last_ewma_diff < UTIL_EST_MARGIN)
+		goto done;
 
 	/*
 	 * To avoid overestimation of actual task utilization, skip updates if
 	 * we cannot grant there is idle time in this CPU.
 	 */
 	if (!static_branch_likely(&auto_dvfs_headroom_enable)) {
-		if (task_util(p) > capacity_orig_of(cpu_of(rq_of(cfs_rq))))
+		if (dequeued > arch_scale_cpu_capacity(cpu_of(rq_of(cfs_rq))))
 			return;
 	}
+
+	/*
+	 * To avoid underestimate of task utilization, skip updates of EWMA if
+	 * we cannot grant that thread got all CPU time it wanted.
+	 */
+	if ((dequeued + UTIL_EST_MARGIN) < task_runnable(p))
+		goto done;
+
 
 	/*
 	 * Update Task's estimated utilization
 	 *
 	 * When *p completes an activation we can consolidate another sample
-	 * of the task size. This is done by storing the current PELT value
-	 * as ue.enqueued and by using this value to update the Exponential
-	 * Weighted Moving Average (EWMA):
+	 * of the task size. This is done by using this value to update the
+	 * Exponential Weighted Moving Average (EWMA):
 	 *
 	 *  ewma(t) = w *  task_util(p) + (1-w) * ewma(t-1)
 	 *          = w *  task_util(p) +         ewma(t-1)  - w * ewma(t-1)
 	 *          = w * (task_util(p) -         ewma(t-1)) +     ewma(t-1)
-	 *          = w * (      last_ewma_diff            ) +     ewma(t-1)
-	 *          = w * (last_ewma_diff  +  ewma(t-1) / w)
+	 *          = w * (      -last_ewma_diff           ) +     ewma(t-1)
+	 *          = w * (-last_ewma_diff +  ewma(t-1) / w)
 	 *
 	 * Where 'w' is the weight of new samples, which is configured to be
 	 * 0.25, thus making w=1/4 ( >>= UTIL_EST_WEIGHT_SHIFT)
 	 */
-	ue.ewma <<= UTIL_EST_WEIGHT_SHIFT;
-	ue.ewma  += last_ewma_diff;
-	ue.ewma >>= UTIL_EST_WEIGHT_SHIFT;
+	if (static_branch_likely(&auto_dvfs_headroom_enable) &&
+	    rampup_multiplier > UTIL_EST_WEIGHT_SHIFT) {
+		ewma <<= rampup_multiplier;
+		ewma  -= last_ewma_diff;
+		ewma >>= rampup_multiplier;
+	} else {
+		ewma <<= UTIL_EST_WEIGHT_SHIFT;
+		ewma  -= last_ewma_diff;
+		ewma >>= UTIL_EST_WEIGHT_SHIFT;
+	}
 done:
-	ue.enqueued |= UTIL_AVG_UNCHANGED;
-	WRITE_ONCE(p->se.avg.util_est, ue);
+	ewma |= UTIL_AVG_UNCHANGED;
+	WRITE_ONCE(p->se.avg.util_est, ewma);
 
 	trace_sched_util_est_se_tp(&p->se);
 }
@@ -2548,13 +2487,12 @@ void rvh_post_init_entity_util_avg_pixel_mod(void *data, struct sched_entity *se
 
 		sa->util_avg = init_value >> 1;
 		sa->runnable_avg = init_value >> 1;
-		sa->util_est.enqueued = init_value | UTIL_AVG_UNCHANGED;
-		sa->util_est.ewma = init_value;
+		sa->util_est = init_value | UTIL_AVG_UNCHANGED;
 	}
 }
 
 void vh_sched_uclamp_validate_pixel_mod(void *data, struct task_struct *tsk,
-					const struct sched_attr *attr, bool user,
+					const struct sched_attr *attr,
 					int *ret, bool *done)
 {
 	struct vendor_task_struct *vtsk = get_vendor_task_struct(tsk);
@@ -2746,14 +2684,12 @@ static struct task_struct *detach_important_task(struct rq *src_rq, int dst_cpu)
 
 	lockdep_assert_held(&src_rq->__lock);
 
+
 	list_for_each_entry_reverse(p, &src_rq->cfs_tasks, se.group_node) {
 		if (!cpumask_test_cpu(dst_cpu, p->cpus_ptr))
 			continue;
 
 		if (task_on_cpu(src_rq, p))
-			continue;
-
-		if (is_binder_task(p))
 			continue;
 
 		/*
@@ -3117,9 +3053,6 @@ void rvh_dequeue_task_fair_pixel_mod(void *data, struct rq *rq, struct task_stru
 void vh_sched_resume_end(void *data, void *unused)
 {
 	max_load_balance_interval = vh_sched_max_load_balance_interval;
-	sysctl_sched_min_granularity = vh_sched_min_granularity_ns;
-	sysctl_sched_wakeup_granularity = vh_sched_wakeup_granularity_ns;
-	sysctl_sched_latency = vh_sched_latency_ns;
 }
 
 static int find_target_cap(unsigned int freq, unsigned int cpu)

@@ -24,7 +24,11 @@
 #include <linux/tracepoint.h>
 
 #if IS_ENABLED(CONFIG_GS_PERF_MON)
+#if IS_ENABLED(CONFIG_SOC_GS101) || IS_ENABLED(CONFIG_SOC_GS101) || IS_ENABLED(CONFIG_SOC_ZUMA)
 #include <performance/gs_perf_mon/gs_perf_mon.h>
+#else
+#include <perf/core/gs_perf_mon.h>
+#endif
 #else
 #include "../../devfreq/google/governor_memlat.h"
 #endif

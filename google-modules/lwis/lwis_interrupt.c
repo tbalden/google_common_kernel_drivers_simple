@@ -113,6 +113,7 @@ void lwis_interrupt_list_free(struct lwis_interrupt_list *list)
 		spin_unlock_irqrestore(&list->irq[i].lock, flags);
 	}
 	kfree(list->irq);
+	kfree(list);
 }
 
 int lwis_interrupt_init(struct lwis_interrupt_list *list, int index, char *name)
@@ -155,7 +156,7 @@ int lwis_interrupt_get(struct lwis_interrupt_list *list, int index,
 		return ret;
 	}
 
-	if (lwis_plaform_set_default_irq_affinity(irq) != 0) {
+	if (lwis_platform_set_default_irq_affinity(irq) != 0) {
 		dev_warn(list->lwis_dev->dev, "Interrupt %s cannot set affinity.\n",
 			 list->irq[index].full_name);
 	}
@@ -197,7 +198,7 @@ int lwis_interrupt_get_gpio_irq(struct lwis_interrupt_list *list, int index, cha
 		return ret;
 	}
 
-	if (lwis_plaform_set_default_irq_affinity(list->irq[index].irq) != 0) {
+	if (lwis_platform_set_default_irq_affinity(list->irq[index].irq) != 0) {
 		dev_warn(list->lwis_dev->dev, "Interrupt %s cannot set affinity.\n",
 			 list->irq[index].full_name);
 	}
@@ -572,6 +573,7 @@ int lwis_interrupt_set_event_info(struct lwis_interrupt_list *list, int index, i
 			kzalloc(sizeof(struct lwis_single_event_info), GFP_KERNEL);
 		if (!new_event)
 			return -ENOMEM;
+		INIT_LIST_HEAD(&new_event->node_enabled);
 
 		/* Check to see if this event is considered critical */
 		is_critical = false;
@@ -656,6 +658,7 @@ int lwis_interrupt_set_gpios_event_info(struct lwis_interrupt_list *list, int in
 	new_event = kzalloc(sizeof(struct lwis_single_event_info), GFP_KERNEL);
 	if (!new_event)
 		return -ENOMEM;
+	INIT_LIST_HEAD(&new_event->node_enabled);
 
 	/* Fill the device id info in event id bit[47..32] */
 	irq_event |= (int64_t)(list->lwis_dev->id & 0xFFFF) << 32;
@@ -705,10 +708,21 @@ static int interrupt_single_event_enable_locked(struct lwis_interrupt *irq,
 		return -EINVAL;
 	}
 
-	if (enabled)
-		list_add_tail(&event->node_enabled, &irq->enabled_event_infos);
-	else
-		list_del(&event->node_enabled);
+	if (enabled) {
+		/* Only add if it's not already in a list */
+		if (list_empty(&event->node_enabled))
+			list_add_tail(&event->node_enabled, &irq->enabled_event_infos);
+		else
+			pr_warn("Event 0x%llx already enabled for IRQ %s\n", event->event_id,
+				irq->name);
+	} else {
+		/* Only delete if it's actually in a list */
+		if (!list_empty(&event->node_enabled))
+			list_del_init(&event->node_enabled);
+		else
+			pr_warn("Event 0x%llx already disabled for IRQ %s\n", event->event_id,
+				irq->name);
+	}
 
 	/* If mask_toggled is set, reverse the enable/disable logic. */
 	is_set = (!irq->mask_toggled) ? enabled : !enabled;

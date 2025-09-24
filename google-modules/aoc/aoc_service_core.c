@@ -11,7 +11,6 @@
 
 #include "aoc.h"
 
-extern enum AOC_FW_STATE aoc_state;
 extern struct aoc_control_block *aoc_control;
 
 static void signal_aoc(struct mbox_chan *channel);

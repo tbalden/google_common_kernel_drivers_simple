@@ -5,6 +5,9 @@
  * Copyright (C) 2024 Google, LLC.
  */
 
+#pragma clang diagnostic ignored "-Wenum-conversion"
+#pragma clang diagnostic ignored "-Wswitch"
+
 #include <linux/err.h>
 #include <linux/version.h>
 #include <linux/init.h>
@@ -21,7 +24,7 @@
 #include "hl7132_regs.h"
 #include "hl7132_charger.h"
 
-#if defined(CONFIG_OF)
+#if IS_ENABLED(CONFIG_OF)
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #endif /* CONFIG_OF */
@@ -923,15 +926,15 @@ static int hl7132_get_iin_original(struct hl7132_charger *hl7132, int *iin)
 
 static int hl7132_get_iin(struct hl7132_charger *hl7132, int *iin)
 {
-    int ret;
-    int temp;
+	int ret;
+	int temp;
 
-    ret = hl7132_get_iin_original(hl7132, &temp);
-    if (ret < 0)
-        return ret;
+	ret = hl7132_get_iin_original(hl7132, &temp);
+	if (ret < 0)
+		return ret;
 
-    *iin = temp * 2; /* 2:1 */
-    return 0;
+	*iin = temp * 2; /* 2:1 */
+	return 0;
 }
 
 static int hl7132_get_batt_info(struct hl7132_charger *hl7132, int info_type, int *info)
@@ -4260,7 +4263,7 @@ static struct gbms_desc hl7132_mains_desc = {
 	.forward		= true,
 };
 
-#if defined(CONFIG_OF)
+#if IS_ENABLED(CONFIG_OF)
 static int of_hl7132_dt(struct device *dev,
 			 struct hl7132_platform_data *pdata)
 {
@@ -4397,7 +4400,7 @@ static int of_hl7132_dt(struct device *dev,
 }
 #endif /* CONFIG_OF */
 
-#ifdef CONFIG_THERMAL
+#if IS_ENABLED(CONFIG_THERMAL)
 static int hl7132_usb_tz_read_temp(struct thermal_zone_device *tzd, int *temp)
 {
 	struct hl7132_charger *hl7132 = tzd->devdata;
@@ -4769,8 +4772,7 @@ static int hl7132_create_fs_entries(struct hl7132_charger *chip)
 }
 
 
-static int hl7132_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int hl7132_probe(struct i2c_client *client)
 {
 	static char *battery[] = { "hl7132-battery" };
 	struct power_supply_config mains_cfg = {};
@@ -4786,7 +4788,7 @@ static int hl7132_probe(struct i2c_client *client,
 	if (!hl7132_chg)
 		return -ENOMEM;
 
-#if defined(CONFIG_OF)
+#if IS_ENABLED(CONFIG_OF)
 	if (client->dev.of_node) {
 		pdata = devm_kzalloc(&client->dev,
 				     sizeof(struct hl7132_platform_data),
@@ -4907,10 +4909,10 @@ static int hl7132_probe(struct i2c_client *client,
 #if IS_ENABLED(CONFIG_THERMAL)
 	if (pdata->usb_tz_name) {
 		hl7132_chg->usb_tzd =
-			thermal_zone_device_register(pdata->usb_tz_name, 0, 0,
-						     hl7132_chg,
-						     &hl7132_usb_tzd_ops,
-						     NULL, 0, 0);
+			thermal_tripless_zone_device_register(pdata->usb_tz_name,
+							      hl7132_chg,
+							      &hl7132_usb_tzd_ops,
+							      NULL);
 		if (IS_ERR(hl7132_chg->usb_tzd)) {
 			hl7132_chg->usb_tzd = NULL;
 			ret = PTR_ERR(hl7132_chg->usb_tzd);
@@ -4971,7 +4973,7 @@ static const struct i2c_device_id hl7132_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, hl7132_id);
 
-#if defined(CONFIG_OF)
+#if IS_ENABLED(CONFIG_OF)
 static struct of_device_id hl7132_i2c_dt_ids[] = {
 	{ .compatible = "hl,hl7132" },
 	{ },
@@ -4979,8 +4981,8 @@ static struct of_device_id hl7132_i2c_dt_ids[] = {
 MODULE_DEVICE_TABLE(of, hl7132_i2c_dt_ids);
 #endif /* CONFIG_OF */
 
-#if defined(CONFIG_PM)
-#ifdef CONFIG_RTC_HCTOSYS
+#if IS_ENABLED(CONFIG_PM)
+#if IS_ENABLED(CONFIG_RTC_HCTOSYS)
 static int get_current_time(unsigned long *now_tm_sec)
 {
 	struct rtc_time tm;
@@ -5067,7 +5069,7 @@ static int hl7132_resume(struct device *dev)
 	dev_dbg(hl7132->dev, "%s: update_timer\n", __func__);
 
 	/* Update the current timer */
-#ifdef CONFIG_RTC_HCTOSYS
+#if IS_ENABLED(CONFIG_RTC_HCTOSYS)
 	hl7132_check_and_update_charging_timer(hl7132);
 #else
 	if (hl7132->timer_id != TIMER_ID_NONE) {
@@ -5093,10 +5095,10 @@ const struct dev_pm_ops hl7132_pm_ops = {
 static struct i2c_driver hl7132_driver = {
 	.driver = {
 		.name = "hl7132",
-#if defined(CONFIG_OF)
+#if IS_ENABLED(CONFIG_OF)
 		.of_match_table = hl7132_i2c_dt_ids,
 #endif /* CONFIG_OF */
-#if defined(CONFIG_PM)
+#if IS_ENABLED(CONFIG_PM)
 		.pm = &hl7132_pm_ops,
 #endif
 	},

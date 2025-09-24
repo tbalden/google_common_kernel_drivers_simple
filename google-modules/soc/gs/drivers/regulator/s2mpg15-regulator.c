@@ -381,7 +381,7 @@ static int s2mpg15_pmic_dt_parse_pdata(struct s2mpg15_dev *iodev,
 	of_property_read_u32(pmic_np, "buck_ocp_ctrl7", &pdata->buck_ocp_ctrl7);
 
 	/* parse OCP_WARN information */
-	pdata->b2_ocp_warn_pin = of_get_gpio(pmic_np, 0);
+	pdata->b2_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 0);
 	if (pdata->b2_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b2_ocp_warn_pin < 0: %d\n",
 			pdata->b2_ocp_warn_pin);
@@ -402,7 +402,7 @@ static int s2mpg15_pmic_dt_parse_pdata(struct s2mpg15_dev *iodev,
 	pdata->b2_ocp_warn_debounce_clk = ret ? 0 : val;
 
 	/* parse SOFT_OCP_WARN information */
-	pdata->b2_soft_ocp_warn_pin = of_get_gpio(pmic_np, 1);
+	pdata->b2_soft_ocp_warn_pin = of_get_named_gpio(pmic_np, "gpios", 1);
 	if (pdata->b2_soft_ocp_warn_pin < 0)
 		dev_err(iodev->dev, "b2_soft_ocp_warn_pin < 0: %d\n",
 			pdata->b2_soft_ocp_warn_pin);

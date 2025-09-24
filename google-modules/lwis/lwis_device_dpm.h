@@ -29,7 +29,30 @@ int lwis_dpm_update_clock(struct lwis_device *lwis_dev, struct lwis_clk_setting 
 /*
  *  lwis_dpm_update_qos: update qos requirement from dpm client.
  */
-int lwis_dpm_update_qos(struct lwis_device *lwis_dev, struct lwis_qos_setting_v3 *qos_setting);
+int lwis_dpm_update_qos(struct lwis_device *lwis_dev, struct lwis_qos_setting *qos_setting,
+			int *sync_update, int *devfreq_sync_update);
+
+/*
+ *  lwis_dpm_sync_update_qos: sync the constraints to the device from
+ *  all its subdevice IPs.
+ */
+int lwis_dpm_sync_update_qos(struct lwis_device *lwis_dev, int sync_update);
+
+/*
+ *  lwis_dpm_devfreq_sync_update_qos: sync the constraints to the device from
+ *  all its subdevice IPs.
+ */
+int lwis_dpm_devfreq_sync_update_qos(struct lwis_device *lwis_dev, int devfreq_sync_update);
+
+/*
+ * lwis_query_irm_register_verify: query the irm registers set correctly.
+ */
+int lwis_query_irm_register_verify(struct lwis_device *lwis_dev, int sync_update);
+
+/*
+ * lwis_query_devfreq_verify(lwis_dev, devfreq_sync_update)
+ */
+int lwis_query_devfreq_verify(struct lwis_device *lwis_dev, int devfreq_sync_update);
 
 /*
  *  lwis_dpm_read_clock: read current IP core clock for given lwis device.

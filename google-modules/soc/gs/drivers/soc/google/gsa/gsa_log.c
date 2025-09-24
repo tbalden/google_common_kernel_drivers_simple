@@ -13,7 +13,7 @@
 #include "gsa_log.h"
 
 #define GSA_LOG_MAGIC 'GSAL'
-#define GSA_LOG_SIZE  0x800
+#define GSA_LOG_SIZE  ((CONFIG_GSA_LOG_REGION_SIZE) / 2)
 
 /*
  * struct gsa_log_hdr - GSA log header
@@ -32,7 +32,7 @@ struct gsa_log_hdr {
 
 struct gsa_log_mem {
 	struct gsa_log_hdr hdr;
-	uint8_t body[0];
+	uint8_t body[];
 } __packed;
 
 struct gsa_log {
@@ -63,7 +63,8 @@ struct gsa_log *gsa_log_init(struct platform_device *pdev)
 	}
 
 	if (rmem->size % (GSA_LOG_SIZE * 2)) {
-		dev_err(dev, "log size not multiple of expected size %d", (GSA_LOG_SIZE * 2));
+		dev_err(dev, "log size not multiple of expected size %d",
+			(GSA_LOG_SIZE * 2));
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -76,7 +77,8 @@ struct gsa_log *gsa_log_init(struct platform_device *pdev)
 	/* map main log region */
 	log->base_main = devm_ioremap(dev, rmem->base, rmem->size);
 	if (IS_ERR(log->base_main)) {
-		dev_err(dev, "ioremap failed (%d)\n", (int)PTR_ERR(log->base_main));
+		dev_err(dev, "ioremap failed (%d)\n",
+			(int)PTR_ERR(log->base_main));
 		return log->base_main;
 	}
 
@@ -86,20 +88,29 @@ struct gsa_log *gsa_log_init(struct platform_device *pdev)
 	return log;
 }
 
-ssize_t gsa_log_read(struct gsa_log *log, bool intermediate, char *buf)
+ssize_t gsa_log_read(struct gsa_log *log, bool intermediate, char *buf,
+		     size_t read_size)
 {
-	uint32_t magic;
-	size_t size;
-	size_t tail;
-	size_t offset = 0;
-	void *base;
-	struct gsa_log_mem *gsa_log_mem_base;
+	void *base = NULL;
+	struct gsa_log_mem *gsa_log_mem_base = NULL;
+	uint32_t magic = 0;
+	size_t size = 0;
+	size_t tail = 0;
+	size_t next_read_size = 0;
+	size_t copied = 0;
 
-	if (intermediate) {
+	if (IS_ERR(log))
+		return PTR_ERR(log);
+	else if (log == NULL)
+		return -ENODEV;
+
+	dev_dbg(log->dev, "%s(%p, %d, %p, %zu)\n",
+		__func__, log, intermediate, buf, read_size);
+
+	if (intermediate)
 		base = log->base_intermediate;
-	} else {
+	else
 		base = log->base_main;
-	}
 
 	gsa_log_mem_base = (struct gsa_log_mem *)base;
 	magic = readl(&gsa_log_mem_base->hdr.magic);
@@ -110,6 +121,11 @@ ssize_t gsa_log_read(struct gsa_log *log, bool intermediate, char *buf)
 			|| size != (GSA_LOG_SIZE - sizeof(struct gsa_log_hdr))
 			|| tail >= size) {
 		dev_err(log->dev, "log is corrupted\n");
+		dev_dbg(log->dev, "Magic: %u\n", magic);
+		dev_dbg(log->dev, "Size: %#zx\n", size);
+		dev_dbg(log->dev, "Size Expected size: %#lx\n",
+			(GSA_LOG_SIZE - sizeof(struct gsa_log_hdr)));
+		dev_dbg(log->dev, "Tail: %#zx\n", tail);
 		return 0;
 	}
 
@@ -122,16 +138,28 @@ ssize_t gsa_log_read(struct gsa_log *log, bool intermediate, char *buf)
 	 * Check to see if the byte after tail is null to discriminate
 	 * which case the log is in:
 	 */
+	next_read_size = size - tail - 1;
+	copied = 0;
 	if ((tail + 1) != size && readb(&gsa_log_mem_base->body[tail + 1])) {
-		memcpy_fromio(buf, &gsa_log_mem_base->body[tail + 1], size - tail - 1);
-		offset += size - tail - 1;
+		if (next_read_size > read_size - 1)
+			next_read_size = read_size - 1;
+		dev_dbg(log->dev, "Reading first hunk (%zu)\n",
+			 next_read_size);
+		memcpy_fromio(buf, &gsa_log_mem_base->body[tail + 1],
+			      next_read_size);
+		copied += next_read_size;
 	}
 
 	/* Copy the newer log data (bytes up to 'tail') */
-	memcpy_fromio(&buf[offset], gsa_log_mem_base->body, tail);
-	buf[offset + tail] = '\0';
+	next_read_size = tail;
+	if (next_read_size > read_size - copied - 1)
+		next_read_size = read_size - copied - 1;
+	dev_dbg(log->dev, "Reading second hunk (%zu)\n", next_read_size);
+	memcpy_fromio(&buf[copied], gsa_log_mem_base->body, next_read_size);
+	copied += next_read_size;
+	buf[copied] = '\0';
 
-	return offset + tail;
+	return copied + 1;
 }
 
 MODULE_LICENSE("GPL v2");

@@ -1529,8 +1529,6 @@ struct cs40l2x_private {
 #endif /* CONFIG_ANDROID_TIMED_OUTPUT */
 	unsigned int autosuspend_delay;
 	struct completion hap_done;
-
-	bool has_probe_failed;
 };
 
 int cs40l2x_coeff_file_parse(struct cs40l2x_private *cs40l2x,

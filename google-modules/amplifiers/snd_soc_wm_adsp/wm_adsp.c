@@ -2088,7 +2088,7 @@ int wm_adsp_write_ctl(struct wm_adsp *dsp, const char *name, int type,
 		snprintf(ctl_name, SNDRV_CTL_ELEM_ID_NAME_MAXLEN, "%s",
 			 ctl->name);
 
-	kcontrol = snd_soc_card_get_kcontrol(dsp->component->card, ctl_name);
+	kcontrol = snd_soc_card_get_kcontrol_locked(dsp->component->card, ctl_name);
 	if (!kcontrol) {
 		adsp_err(dsp, "Can't find kcontrol %s\n", ctl_name);
 		return -EINVAL;

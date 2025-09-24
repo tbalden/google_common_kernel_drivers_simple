@@ -720,10 +720,10 @@ static int dbg_snapshot_restart_handler(struct notifier_block *nb,
 	int cpu;
 
 	if (!dbg_snapshot_get_enable())
-		return NOTIFY_DONE;
+		goto exit;
 
 	if (dss_desc.in_panic)
-		return NOTIFY_DONE;
+		goto exit;
 
 	if (dss_desc.in_warm) {
 		dev_emerg(dss_desc.dev, "warm reset\n");
@@ -749,6 +749,9 @@ static int dbg_snapshot_restart_handler(struct notifier_block *nb,
 
 	cache_flush_all();
 
+exit:
+	dev_info(dss_desc.dev, "ready to do restart.\n");
+
 	return NOTIFY_DONE;
 }
 
@@ -757,9 +760,13 @@ static struct notifier_block nb_reboot_block = {
 	.priority = INT_MAX,
 };
 
+/*
+ * We must set priority 131 to be higher than pixel_restart_hander(130) and lower than other
+ * handlers.
+ */
 static struct notifier_block nb_restart_block = {
 	.notifier_call = dbg_snapshot_restart_handler,
-	.priority = INT_MAX,
+	.priority = 131,
 };
 
 static struct notifier_block nb_panic_block = {

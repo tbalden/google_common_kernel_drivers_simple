@@ -4,3 +4,4 @@
 
 build:akita --config=zuma_base
 build:akita --//private/devices/google/common:kernel=//private/devices/google/akita:akita/kernel
+build:akita --//private/google-modules/touch/common:samsung_drm

@@ -12,8 +12,8 @@ else
   git -C aosp branch -D update_symbol_list-delete-after-push
 fi
 GKI_SHA=`repo --color=never info aosp | grep "Manifest revision" | sed 's/Manifest revision: //g'`
-GKI_BRANCH="android14-6.1" # Need to push symbol list changes to the main ACK branch (not release branches)
-GKI_STAGING_REMOTE="partner-common"
+GKI_BRANCH="android15-6.6" # Need to push symbol list changes to the main ACK branch (not release branches)
+GKI_STAGING_REMOTE="partner"
 PIXEL_SYMBOL_LIST="android/abi_gki_aarch64_pixel"
 TARGET=
 FOR_AOSP_PUSH_BRANCH="update_symbol_list-delete-after-push"
@@ -108,7 +108,7 @@ echo "KERNEL_TARGET=${KERNEL_TARGET}"
 
 KERNEL_DIR="$(bazel_cquery \
   'filter(kernel_aarch64_sources, deps(//private/devices/google/common:kernel))' \
-  2>/dev/null | grep -v common | sed -n 's://\(.*\)\:kernel_aarch64_sources.*:\1:p')"
+  2>/dev/null | tail -n 1 | sed -n 's://\(.*\)\:kernel_aarch64_sources.*:\1:p')"
 if [[ -n "${KERNEL_DIR}" ]]; then
   echo "KERNEL_DIR=${KERNEL_DIR}"
 else

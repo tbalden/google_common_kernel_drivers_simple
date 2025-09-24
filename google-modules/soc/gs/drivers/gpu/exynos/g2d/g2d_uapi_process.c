@@ -218,7 +218,7 @@ static int g2d_get_userptr(struct g2d_task *task,
 	if (!vec)
 		goto err_vector;
 
-	ret = get_vaddr_frames(begin << PAGE_SHIFT, nr_pages, vec);
+	ret = get_vaddr_frames(begin << PAGE_SHIFT, nr_pages, true, vec);
 	if (ret < 0)
 		goto err_get_frames;
 	if (ret != (int)nr_pages) {

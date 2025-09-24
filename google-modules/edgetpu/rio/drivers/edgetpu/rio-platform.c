@@ -58,7 +58,7 @@ static void __exit edgetpu_platform_exit(void)
 }
 
 MODULE_DESCRIPTION("Google Edge TPU platform driver");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 module_init(edgetpu_platform_init);
 module_exit(edgetpu_platform_exit);
 MODULE_FIRMWARE(EDGETPU_DEFAULT_FIRMWARE_NAME);

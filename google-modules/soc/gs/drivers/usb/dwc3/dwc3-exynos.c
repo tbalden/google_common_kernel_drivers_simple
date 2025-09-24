@@ -1075,14 +1075,6 @@ static ssize_t usb_data_enabled_store(struct device *dev, struct device_attribut
 
 	exynos->usb_data_enabled = enabled;
 
-	if (exynos->usb_data_enabled) {
-		if (extcon_get_state(exynos->edev, EXTCON_USB) > 0)
-			dwc3_exynos_device_event(exynos->dev, 1);
-		else if (extcon_get_state(exynos->edev, EXTCON_USB_HOST) > 0)
-			dwc3_exynos_host_event(exynos->dev, 1);
-		dwc3_exynos_wait_role(exynos->dotg);
-	}
-
 	return n;
 }
 static DEVICE_ATTR_RW(usb_data_enabled);
@@ -1249,7 +1241,7 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 	if (of_property_read_bool(dev->of_node, "extcon")) {
 		ret = dwc3_exynos_extcon_register(exynos);
 		if (ret < 0) {
-			dev_err(dev, "failed to register extcon (%d)\n", ret);
+			dev_err(dev, "failed to register extcon (%d), defer probe\n", ret);
 			ret = -EPROBE_DEFER;
 			goto vdd33_err;
 		}
@@ -1299,8 +1291,11 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 
 	dwc3_pdev = of_find_device_by_node(dwc3_np);
 	exynos->dwc = platform_get_drvdata(dwc3_pdev);
-	if (exynos->dwc == NULL)
+	if (exynos->dwc == NULL) {
+		dev_err(dev, "probe deferred due to dwc3_pdev is not ready\n");
+		ret = -EPROBE_DEFER;
 		goto populate_err;
+	}
 
 	/* dwc3 core configurations */
 	pm_runtime_allow(exynos->dwc->dev);
@@ -1330,7 +1325,7 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 	}
 
 	/* disconnect gadget in probe */
-	dwc3_otg_gadget_handler(exynos->dwc->gadget, false);
+	usb_udc_vbus_handler(exynos->dwc->gadget, false);
 
 	if (of_property_read_bool(dev->of_node, "extcon")) {
 		/*

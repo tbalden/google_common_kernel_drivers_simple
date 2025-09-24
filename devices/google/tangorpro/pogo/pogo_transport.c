@@ -10,14 +10,15 @@
 #include <linux/delay.h>
 #include <linux/extcon.h>
 #include <linux/extcon-provider.h>
+#include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
 #include <linux/kthread.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <linux/of_irq.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/power_supply.h>
 #include <linux/reboot.h>
@@ -25,7 +26,7 @@
 #include <linux/spinlock.h>
 #include <linux/usb.h>
 #include <linux/usb/tcpm.h>
-#include <misc/gvotable.h>
+#include <gvotable.h>
 
 #include "google_bms.h"
 #include "google_psy.h"
@@ -246,13 +247,13 @@ struct pogo_transport {
 	struct device *dev;
 	struct max77759_plat *chip;
 	struct logbuffer *log;
-	int pogo_gpio;
+	struct gpio_desc *pogo_gpio;
 	int pogo_irq;
-	int pogo_data_mux_gpio;
-	int pogo_hub_sel_gpio;
-	int pogo_hub_reset_gpio;
-	int pogo_ovp_en_gpio;
-	int pogo_acc_gpio;
+	struct gpio_desc *pogo_data_mux_gpio;
+	struct gpio_desc *pogo_hub_sel_gpio;
+	struct gpio_desc *pogo_hub_reset_gpio;
+	struct gpio_desc *pogo_ovp_en_gpio;
+	struct gpio_desc *pogo_acc_gpio;
 	int pogo_acc_irq;
 	unsigned int pogo_acc_gpio_debounce_ms;
 	struct regulator *hub_ldo;
@@ -476,9 +477,9 @@ static void disable_and_bypass_hub(struct pogo_transport *pogo_transport)
 		return;
 
 	/* USB_MUX_HUB_SEL set to 0 to bypass the hub */
-	gpio_set_value(pogo_transport->pogo_hub_sel_gpio, 0);
+	gpiod_set_value(pogo_transport->pogo_hub_sel_gpio, 0);
 	logbuffer_log(pogo_transport->log, "POGO: hub-mux:%d",
-		      gpio_get_value(pogo_transport->pogo_hub_sel_gpio));
+		      gpiod_get_value(pogo_transport->pogo_hub_sel_gpio));
 	pogo_transport->pogo_hub_active = false;
 
 	/*
@@ -512,9 +513,9 @@ static void switch_to_usbc_locked(struct pogo_transport *pogo_transport)
 	if (ret)
 		dev_err(pogo_transport->dev, "failed to select suspend in usb state ret:%d\n", ret);
 
-	gpio_set_value(pogo_transport->pogo_data_mux_gpio, 0);
+	gpiod_set_value(pogo_transport->pogo_data_mux_gpio, 0);
 	logbuffer_log(pogo_transport->log, "POGO: data-mux:%d",
-		      gpio_get_value(pogo_transport->pogo_data_mux_gpio));
+		      gpiod_get_value(pogo_transport->pogo_data_mux_gpio));
 	data_alt_path_active(chip, false);
 
 	/*
@@ -553,9 +554,9 @@ static void switch_to_pogo_locked(struct pogo_transport *pogo_transport)
 		dev_err(pogo_transport->dev, "failed to select suspend in pogo state ret:%d\n",
 			ret);
 
-	gpio_set_value(pogo_transport->pogo_data_mux_gpio, 1);
+	gpiod_set_value(pogo_transport->pogo_data_mux_gpio, 1);
 	logbuffer_log(pogo_transport->log, "POGO: data-mux:%d",
-		      gpio_get_value(pogo_transport->pogo_data_mux_gpio));
+		      gpiod_get_value(pogo_transport->pogo_data_mux_gpio));
 	ret = extcon_set_state_sync(chip->extcon, EXTCON_USB_HOST, 1);
 	logbuffer_log(pogo_transport->log, "%s: %s turning on host for Pogo", __func__, ret < 0 ?
 		      "Failed" : "Succeeded");
@@ -613,13 +614,13 @@ static void switch_to_hub_locked(struct pogo_transport *pogo_transport)
 		dev_err(pogo_transport->dev, "failed to select hub state ret:%d\n", ret);
 
 	/* USB_MUX_POGO_SEL set to 0 to direct usb-c to AP or hub */
-	gpio_set_value(pogo_transport->pogo_data_mux_gpio, 0);
+	gpiod_set_value(pogo_transport->pogo_data_mux_gpio, 0);
 
 	/* USB_MUX_HUB_SEL set to 1 to switch the path to hub */
-	gpio_set_value(pogo_transport->pogo_hub_sel_gpio, 1);
+	gpiod_set_value(pogo_transport->pogo_hub_sel_gpio, 1);
 	logbuffer_log(pogo_transport->log, "POGO: data-mux:%d hub-mux:%d",
-		      gpio_get_value(pogo_transport->pogo_data_mux_gpio),
-		      gpio_get_value(pogo_transport->pogo_hub_sel_gpio));
+		      gpiod_get_value(pogo_transport->pogo_data_mux_gpio),
+		      gpiod_get_value(pogo_transport->pogo_hub_sel_gpio));
 
 	/* wait for the host mode to be turned off completely */
 	mdelay(60);
@@ -647,8 +648,8 @@ static void update_pogo_transport(struct pogo_transport *pogo_transport,
 	struct max77759_plat *chip = pogo_transport->chip;
 	int ret;
 	union power_supply_propval voltage_now = {0};
-	bool docked = !gpio_get_value(pogo_transport->pogo_gpio);
-	bool acc_detected = gpio_get_value(pogo_transport->pogo_acc_gpio);
+	bool docked = gpiod_get_value(pogo_transport->pogo_gpio);
+	bool acc_detected = gpiod_get_value(pogo_transport->pogo_acc_gpio);
 
 	ret = power_supply_get_property(pogo_transport->pogo_psy, POWER_SUPPLY_PROP_VOLTAGE_NOW,
 					&voltage_now);
@@ -771,9 +772,8 @@ static void update_pogo_transport(struct pogo_transport *pogo_transport,
 		break;
 	case EVENT_HALL_SENSOR_ACC_DETECTED:
 		/* Disable OVP to prevent the voltage going through POGO_VIN */
-		if (pogo_transport->pogo_ovp_en_gpio >= 0)
-			gpio_set_value_cansleep(pogo_transport->pogo_ovp_en_gpio,
-						!pogo_transport->pogo_ovp_en_active_state);
+		if (pogo_transport->pogo_ovp_en_gpio)
+			gpiod_set_value_cansleep(pogo_transport->pogo_ovp_en_gpio, 0);
 
 		if (pogo_transport->acc_detect_ldo &&
 		    pogo_transport->accessory_detection_enabled == ENABLED) {
@@ -880,9 +880,8 @@ static void update_pogo_transport(struct pogo_transport *pogo_transport,
 			pogo_transport->acc_irq_enabled = false;
 		}
 
-		if (pogo_transport->pogo_ovp_en_gpio >= 0)
-			gpio_set_value_cansleep(pogo_transport->pogo_ovp_en_gpio,
-						!pogo_transport->pogo_ovp_en_active_state);
+		if (pogo_transport->pogo_ovp_en_gpio)
+			gpiod_set_value_cansleep(pogo_transport->pogo_ovp_en_gpio, 0);
 
 		/* Disable, just in case when docked, if acc_detect_ldo was on */
 		if (pogo_transport->acc_detect_ldo &&
@@ -1078,8 +1077,8 @@ static void pogo_transport_reset_acc_detection(struct pogo_transport *pogo_trans
  */
 static void pogo_transport_run_state_machine(struct pogo_transport *pogo_transport)
 {
-	bool acc_detected = gpio_get_value(pogo_transport->pogo_acc_gpio);
-	bool docked = !gpio_get_value(pogo_transport->pogo_gpio);
+	bool acc_detected = gpiod_get_value(pogo_transport->pogo_acc_gpio);
+	bool docked = gpiod_get_value(pogo_transport->pogo_gpio);
 	struct max77759_plat *chip = pogo_transport->chip;
 	int ret;
 
@@ -1416,14 +1415,14 @@ static void pogo_transport_usbc_host_off(struct pogo_transport *pogo_transport)
 		/* b/271669059 */
 		if (ss_attached) {
 			/* USB_MUX_HUB_SEL set to 0 to bypass the hub */
-			gpio_set_value(pogo_transport->pogo_hub_sel_gpio, 0);
+			gpiod_set_value(pogo_transport->pogo_hub_sel_gpio, 0);
 			logbuffer_log(pogo_transport->log, "POGO: toggling hub-mux, hub-mux:%d",
-				      gpio_get_value(pogo_transport->pogo_hub_sel_gpio));
+				      gpiod_get_value(pogo_transport->pogo_hub_sel_gpio));
 			mdelay(10);
 			/* USB_MUX_HUB_SEL set to 1 to switch the path to hub */
-			gpio_set_value(pogo_transport->pogo_hub_sel_gpio, 1);
+			gpiod_set_value(pogo_transport->pogo_hub_sel_gpio, 1);
 			logbuffer_log(pogo_transport->log, "POGO: hub-mux:%d",
-				      gpio_get_value(pogo_transport->pogo_hub_sel_gpio));
+				      gpiod_get_value(pogo_transport->pogo_hub_sel_gpio));
 		}
 
 		/* Clear data_active since USB-C device is detached */
@@ -1632,9 +1631,8 @@ static void pogo_transport_skip_acc_detection(struct pogo_transport *pogo_transp
 	 * Disable OVP to prevent the voltage going through POGO_VIN. OVP will be re-enabled once
 	 * we vote GBMS_POGO_VIN and GBMS gets the votable result.
 	 */
-	if (pogo_transport->pogo_ovp_en_gpio >= 0)
-		gpio_set_value_cansleep(pogo_transport->pogo_ovp_en_gpio,
-					!pogo_transport->pogo_ovp_en_active_state);
+	if (pogo_transport->pogo_ovp_en_gpio)
+		gpiod_set_value_cansleep(pogo_transport->pogo_ovp_en_gpio, 0);
 
 	if (pogo_transport->acc_irq_enabled) {
 		disable_irq(pogo_transport->pogo_acc_irq);
@@ -1679,9 +1677,8 @@ static void pogo_transport_hes_acc_detected(struct pogo_transport *pogo_transpor
 			 * Disable OVP to prevent the voltage going through POGO_VIN. OVP will be
 			 * re-enabled once we vote GBMS_POGO_VIN and GBMS gets the votable result.
 			 */
-			if (pogo_transport->pogo_ovp_en_gpio >= 0)
-				gpio_set_value_cansleep(pogo_transport->pogo_ovp_en_gpio,
-							!pogo_transport->pogo_ovp_en_active_state);
+			if (pogo_transport->pogo_ovp_en_gpio)
+				gpiod_set_value_cansleep(pogo_transport->pogo_ovp_en_gpio, 0);
 
 			if (!pogo_transport->acc_irq_enabled) {
 				enable_irq(pogo_transport->pogo_acc_irq);
@@ -2080,7 +2077,7 @@ static int pogo_transport_acc_charger_status(struct pogo_transport *pogo_transpo
 	int ret, count;
 	bool retry;
 
-	if (pogo_transport->pogo_acc_gpio <= 0 || !pogo_transport->acc_charger_psy_name)
+	if (IS_ERR_OR_NULL(pogo_transport->pogo_acc_gpio) || !pogo_transport->acc_charger_psy_name)
 		return -EINVAL;
 
 	for (count = 0; count < ACC_CHARGER_PSY_RETRY_COUNT; count++) {
@@ -2286,14 +2283,14 @@ static void pogo_transport_event_handler(struct kthread_work *work)
 		spin_unlock(&pogo_transport->pogo_event_lock);
 
 		if (events & EVENT_POGO_IRQ) {
-			int pogo_gpio = gpio_get_value(pogo_transport->pogo_gpio);
+			int pogo_gpio = gpiod_get_value(pogo_transport->pogo_gpio);
 
 			logbuffer_log(pogo_transport->log, "EV:POGO_IRQ %s", pogo_gpio ?
-				      "STANDBY" : "ACTIVE");
+				      "ACTIVE" : "STANDBY");
 			if (pogo_gpio)
-				pogo_transport_pogo_irq_standby(pogo_transport);
-			else
 				pogo_transport_pogo_irq_active(pogo_transport);
+			else
+				pogo_transport_pogo_irq_standby(pogo_transport);
 		}
 		if (events & EVENT_USBC_ORIENTATION) {
 			logbuffer_log(pogo_transport->log, "EV:ORIENTATION %u",
@@ -2425,7 +2422,7 @@ static irqreturn_t pogo_acc_irq(int irq, void *dev_id)
 	 * Cache the acc gpio result as it might change after the IRQ is disabled and we need the
 	 * latest acc gpio status before the disabling of the IRQ.
 	 */
-	pogo_transport->acc_gpio_result_cache = gpio_get_value(pogo_transport->pogo_acc_gpio);
+	pogo_transport->acc_gpio_result_cache = gpiod_get_value(pogo_transport->pogo_acc_gpio);
 
 	logbuffer_log(pogo_transport->log, "Pogo acc threaded irq running, acc_detect %u",
 		      pogo_transport->acc_gpio_result_cache);
@@ -2458,7 +2455,7 @@ static irqreturn_t pogo_acc_isr(int irq, void *dev_id)
 static irqreturn_t pogo_irq(int irq, void *dev_id)
 {
 	struct pogo_transport *pogo_transport = dev_id;
-	int pogo_gpio = gpio_get_value(pogo_transport->pogo_gpio);
+	int pogo_gpio = gpiod_get_value(pogo_transport->pogo_gpio);
 
 	logbuffer_log(pogo_transport->log, "Pogo threaded irq running, pogo_gpio %u", pogo_gpio);
 
@@ -2496,15 +2493,15 @@ static irqreturn_t pogo_irq(int irq, void *dev_id)
 	}
 
 dock_detection:
-	if (pogo_transport->pogo_ovp_en_gpio >= 0) {
+	if (pogo_transport->pogo_ovp_en_gpio) {
 		int ret;
 
 		/*
 		 * Vote GBMS_POGO_VIN to notify BMS that there is input voltage on pogo power and
-		 * it is over the threshold if pogo_gpio (ACTIVE_LOW) is in active state (0)
+		 * it is over the threshold if pogo_gpio is in active state
 		 */
 		ret = gvotable_cast_long_vote(pogo_transport->charger_mode_votable, POGO_VOTER,
-					      GBMS_POGO_VIN, !pogo_gpio);
+					      GBMS_POGO_VIN, pogo_gpio);
 		if (ret)
 			logbuffer_log(pogo_transport->log, "%s: Failed to vote VIN, ret %d",
 				      __func__, ret);
@@ -2513,7 +2510,7 @@ dock_detection:
 	if (pogo_transport->state_machine_enabled)
 		pogo_transport_queue_event(pogo_transport, EVENT_POGO_IRQ);
 	else
-		pogo_transport_event(pogo_transport, EVENT_DOCKING, !pogo_gpio ?
+		pogo_transport_event(pogo_transport, EVENT_DOCKING, pogo_gpio ?
 				     POGO_PSY_DEBOUNCE_MS : 0);
 	return IRQ_HANDLED;
 }
@@ -2771,7 +2768,7 @@ static int init_pogo_irqs(struct pogo_transport *pogo_transport)
 	int ret;
 
 	/* initialize pogo status irq */
-	pogo_transport->pogo_irq = gpio_to_irq(pogo_transport->pogo_gpio);
+	pogo_transport->pogo_irq = gpiod_to_irq(pogo_transport->pogo_gpio);
 	if (pogo_transport->pogo_irq <= 0) {
 		dev_err(pogo_transport->dev, "Pogo irq not found\n");
 		return -ENODEV;
@@ -2795,11 +2792,11 @@ static int init_pogo_irqs(struct pogo_transport *pogo_transport)
 		goto free_status_irq;
 	}
 
-	if (!pogo_transport->pogo_acc_gpio)
+	if (IS_ERR_OR_NULL(pogo_transport->pogo_acc_gpio))
 		return 0;
 
 	/* initialize pogo accessory irq */
-	pogo_transport->pogo_acc_irq = gpio_to_irq(pogo_transport->pogo_acc_gpio);
+	pogo_transport->pogo_acc_irq = gpiod_to_irq(pogo_transport->pogo_acc_gpio);
 	if (pogo_transport->pogo_acc_irq <= 0) {
 		dev_err(pogo_transport->dev, "Pogo acc irq not found\n");
 		ret = -ENODEV;
@@ -2840,30 +2837,22 @@ static int init_acc_gpio(struct pogo_transport *pogo_transport)
 {
 	int ret;
 
-	pogo_transport->pogo_acc_gpio = of_get_named_gpio(pogo_transport->dev->of_node,
-							  "pogo-acc-detect", 0);
-	if (pogo_transport->pogo_acc_gpio < 0) {
-		dev_err(pogo_transport->dev, "pogo acc detect gpio not found ret:%d\n",
-			pogo_transport->pogo_acc_gpio);
-		return pogo_transport->pogo_acc_gpio;
+	pogo_transport->pogo_acc_gpio = devm_gpiod_get(pogo_transport->dev,
+						       "pogo-acc-detect", GPIOD_ASIS);
+	if (IS_ERR(pogo_transport->pogo_acc_gpio)) {
+		dev_err(pogo_transport->dev, "failed to request pogo-acc-detect gpio, ret:%ld\n",
+			PTR_ERR(pogo_transport->pogo_acc_gpio));
+		return PTR_ERR(pogo_transport->pogo_acc_gpio);
 	}
 
-	ret = devm_gpio_request(pogo_transport->dev, pogo_transport->pogo_acc_gpio,
-				"pogo-acc-detect");
-	if (ret) {
-		dev_err(pogo_transport->dev, "failed to request pogo-acc-detect gpio, ret:%d\n",
-			ret);
-		return ret;
-	}
-
-	ret = gpio_direction_input(pogo_transport->pogo_acc_gpio);
+	ret = gpiod_direction_input(pogo_transport->pogo_acc_gpio);
 	if (ret) {
 		dev_err(pogo_transport->dev, "failed to set pogo-acc-detect as input, ret:%d\n",
 			ret);
 		return ret;
 	}
 
-	ret = gpio_set_debounce(pogo_transport->pogo_acc_gpio, POGO_ACC_GPIO_DEBOUNCE_MS * 1000);
+	ret = gpiod_set_debounce(pogo_transport->pogo_acc_gpio, POGO_ACC_GPIO_DEBOUNCE_MS * 1000);
 	if (ret < 0) {
 		dev_info(pogo_transport->dev, "failed to set debounce, ret:%d\n", ret);
 		pogo_transport->pogo_acc_gpio_debounce_ms = POGO_ACC_GPIO_DEBOUNCE_MS;
@@ -2874,20 +2863,20 @@ static int init_acc_gpio(struct pogo_transport *pogo_transport)
 
 static int init_hub_gpio(struct pogo_transport *pogo_transport)
 {
-	pogo_transport->pogo_hub_sel_gpio = of_get_named_gpio(pogo_transport->dev->of_node,
-							      "pogo-hub-sel", 0);
-	if (pogo_transport->pogo_hub_sel_gpio < 0) {
-		dev_err(pogo_transport->dev, "Pogo hub sel gpio not found ret:%d\n",
-			pogo_transport->pogo_hub_sel_gpio);
-		return pogo_transport->pogo_hub_sel_gpio;
+	pogo_transport->pogo_hub_sel_gpio = devm_gpiod_get(pogo_transport->dev,
+							   "pogo-hub-sel", GPIOD_OUT_LOW);
+	if (IS_ERR(pogo_transport->pogo_hub_sel_gpio)) {
+		dev_err(pogo_transport->dev, "Pogo hub sel gpio not found ret:%ld\n",
+			PTR_ERR(pogo_transport->pogo_hub_sel_gpio));
+		return PTR_ERR(pogo_transport->pogo_hub_sel_gpio);
 	}
 
-	pogo_transport->pogo_hub_reset_gpio = of_get_named_gpio(pogo_transport->dev->of_node,
-								"pogo-hub-reset", 0);
-	if (pogo_transport->pogo_hub_reset_gpio < 0) {
-		dev_err(pogo_transport->dev, "Pogo hub reset gpio not found ret:%d\n",
-			pogo_transport->pogo_hub_reset_gpio);
-		return pogo_transport->pogo_hub_reset_gpio;
+	pogo_transport->pogo_hub_reset_gpio = devm_gpiod_get(pogo_transport->dev,
+							     "pogo-hub-reset", GPIOD_OUT_LOW);
+	if (IS_ERR(pogo_transport->pogo_hub_reset_gpio)) {
+		dev_err(pogo_transport->dev, "Pogo hub reset gpio not found ret:%ld\n",
+			PTR_ERR(pogo_transport->pogo_hub_reset_gpio));
+		return PTR_ERR(pogo_transport->pogo_hub_reset_gpio);
 	}
 
 	pogo_transport->hub_state = pinctrl_lookup_state(pogo_transport->pinctrl, "hub");
@@ -2905,24 +2894,16 @@ static int init_pogo_gpio(struct pogo_transport *pogo_transport)
 	int ret;
 
 	/* initialize pogo status gpio */
-	pogo_transport->pogo_gpio = of_get_named_gpio(pogo_transport->dev->of_node,
-						      "pogo-transport-status", 0);
-	if (pogo_transport->pogo_gpio < 0) {
-		dev_err(pogo_transport->dev, "Pogo status gpio not found ret:%d\n",
-			pogo_transport->pogo_gpio);
-		return pogo_transport->pogo_gpio;
-	}
-
-	ret = devm_gpio_request(pogo_transport->dev, pogo_transport->pogo_gpio,
-				"pogo-transport-status");
-	if (ret) {
+	pogo_transport->pogo_gpio = devm_gpiod_get(pogo_transport->dev,
+						   "pogo-transport-status", GPIOD_ASIS);
+	if (IS_ERR(pogo_transport->pogo_gpio)) {
 		dev_err(pogo_transport->dev,
-			"failed to request pogo-transport-status gpio, ret:%d\n",
-			ret);
-		return ret;
+			"failed to request pogo-transport-status gpio, ret:%ld\n",
+			PTR_ERR(pogo_transport->pogo_gpio));
+		return PTR_ERR(pogo_transport->pogo_gpio);
 	}
 
-	ret = gpio_direction_input(pogo_transport->pogo_gpio);
+	ret = gpiod_direction_input(pogo_transport->pogo_gpio);
 	if (ret) {
 		dev_err(pogo_transport->dev,
 			"failed set pogo-transport-status as input, ret:%d\n",
@@ -2931,23 +2912,15 @@ static int init_pogo_gpio(struct pogo_transport *pogo_transport)
 	}
 
 	/* initialize data mux gpio */
-	pogo_transport->pogo_data_mux_gpio = of_get_named_gpio(pogo_transport->dev->of_node,
-							       "pogo-transport-sel", 0);
-	if (pogo_transport->pogo_data_mux_gpio < 0) {
-		dev_err(pogo_transport->dev, "Pogo sel gpio not found ret:%d\n",
-			pogo_transport->pogo_data_mux_gpio);
-		return pogo_transport->pogo_data_mux_gpio;
+	pogo_transport->pogo_data_mux_gpio = devm_gpiod_get(pogo_transport->dev,
+							    "pogo-transport-sel", GPIOD_ASIS);
+	if (IS_ERR(pogo_transport->pogo_data_mux_gpio)) {
+		dev_err(pogo_transport->dev, "failed to request pogo-transport-sel gpio, ret:%ld\n",
+			PTR_ERR(pogo_transport->pogo_data_mux_gpio));
+		return PTR_ERR(pogo_transport->pogo_data_mux_gpio);
 	}
 
-	ret = devm_gpio_request(pogo_transport->dev, pogo_transport->pogo_data_mux_gpio,
-				"pogo-transport-sel");
-	if (ret) {
-		dev_err(pogo_transport->dev, "failed to request pogo-transport-sel gpio, ret:%d\n",
-			ret);
-		return ret;
-	}
-
-	ret = gpio_direction_output(pogo_transport->pogo_data_mux_gpio, 0);
+	ret = gpiod_direction_output(pogo_transport->pogo_data_mux_gpio, 0);
 	if (ret) {
 		dev_err(pogo_transport->dev, "failed set pogo-transport-sel as output, ret:%d\n",
 			ret);
@@ -2984,34 +2957,22 @@ static int init_pogo_gpio(struct pogo_transport *pogo_transport)
 
 static int init_pogo_ovp_gpio(struct pogo_transport *pogo_transport)
 {
-	enum of_gpio_flags flags;
 	int ret;
 
-	if (!of_property_read_bool(pogo_transport->dev->of_node, "pogo-ovp-en")) {
-		pogo_transport->pogo_ovp_en_gpio = -EINVAL;
+	pogo_transport->pogo_ovp_en_gpio = devm_gpiod_get_optional(pogo_transport->dev,
+								   "pogo-ovp-en", GPIOD_ASIS);
+
+	if (!pogo_transport->pogo_ovp_en_gpio)
 		return 0;
-	}
 
-	pogo_transport->pogo_ovp_en_gpio = of_get_named_gpio_flags(pogo_transport->dev->of_node,
-								   "pogo-ovp-en", 0, &flags);
-	if (pogo_transport->pogo_ovp_en_gpio < 0) {
-		dev_err(pogo_transport->dev, "Pogo ovp en gpio not found. ret:%d\n",
-			pogo_transport->pogo_ovp_en_gpio);
-		return pogo_transport->pogo_ovp_en_gpio;
-	}
-
-	pogo_transport->pogo_ovp_en_active_state = (flags & OF_GPIO_ACTIVE_LOW) ? 0 : 1;
-
-	ret = devm_gpio_request(pogo_transport->dev, pogo_transport->pogo_ovp_en_gpio,
-				"pogo-ovp-en");
-	if (ret) {
-		dev_err(pogo_transport->dev, "failed to request pogo-ovp-en gpio, ret:%d\n", ret);
-		return ret;
+	if (IS_ERR(pogo_transport->pogo_ovp_en_gpio)) {
+		dev_err(pogo_transport->dev, "failed to request pogo-ovp-en gpio, ret:%ld\n",
+			PTR_ERR(pogo_transport->pogo_ovp_en_gpio));
+		return PTR_ERR(pogo_transport->pogo_ovp_en_gpio);
 	}
 
 	/* Default disable pogo ovp. Set to disable state for pogo_ovp_en */
-	ret = gpio_direction_output(pogo_transport->pogo_ovp_en_gpio,
-				    !pogo_transport->pogo_ovp_en_active_state);
+	ret = gpiod_direction_output(pogo_transport->pogo_ovp_en_gpio, 0);
 	if (ret) {
 		dev_err(pogo_transport->dev, "failed set pogo-ovp-en as output, ret:%d\n", ret);
 		return ret;
@@ -3194,7 +3155,7 @@ static int pogo_transport_probe(struct platform_device *pdev)
 			pogo_transport->accessory_detection_enabled = HALL_ONLY;
 	}
 
-	if (pogo_transport->pogo_acc_gpio > 0) {
+	if (!IS_ERR_OR_NULL(pogo_transport->pogo_acc_gpio)) {
 		pogo_transport->acc_charger_psy_name =
 				(char *)of_get_property(dn, "acc-charger-psy-name", NULL);
 		if (!pogo_transport->acc_charger_psy_name)
@@ -3510,7 +3471,7 @@ static ssize_t acc_detect_debounce_ms_store(struct device *dev, struct device_at
 	if (kstrtouint(buf, 0, &debounce_ms))
 		return -EINVAL;
 
-	ret = gpio_set_debounce(pogo_transport->pogo_acc_gpio, debounce_ms * 1000);
+	ret = gpiod_set_debounce(pogo_transport->pogo_acc_gpio, debounce_ms * 1000);
 	if (ret < 0) {
 		dev_info(pogo_transport->dev, "failed to set debounce, ret:%d\n", ret);
 		pogo_transport->pogo_acc_gpio_debounce_ms = debounce_ms;

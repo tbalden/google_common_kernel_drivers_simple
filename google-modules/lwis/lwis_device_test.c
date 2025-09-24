@@ -29,9 +29,12 @@ static int lwis_test_register_io(struct lwis_device *lwis_dev, struct lwis_io_en
 
 static struct lwis_device_subclass_operations test_vops = {
 	.register_io = lwis_test_register_io,
+	.batch_register_io = NULL,
 	.register_io_barrier = NULL,
 	.device_enable = lwis_test_device_enable,
 	.device_disable = lwis_test_device_disable,
+	.device_resume = NULL,
+	.device_suspend = NULL,
 	.event_enable = NULL,
 	.event_flags_updated = NULL,
 	.close = NULL,

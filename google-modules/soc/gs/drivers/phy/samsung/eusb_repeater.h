@@ -29,6 +29,7 @@
 #include <linux/kernel.h>
 #include <linux/debugfs.h>
 #include <linux/module.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/pinctrl/consumer.h>

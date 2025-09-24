@@ -434,6 +434,7 @@ static int slg51002_pinconf_set(struct pinctrl_dev *pctldev,
 static int slg51002_pinctrl_probe(struct platform_device *pdev)
 {
 	int ret;
+	struct device_node *dp;
 	struct slg51002_pinctrl *slg51002_pctl;
 	struct pinctrl_dev *pctl;
 	u32 ngpios;
@@ -484,18 +485,17 @@ static int slg51002_pinctrl_probe(struct platform_device *pdev)
 
 	slg51002_pctl->gc.base = -1;
 	slg51002_pctl->gc.can_sleep = true;
-	slg51002_pctl->gc.of_node =
-		of_find_node_by_name(pdev->dev.parent->of_node, pdev->name);
 	slg51002_pctl->gc.set_config = gpiochip_generic_config;
 	slg51002_pctl->gc.request = gpiochip_generic_request;
 	slg51002_pctl->gc.free = gpiochip_generic_free;
 
-	if (!slg51002_pctl->gc.of_node) {
+	dp = of_find_node_by_name(pdev->dev.parent->of_node, pdev->name);
+	if (!dp) {
 		dev_err(&pdev->dev, "Failed to find %s DT node\n", pdev->name);
 		return -EINVAL;
 	}
-	if (of_property_read_u32(slg51002_pctl->gc.of_node,
-			"ngpios", &ngpios)) {
+	slg51002_pctl->gc.fwnode = of_node_to_fwnode(dp);
+	if (of_property_read_u32(dp, "ngpios", &ngpios)) {
 		dev_err(&pdev->dev, "Failed to get ngpios from %s DT node\n",
 			pdev->name);
 		return -EINVAL;

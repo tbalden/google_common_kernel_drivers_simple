@@ -13,6 +13,7 @@
 #include <linux/mfd/core.h>
 #include <linux/mfd/slg51002.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regmap.h>
 
 #define SLG51002_CHIP_ID_LEN            3
@@ -583,8 +584,7 @@ static const struct regmap_config slg51002_regmap_config = {
 	.reg_write = slg51002_reg_write,
 };
 
-static int slg51002_i2c_probe(struct i2c_client *client,
-			      const struct i2c_device_id *id)
+static int slg51002_i2c_probe(struct i2c_client *client)
 {
 	struct slg51002_dev *slg51002;
 	int gpio, ret;
@@ -665,7 +665,7 @@ static int slg51002_i2c_probe(struct i2c_client *client,
 		slg51002->chip_buck_pin = -1;
 	}
 
-	/* mandatory property. It wakes the chip from low-power reset state */
+	/* optional property. It wakes the chip from low-power reset state */
 	gpio = of_get_named_gpio(client->dev.of_node, "dlg,cs-gpios", 0);
 	if (gpio_is_valid(gpio)) {
 		ret = devm_gpio_request_one(&client->dev, gpio,
@@ -685,7 +685,7 @@ static int slg51002_i2c_probe(struct i2c_client *client,
 		usleep_range(SLEEP_10000_USEC,
 			     SLEEP_10000_USEC + SLEEP_RANGE_USEC);
 	} else {
-		return gpio;
+		slg51002->chip_cs_pin = -1;
 	}
 
 	i2c_set_clientdata(client, slg51002);
@@ -814,6 +814,32 @@ static const struct of_device_id slg51002_of_match[] = {
 MODULE_DEVICE_TABLE(of, slg51002_of_match);
 #endif /* CONFIG_OF */
 
+static int slg51002_pm_suspend(struct device *dev)
+{
+	struct slg51002_dev *chip;
+
+	chip = dev_get_drvdata(dev);
+	if (chip == NULL)
+		return -EINVAL;
+	timer_delete_sync(&chip->timer);
+	cancel_work_sync(&chip->timeout_work);
+	return slg51002_power_off(chip);
+}
+
+static int slg51002_pm_resume(struct device *dev)
+{
+	struct slg51002_dev *chip;
+
+	chip = dev_get_drvdata(dev);
+	if (chip == NULL)
+		return -EINVAL;
+	mod_timer(&chip->timer,
+		jiffies + msecs_to_jiffies(TIMER_EXPIRED_MSEC));
+	return 0;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(slg51002_pm_ops, slg51002_pm_suspend, slg51002_pm_resume);
+
 static struct i2c_driver slg51002_i2c_driver = {
 	.driver = {
 		.name = "slg51002",
@@ -821,6 +847,7 @@ static struct i2c_driver slg51002_i2c_driver = {
 #if defined(CONFIG_OF)
 		.of_match_table = of_match_ptr(slg51002_of_match),
 #endif /* CONFIG_OF */
+		.pm = &slg51002_pm_ops,
 	},
 	.probe = slg51002_i2c_probe,
 	.remove = slg51002_i2c_remove,

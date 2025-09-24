@@ -29,7 +29,7 @@
 
 #include "max_m5.h"
 
-#ifdef CONFIG_DEBUG_FS
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 #include <linux/debugfs.h>
 #endif
 
@@ -159,7 +159,7 @@ static int mem16test(u16 *data, u16 code, int count)
 /* load custom model b/137037210 */
 static int max_m5_update_custom_model(struct max_m5_data *m5_data)
 {
-	int retries, ret, same = 0;
+	int retries, ret;
 	bool success;
 	u16 *data;
 
@@ -215,6 +215,7 @@ static int max_m5_update_custom_model(struct max_m5_data *m5_data)
 
 	/* lock and verify lock */
 	for (retries = 3; retries > 0; retries--) {
+		int same;
 
 		ret = max_m5_model_lock(m5_data->regmap->regmap, true);
 		if (ret < 0) {
@@ -238,11 +239,7 @@ static int max_m5_update_custom_model(struct max_m5_data *m5_data)
 	}
 
 	kfree(data);
-
-	if (same == 0)
-		return -EIO;
-
-	return ret;
+	return 0;
 }
 
 /* Step 7: Write custom parameters */
@@ -441,26 +438,6 @@ int max_m5_needs_reset_model_data(const struct max_m5_data *m5_data)
 		return 1;
 
 	return 0;
-}
-
-bool max_m5_check_lock(struct max_m5_data *m5_data)
-{
-	u16 data[2] = { 0 };
-	int ret;
-
-	ret = regmap_raw_read(m5_data->regmap->regmap, MAX_M5_UNLOCK_MODEL_ACCESS,
-			      data, sizeof(data));
-	if (ret < 0)
-		return true;
-
-	if (data[0] != 0x0 || data[1] != 0x0) {
-		dev_err(m5_data->dev, "FG UNLOCK: %#x=%#x, %#x=%#x",
-			MAX_M5_UNLOCK_MODEL_ACCESS, data[0],
-			MAX_M5_UNLOCK_MODEL_ACCESS + 1, data[1]);
-		return false;
-	}
-
-	return true;
 }
 
 /* convert taskperiod to the scaling factor for capacity */
@@ -1712,7 +1689,7 @@ int max_m5_regmap_init(struct maxfg_regmap *regmap, struct i2c_client *clnt)
  *  - before the model data is loaded using max1720x_model_load,
  *    these values must be updated based on aafv.
  */
-void max_m5_model_apply_aaf_fullsoc(struct max_m5_data *m5_data, const struct aafv_fg_config *cfg)
+void max_m5_model_apply_aafv_fullsoc(struct max_m5_data *m5_data, const struct aafv_fg_config *cfg)
 {
 	struct max_m5_custom_parameters *cp = &m5_data->parameters;
 

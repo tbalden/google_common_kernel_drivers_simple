@@ -2,7 +2,7 @@
 /*
  * Synaptics TouchCom touchscreen driver
  *
- * Copyright (C) 2017-2020 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2017-2024 Synaptics Incorporated. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -29,7 +29,7 @@
  * DOLLARS.
  */
 
-/*
+/**
  * @file syna_tcm2_sysfs.c
  *
  * This file implements sysfs attributes in the reference driver.
@@ -43,343 +43,30 @@
 #ifdef HAS_TESTING_FEATURE
 #include "syna_tcm2_testing.h"
 #endif
+#ifdef HAS_TDDI_REFLASH_FEATURE
+#include "synaptics_touchcom_func_reflash_tddi.h"
+#endif
+#ifdef HAS_REFLASH_FEATURE
+#include "synaptics_touchcom_func_reflash.h"
+#endif
+#include "syna_tcm2_sysfs.h"
 
-/* g_sysfs_dir represents the root directory of sysfs nodes being created
- */
-static struct kobject *g_sysfs_dir;
 
-/*
- * syna_get_fw_info()
- *
- * Output the device and driver information.
- *
- * @param
- *    [ in] tcm: the driver handle
- *    [out] buf:  string buffer for the firmware and the driver information
- *    [ in] buf_size: size of the buf
- *
- * @return
- *    on success, number of characters being output;
- *    otherwise, negative value on error.
- */
-ssize_t syna_get_fw_info(struct syna_tcm *tcm, char *buf, size_t buf_size)
-{
-	int retval;
-	int i;
-	unsigned int count;
-	struct tcm_dev *tcm_dev;
+#define SYSFS_ROOT_DIR "sysfs"
+#define SYSFS_SUB_DIR "utility"
 
-	tcm_dev = tcm->tcm_dev;
 
-	count = 0;
-
-	retval = scnprintf(buf, buf_size - count,
-			"Driver version:     %d.%s\n",
-			SYNAPTICS_TCM_DRIVER_VERSION,
-			SYNAPTICS_TCM_DRIVER_SUBVER);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	retval = scnprintf(buf, buf_size - count,
-			"Core lib version:   %d.%02d\n\n",
-			(unsigned char)(SYNA_TCM_CORE_LIB_VERSION >> 8),
-			(unsigned char)SYNA_TCM_CORE_LIB_VERSION);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	if (!tcm->is_connected) {
-		retval = scnprintf(buf, buf_size - count,
-				"Device is NOT connected\n");
-		count += retval;
-		retval = count;
-		goto exit;
-	}
-
-	if (tcm->pwr_state == BARE_MODE) {
-		retval = count;
-		goto exit;
-	}
-
-	retval = scnprintf(buf, buf_size - count,
-			"TouchComm version:  %d\n", tcm_dev->id_info.version);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	switch (tcm_dev->id_info.mode) {
-	case MODE_APPLICATION_FIRMWARE:
-		retval = scnprintf(buf, buf_size - count,
-				"Firmware mode:      Application Firmware, 0x%02x\n",
-				tcm_dev->id_info.mode);
-		if (retval < 0)
-			goto exit;
-		break;
-	case MODE_BOOTLOADER:
-		retval = scnprintf(buf, buf_size - count,
-				"Firmware mode:      Bootloader, 0x%02x\n",
-				tcm_dev->id_info.mode);
-		if (retval < 0)
-			goto exit;
-		break;
-	case MODE_ROMBOOTLOADER:
-		retval = scnprintf(buf, buf_size - count,
-				"Firmware mode:      Rom Bootloader, 0x%02x\n",
-				tcm_dev->id_info.mode);
-		if (retval < 0)
-			goto exit;
-		break;
-	default:
-		retval = scnprintf(buf, buf_size - count,
-				"Firmware mode:      Mode 0x%02x\n",
-				tcm_dev->id_info.mode);
-		if (retval < 0)
-			goto exit;
-		break;
-	}
-	buf += retval;
-	count += retval;
-
-	retval = scnprintf(buf, buf_size - count,
-			"Part number:        %s", tcm_dev->id_info.part_number);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	retval = scnprintf(buf, buf_size - count, "\n");
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	retval = scnprintf(buf, buf_size - count,
-			"Packrat number:     %d\n\n", tcm_dev->packrat_number);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	if (tcm_dev->id_info.mode != MODE_APPLICATION_FIRMWARE) {
-		retval = count;
-		goto exit;
-	}
-
-	retval = scnprintf(buf, buf_size - count, "Config ID:          ");
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	for (i = 0; i < MAX_SIZE_CONFIG_ID; i++) {
-		retval = scnprintf(buf, buf_size - count,
-			"0x%2x ", tcm_dev->config_id[i]);
-		if (retval < 0)
-			goto exit;
-		buf += retval;
-		count += retval;
-	}
-
-	retval = scnprintf(buf, buf_size - count, "\n");
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	retval = scnprintf(buf, buf_size - count,
-		"Max X & Y:          %d, %d\n", tcm_dev->max_x, tcm_dev->max_y);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	retval = scnprintf(buf, buf_size - count,
-		"Num of objects:     %d\n", tcm_dev->max_objects);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	retval = scnprintf(buf, buf_size - count,
-		"Num of cols & rows: %d, %d\n", tcm_dev->cols, tcm_dev->rows);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	retval = snprintf(buf, buf_size - count,
-		"Max. Read Size:     %d bytes\n", tcm_dev->max_rd_size);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	retval = snprintf(buf, buf_size - count,
-		"Max. Write Size:    %d bytes\n", tcm_dev->max_wr_size);
-	if (retval < 0)
-		goto exit;
-
-	buf += retval;
-	count += retval;
-
-	retval = count;
-
-exit:
-	if (retval < 0)
-		LOGE("Failed to get firmware info");
-
-	return retval;
-}
-/*
- * syna_sysfs_info_show()
- *
- * Attribute to show the device and driver information to the console.
+/**
+ * @brief  Debugging attribute to set int2.
  *
  * @param
- *    [ in] kobj:  an instance of kobj
- *    [ in] attr:  an instance of kobj attribute structure
- *    [out] buf:  string buffer shown on console
- *
- * @return
- *    on success, number of characters being output;
- *    otherwise, negative value on error.
- */
-static ssize_t syna_sysfs_info_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	int retval = 0;
-	struct device *p_dev;
-	struct kobject *p_kobj;
-	struct syna_tcm *tcm;
-
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
-	tcm = dev_get_drvdata(p_dev);
-
-	if (!tcm || !tcm->tcm_dev)
-		return -ENODEV;
-
-	retval = syna_tcm_identify(tcm->tcm_dev, &tcm->tcm_dev->id_info);
-	if (retval < 0) {
-		LOGE("Fail to get identification\n");
-		return retval;
-	}
-
-	/* collect app info containing most of sensor information */
-	retval = syna_tcm_get_app_info(tcm->tcm_dev, &tcm->tcm_dev->app_info);
-	if (retval < 0) {
-		LOGE("Fail to get application info\n");
-		return retval;
-	}
-
-	return syna_get_fw_info(tcm, buf, PAGE_SIZE);
-}
-
-static struct kobj_attribute kobj_attr_info =
-	__ATTR(info, 0444, syna_sysfs_info_show, NULL);
-
-/*
- * syna_sysfs_irq_en_store()
- *
- * Attribute to disable/enable the irq
- *
- * @param
- *    [ in] kobj:  an instance of kobj
- *    [ in] attr:  an instance of kobj attribute structure
+ *    [ in] kobj:  handle of kernel object
+ *    [ in] attr:  handle of kernel attribute
  *    [ in] buf:   string buffer input
  *    [ in] count: size of buffer input
  *
  * @return
- *    on success, return count; otherwise, return error code
- */
-static ssize_t syna_sysfs_irq_en_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	int retval = 0;
-	unsigned int input;
-	struct device *p_dev;
-	struct kobject *p_kobj;
-	struct syna_tcm *tcm;
-
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
-	tcm = dev_get_drvdata(p_dev);
-
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
-
-	if (!tcm->hw_if->ops_enable_irq)
-		return 0;
-
-	if (!tcm->is_connected) {
-		LOGW("Device is NOT connected\n");
-		return count;
-	}
-
-	if (tcm->pwr_state == BARE_MODE) {
-		LOGN("In bare connection mode, no irq support\n");
-		retval = count;
-		goto exit;
-	}
-
-	/* disable the interrupt line */
-	if (input == 0) {
-		retval = tcm->hw_if->ops_enable_irq(tcm->hw_if, false);
-		if (retval < 0) {
-			LOGE("Fail to disable interrupt\n");
-			goto exit;
-		}
-	} else if (input == 1) {
-	/* enable the interrupt line */
-		retval = tcm->hw_if->ops_enable_irq(tcm->hw_if, true);
-		if (retval < 0) {
-			LOGE("Fail to enable interrupt\n");
-			goto exit;
-		}
-	} else {
-		LOGW("Unknown option %d (0:disable / 1:enable)\n", input);
-		retval = -EINVAL;
-		goto exit;
-	}
-
-	retval = count;
-
-exit:
-	return retval;
-}
-
-static struct kobj_attribute kobj_attr_irq_en =
-	__ATTR(irq_en, 0220, NULL, syna_sysfs_irq_en_store);
-
-/*
- * syna_sysfs_int2_store()
- *
- * Attribute to set int2.
- *
- * @param
- *    [ in] kobj:  an instance of kobj
- *    [ in] attr:  an instance of kobj attribute structure
- *    [ in] buf:   string buffer input
- *    [ in] count: size of buffer input
- *
- * @return
- *    on success, return count; otherwise, return error code
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static ssize_t syna_sysfs_int2_store(struct kobject *kobj,
 		struct kobj_attribute *attr, const char *buf, size_t count)
@@ -388,11 +75,9 @@ static ssize_t syna_sysfs_int2_store(struct kobject *kobj,
 	u16 config;
 	unsigned int input;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 
 	if (kstrtouint(buf, 10, &input))
@@ -420,49 +105,38 @@ static ssize_t syna_sysfs_int2_store(struct kobject *kobj,
 		goto exit;
 	}
 
-	syna_tcm_set_dynamic_config(tcm->tcm_dev,
-			DC_INT2_PRODUCTION_CMD,
-			config,
-			RESP_IN_ATTN);
+	syna_tcm_set_dynamic_config(tcm->tcm_dev, DC_INT2_PRODUCTION_CMD,
+		config, CMD_RESPONSE_IN_ATTN);
 
 exit:
 	retval = count;
 	return retval;
 }
-
-/*
- * syna_sysfs_int2_show()
- *
- * Attribute to show the int2 status.
+/**
+ * @brief  Debugging attribute to show the int2 status.
  *
  * @param
- *    [ in] kobj:  an instance of kobj
- *    [ in] attr:  an instance of kobj attribute structure
- *    [out] buf:  string buffer shown on console
+ *    [ in] kobj:  handle of kernel object
+ *    [ in] attr:  handle of kernel attribute
+ *    [ in] buf:   string buffer input
+ *    [ in] count: size of buffer input
  *
  * @return
- *    on success, number of characters being output;
- *    otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static ssize_t syna_sysfs_int2_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
+	struct kobj_attribute *attr, char *buf)
 {
 	int retval = 0;
 	u16 config;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 
-	tcm->hw_if->ops_enable_irq(tcm->hw_if, false);
-
 	retval = syna_tcm_get_dynamic_config(tcm->tcm_dev, DC_INT2_PRODUCTION_CMD,
-			&config, RESP_IN_POLLING);
-
-	tcm->hw_if->ops_enable_irq(tcm->hw_if, true);
+			&config, tcm->tcm_dev->msg_data.command_polling_time);
 
 	if (retval < 0) {
 		retval = scnprintf(buf, PAGE_SIZE, "Read failure.\n");
@@ -483,33 +157,35 @@ static ssize_t syna_sysfs_int2_show(struct kobject *kobj,
 static struct kobj_attribute kobj_attr_int2 =
 	__ATTR(int2, 0644, syna_sysfs_int2_show, syna_sysfs_int2_store);
 
-/*
- * syna_sysfs_reset_store()
- *
- * Attribute to issue a reset.
- * "1" for a sw reset; "2" for a hardware reset
+/**
+ * @brief  Debugging attribute to issue a reset.
+ *         Parameters
+ *            1: for a sw reset
+ *            2: for a hardware reset
  *
  * @param
- *    [ in] kobj:  an instance of kobj
- *    [ in] attr:  an instance of kobj attribute structure
+ *    [ in] kobj:  handle of kernel object
+ *    [ in] attr:  handle of kernel attribute
  *    [ in] buf:   string buffer input
  *    [ in] count: size of buffer input
  *
  * @return
- *    on success, return count; otherwise, return error code
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static ssize_t syna_sysfs_reset_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	int retval = 0;
 	unsigned int input;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
+	struct syna_hw_attn_data *attn;
+	unsigned char code;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
+
+	attn = &tcm->hw_if->bdata_attn;
 
 	if (kstrtouint(buf, 10, &input))
 		return -EINVAL;
@@ -524,20 +200,14 @@ static ssize_t syna_sysfs_reset_store(struct kobject *kobj,
 			LOGE("No hardware reset support\n");
 			goto exit;
 		}
-
 		tcm->hw_if->ops_hw_reset(tcm->hw_if);
+		/* manually read in the event after reset if attn is disabled */
+		if (!attn->irq_enabled)
+			syna_tcm_get_event_data(tcm->tcm_dev, &code, NULL);
 
-		/* enable the interrupt to process the identify report
-		 * after the hardware reset.
-		 */
-		if (!tcm->hw_if->bdata_attn.irq_enabled) {
-			tcm->hw_if->ops_enable_irq(tcm->hw_if, true);
-			/* disable it and back to original status */
-			syna_pal_sleep_ms(100);
-			tcm->hw_if->ops_enable_irq(tcm->hw_if, false);
-		}
 	} else if (input == 1) {
-		retval = syna_tcm_reset(tcm->tcm_dev);
+		retval = syna_tcm_reset(tcm->tcm_dev,
+			tcm->tcm_dev->msg_data.command_polling_time);
 		if (retval < 0) {
 			LOGE("Fail to do reset\n");
 			goto exit;
@@ -566,46 +236,64 @@ exit:
 static struct kobj_attribute kobj_attr_reset =
 	__ATTR(reset, 0220, NULL, syna_sysfs_reset_store);
 
-
-/*
- * syna_sysfs_pwr_store()
- *
- * Attribute to change the power state.
+/**
+ * @brief  Debugging attribute to disable/enable the irq
  *
  * @param
- *    [ in] kobj:  an instance of kobj
- *    [ in] attr:  an instance of kobj attribute structure
+ *    [ in] kobj:  handle of kernel object
+ *    [ in] attr:  handle of kernel attribute
  *    [ in] buf:   string buffer input
  *    [ in] count: size of buffer input
  *
  * @return
- *    on success, return count; otherwise, return error code
+ *    0 or positive value in case of success, a negative value otherwise.
  */
-static ssize_t syna_sysfs_pwr_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t syna_sysfs_irq_en_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	int retval = 0;
+	unsigned int input;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
+	struct tcm_hw_platform *hw;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
+	hw = &tcm->hw_if->hw_platform;
+
+	if (kstrtouint(buf, 10, &input))
+		return -EINVAL;
+
+	if (!hw || !hw->ops_enable_attn)
+		return 0;
 
 	if (!tcm->is_connected) {
 		LOGW("Device is NOT connected\n");
 		return count;
 	}
 
-	if (strncmp(buf, "resume", 6) == 0) {
-		if (tcm->dev_resume)
-			tcm->dev_resume(p_dev);
-	} else if (strncmp(buf, "suspend", 7) == 0) {
-		if (tcm->dev_suspend)
-			tcm->dev_suspend(p_dev);
+	if (tcm->pwr_state == BARE_MODE) {
+		LOGN("In bare connection mode, no irq support\n");
+		retval = count;
+		goto exit;
+	}
+
+	/* disable the interrupt line */
+	if (input == 0) {
+		retval = hw->ops_enable_attn(hw, false);
+		if (retval < 0) {
+			LOGE("Fail to disable interrupt\n");
+			goto exit;
+		}
+	} else if (input == 1) {
+	/* enable the interrupt line */
+		retval = hw->ops_enable_attn(hw, true);
+		if (retval < 0) {
+			LOGE("Fail to enable interrupt\n");
+			goto exit;
+		}
 	} else {
-		LOGW("Unknown option %s\n", buf);
+		LOGW("Unknown option %d (0:disable / 1:enable)\n", input);
 		retval = -EINVAL;
 		goto exit;
 	}
@@ -616,10 +304,123 @@ exit:
 	return retval;
 }
 
-static struct kobj_attribute kobj_attr_pwr =
-	__ATTR(power_state, 0220, NULL, syna_sysfs_pwr_store);
+static struct kobj_attribute kobj_attr_irq_en =
+	__ATTR(irq_en, 0220, NULL, syna_sysfs_irq_en_store);
 
-/*
+
+/* Definitions of debugging sysfs attributes */
+static struct attribute *attrs_debug[] = {
+	&kobj_attr_reset.attr,
+	&kobj_attr_irq_en.attr,
+	NULL,
+};
+
+static struct attribute_group attr_debug_group = {
+	.attrs = attrs_debug,
+};
+
+/**
+ * @brief  Attribute to enable/disable the debugging attributes.
+ *
+ * @param
+ *    [ in] kobj:  handle of kernel object
+ *    [ in] attr:  handle of kernel attribute
+ *    [ in] buf:   string buffer input
+ *    [ in] count: size of buffer input
+ *
+ * @return
+ *    0 or positive value in case of success, a negative value otherwise.
+ */
+static ssize_t syna_sysfs_debug_store(struct kobject *kobj,
+	struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	unsigned int input;
+	struct device *p_dev;
+	struct syna_tcm *tcm;
+
+	p_dev = container_of(kobj->parent, struct device, kobj);
+	tcm = dev_get_drvdata(p_dev);
+
+	if (kstrtouint(buf, 10, &input))
+		return -EINVAL;
+
+	if ((input == 1) && (!tcm->sysfs_dir_utility)) {
+		tcm->sysfs_debug = input;
+		tcm->sysfs_dir_utility = kobject_create_and_add(SYSFS_SUB_DIR, tcm->sysfs_dir);
+		if (!tcm->sysfs_dir_utility) {
+			LOGE("Fail to create sysfs sub directory for debugging\n");
+			return -ENOTDIR;
+		}
+
+		if (sysfs_create_group(tcm->sysfs_dir_utility, &attr_debug_group) < 0) {
+			LOGE("Fail to create sysfs debug group\n");
+			kobject_put(tcm->sysfs_dir_utility);
+			return -ENOTDIR;
+		}
+	} else if (input == 0) {
+		tcm->sysfs_debug = input;
+		if (tcm->sysfs_dir_utility) {
+			sysfs_remove_group(tcm->sysfs_dir_utility, &attr_debug_group);
+			kobject_put(tcm->sysfs_dir_utility);
+		}
+	} else {
+		LOGW("Unknown option %d (0:disable / 1:enable)\n", input);
+		return -EINVAL;
+	}
+
+	return count;
+}
+
+static struct kobj_attribute kobj_attr_debug =
+	__ATTR(debug, 0220, NULL, syna_sysfs_debug_store);
+
+/**
+ * @brief  Attribute to show the device and driver information to the console.
+ *
+ * @param
+ *    [ in] kobj:  handle of kernel object
+ *    [ in] attr:  handle of kernel attribute
+ *    [out] buf:  string buffer shown on console
+ *
+ * @return
+ *    string output in case of success, a negative value otherwise.
+ */
+static ssize_t syna_sysfs_info_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	int retval = 0;
+	struct device *p_dev;
+	struct syna_tcm *tcm;
+
+
+	p_dev = container_of(kobj->parent, struct device, kobj);
+	tcm = dev_get_drvdata(p_dev);
+
+	if (!tcm || !tcm->tcm_dev)
+		return -ENODEV;
+
+	retval = syna_tcm_identify(tcm->tcm_dev, &tcm->tcm_dev->id_info,
+		tcm->tcm_dev->msg_data.command_polling_time);
+	if (retval < 0) {
+		LOGE("Fail to get identification\n");
+		return retval;
+	}
+
+	/* collect app info containing most of sensor information */
+	retval = syna_tcm_get_app_info(tcm->tcm_dev, &tcm->tcm_dev->app_info,
+		tcm->tcm_dev->msg_data.command_polling_time);
+	if (retval < 0) {
+		LOGE("Fail to get application info\n");
+		return retval;
+	}
+
+	return syna_get_fw_info(tcm, buf, PAGE_SIZE);
+}
+
+static struct kobj_attribute kobj_attr_info =
+	__ATTR(info, 0444, syna_sysfs_info_show, NULL);
+
+/**
  * syna_sysfs_scan_mode_store()
  *
  * Attribute to set different scan mode.
@@ -644,12 +445,10 @@ static ssize_t syna_sysfs_scan_mode_store(struct kobject *kobj,
 	unsigned int input;
 	unsigned char command = 0;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 	struct syna_hw_interface *hw_if;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 	hw_if = tcm->hw_if;
 
@@ -665,7 +464,8 @@ static ssize_t syna_sysfs_scan_mode_store(struct kobject *kobj,
 	if (hw_if->ops_hw_reset) {
 		hw_if->ops_hw_reset(hw_if);
 	} else {
-		retval = syna_tcm_reset(tcm->tcm_dev);
+		retval = syna_tcm_reset(tcm->tcm_dev,
+			tcm->tcm_dev->msg_data.command_polling_time);
 		if (retval < 0) {
 			LOGE("Fail to do reset\n");
 			goto exit;
@@ -677,7 +477,7 @@ static ssize_t syna_sysfs_scan_mode_store(struct kobject *kobj,
 	} else if (input == 1 || input == 3) {
 		command = DC_FORCE_DOZE_MODE;
 	} else {
-		LOGW("Unsupport command %u\n", input);
+		LOGW("Un-support command %u\n", input);
 		goto exit;
 	}
 
@@ -685,7 +485,7 @@ static ssize_t syna_sysfs_scan_mode_store(struct kobject *kobj,
 		retval = syna_tcm_set_dynamic_config(tcm->tcm_dev,
 				DC_ENABLE_WAKEUP_GESTURE_MODE,
 				1,
-				RESP_IN_ATTN);
+				tcm->tcm_dev->msg_data.command_polling_time);
 		if (retval < 0) {
 			LOGE("Fail to enable wakeup gesture via DC command\n");
 			goto exit;
@@ -695,7 +495,7 @@ static ssize_t syna_sysfs_scan_mode_store(struct kobject *kobj,
 	retval = syna_tcm_set_dynamic_config(tcm->tcm_dev,
 			command,
 			1,
-			RESP_IN_ATTN);
+			tcm->tcm_dev->msg_data.command_polling_time);
 	if (retval < 0) {
 		LOGE("Fail to set DC command %d\n", command);
 		goto exit;
@@ -711,7 +511,7 @@ static struct kobj_attribute kobj_attr_scan_mode =
 	__ATTR(scan_mode, 0220, NULL, syna_sysfs_scan_mode_store);
 
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
-/*
+/**
  * syna_sysfs_force_active_store()
  *
  * Attribute to set different scan mode.
@@ -735,13 +535,11 @@ static ssize_t syna_sysfs_force_active_store(struct kobject *kobj,
 	int retval = 0;
 	unsigned char input;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 	bool active;
 	u32 ref = 0;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 
 	if (kstrtou8(buf, 16, &input))
@@ -800,121 +598,152 @@ static struct kobj_attribute kobj_attr_force_active =
 	__ATTR(force_active, 0220, NULL, syna_sysfs_force_active_store);
 #endif
 
-/*
- * syna_sysfs_get_raw_data_show()
+/**
+ * syna_sysfs_get_raw_data_read()
  *
- * Attribute to show the rawdata.
+ * Attribute to show the raw data.
  *
  * @param
- *    [ in] kobj:  an instance of kobj
- *    [ in] attr:  an instance of kobj attribute structure
- *    [out] buf:  string buffer shown on console
+ *    [ in] fp:     file pointer
+ *    [ in] kobj:   an instance of kobj
+ *    [ in] battr:  an instance of bin attribute structure
+ *    [ in] buf:    string buffer input
+ *    [ in] offset: starting offset
+ *    [ in] count:  size of buffer input
  *
  * @return
  *    on success, number of characters being output;
  *    otherwise, negative value on error.
  */
-static ssize_t syna_sysfs_get_raw_data_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
+#define STR_BUF_LENGTH (PAGE_SIZE * 2)
+static char syna_str_buf[STR_BUF_LENGTH];
+static loff_t syna_output_str_length;
+static ssize_t syna_sysfs_get_raw_data_read(struct file *fp, struct kobject *kobj,
+		struct bin_attribute *battr, char *buf,
+		loff_t offset, size_t count)
 {
-	int retval = 0;
-	unsigned int count = 0;
+	u64 index = 0;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 	struct tcm_dev *tcm_dev;
 	int i, j, mutual_length;
 	bool is_signed;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 	tcm_dev = tcm->tcm_dev;
 	mutual_length = tcm_dev->cols * tcm_dev->rows;
 	is_signed = (tcm->raw_data_report_code == REPORT_DELTA);
 
+	if (offset > 0)
+		goto output_string;
+
+	syna_output_str_length = 0;
+
 	if (wait_for_completion_timeout(&tcm->raw_data_completion,
 					msecs_to_jiffies(500)) == 0) {
 		complete_all(&tcm->raw_data_completion);
-		count += scnprintf(buf + count, PAGE_SIZE - count, "Timeout\n");
-		goto exit;
+		index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index, "Timeout\n");
+		goto skip_data;
 	}
 
 	if (!tcm->raw_data_buffer) {
-		count += scnprintf(buf + count, PAGE_SIZE - count,
+		index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index,
 				   "Raw data buffer is NULL.\n");
-		goto exit;
+		goto skip_data;
 	}
 
 	syna_pal_mutex_lock(&tcm->raw_data_mutex);
 	/* Mutual raw. */
-	count += scnprintf(buf + count, PAGE_SIZE - count, "Mutual\n");
+	index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index, "Mutual\n");
 	for (i = 0; i < tcm_dev->rows; i++) {
 		for (j = 0; j < tcm_dev->cols; j++) {
-			count += scnprintf(buf + count, PAGE_SIZE - count,
+			index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index,
 				(is_signed) ? "%d " : "%u ",
 				(is_signed) ? tcm->raw_data_buffer[i * tcm_dev->cols + j] :
 					      (u16) (tcm->raw_data_buffer[i * tcm_dev->cols + j]));
 		}
-		count += scnprintf(buf + count, PAGE_SIZE - count, "\n");
+		index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index, "\n");
 	}
 
 	/* Self raw. */
-	count += scnprintf(buf + count, PAGE_SIZE - count, "Self\n");
+	index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index, "Self\n");
 	for (i = 0; i < tcm_dev->cols; i++) {
-		count += scnprintf(buf + count, PAGE_SIZE - count,
+		index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index,
 			(is_signed) ? "%d " : "%u ",
 			(is_signed) ? tcm->raw_data_buffer[mutual_length + i] :
 				      (u16) (tcm->raw_data_buffer[mutual_length + i]));
 	}
-	count += scnprintf(buf + count, PAGE_SIZE - count, "\n");
+	index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index, "\n");
 
 	for (j = 0; j < tcm_dev->rows; j++) {
-		count += scnprintf(buf + count, PAGE_SIZE - count,
+		index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index,
 			(is_signed) ? "%d " : "%u ",
 			(is_signed) ? tcm->raw_data_buffer[mutual_length + i + j] :
 				      (u16) (tcm->raw_data_buffer[mutual_length + i + j]));
 	}
-	count += scnprintf(buf + count, PAGE_SIZE - count, "\n");
+	index += scnprintf(syna_str_buf + index, STR_BUF_LENGTH - index, "\n");
 
 	syna_pal_mutex_unlock(&tcm->raw_data_mutex);
 
 	LOGI("Got raw data, report code %#x\n", tcm->raw_data_report_code);
 
-exit:
-	retval = count;
-	syna_tcm_set_dynamic_config(tcm->tcm_dev, DC_DISABLE_DOZE, 0, RESP_IN_ATTN);
-	syna_tcm_enable_report(tcm_dev, tcm->raw_data_report_code, false, RESP_IN_ATTN);
-	return retval;
+skip_data:
+	syna_output_str_length = index;
+
+output_string:
+	if (syna_output_str_length > PAGE_SIZE && count >= PAGE_SIZE)
+		index = PAGE_SIZE;
+	else
+		index = min((u64) count, (u64) syna_output_str_length);
+
+	LOGI("remaining length: %lld, offset: %lld.\n", syna_output_str_length, offset);
+
+	memcpy(buf, syna_str_buf + offset, index);
+
+	syna_output_str_length -= index;
+
+	if (offset == 0) {
+		syna_tcm_set_dynamic_config(tcm->tcm_dev, DC_DISABLE_DOZE, 0,
+				CMD_RESPONSE_IN_ATTN);
+		syna_tcm_enable_report(tcm_dev, tcm->raw_data_report_code, false,
+				CMD_RESPONSE_IN_ATTN);
+	}
+	return index;
 }
 
-/*
- * syna_sysfs_get_raw_data_store()
+/**
+ * syna_sysfs_get_raw_data_write()
  *
- * Attribute to enable the rawdata report type.
+ * Attribute to enable the raw data report type.
  *
  * @param
- *    [ in] kobj:  an instance of kobj
- *    [ in] attr:  an instance of kobj attribute structure
- *    [ in] buf:   string buffer input
- *    [ in] count: size of buffer input
+ *    [ in] fp:     file pointer
+ *    [ in] kobj:   an instance of kobj
+ *    [ in] battr:  an instance of bin attribute structure
+ *    [ in] buf:    string buffer input
+ *    [ in] offset: starting offset
+ *    [ in] count:  size of buffer input
  *
  * @return
  *    on success, return count; otherwise, return error code
  */
-static ssize_t syna_sysfs_get_raw_data_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t syna_sysfs_get_raw_data_write(struct file *fp, struct kobject *kobj,
+		struct bin_attribute *battr, char *buf,
+		loff_t offset, size_t count)
 {
 	int retval = count;
 	unsigned char input;
 	unsigned char report_code;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
+	const unsigned char REPORT_BASELINE = 0x14;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
+
+	if (offset != 0)
+		return count;
 
 	if (kstrtou8(buf, 16, &input))
 		return -EINVAL;
@@ -937,20 +766,21 @@ static ssize_t syna_sysfs_get_raw_data_store(struct kobject *kobj,
 
 	LOGI("Enable raw data, report code %#x\n", report_code);
 
-	syna_tcm_set_dynamic_config(tcm->tcm_dev, DC_DISABLE_DOZE, 1, RESP_IN_ATTN);
+	syna_tcm_set_dynamic_config(tcm->tcm_dev, DC_DISABLE_DOZE, 1, CMD_RESPONSE_IN_ATTN);
 
 	tcm->raw_data_report_code = report_code;
-	syna_tcm_enable_report(tcm->tcm_dev, report_code, true, RESP_IN_ATTN);
+	syna_tcm_enable_report(tcm->tcm_dev, report_code, true, CMD_RESPONSE_IN_ATTN);
 	reinit_completion(&tcm->raw_data_completion);
 
 exit:
 	return retval;
 }
 
-static struct kobj_attribute kobj_attr_get_raw_data =
-	__ATTR(get_raw_data, 0644, syna_sysfs_get_raw_data_show, syna_sysfs_get_raw_data_store);
+static struct bin_attribute bin_attr_get_raw_data =
+	__BIN_ATTR(get_raw_data, 0644, syna_sysfs_get_raw_data_read,
+	syna_sysfs_get_raw_data_write, 0);
 
-/*
+/**
  * syna_sysfs_high_sensitivity_show()
  *
  * Attribute to show current sensitivity mode.
@@ -967,21 +797,16 @@ static struct kobj_attribute kobj_attr_get_raw_data =
 static ssize_t syna_sysfs_high_sensitivity_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	int retval = 0;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 
-	retval = scnprintf(buf, PAGE_SIZE, "%d\n", tcm->high_sensitivity_mode);
-
-	return retval;
+	return scnprintf(buf, PAGE_SIZE, "%d\n", tcm->high_sensitivity_mode);
 }
 
-/*
+/**
  * syna_sysfs_high_sensitivity_store()
  *
  * Attribute to set high sensitivity mode.
@@ -1001,11 +826,9 @@ static ssize_t syna_sysfs_high_sensitivity_store(struct kobject *kobj,
 	int retval = count;
 	bool input;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 
 	if (kstrtobool(buf, &input)) {
@@ -1023,7 +846,7 @@ static ssize_t syna_sysfs_high_sensitivity_store(struct kobject *kobj,
 	retval = syna_tcm_set_dynamic_config(tcm->tcm_dev,
 				DC_HIGH_SENSITIVITY_MODE,
 				input,
-				RESP_IN_ATTN);
+				CMD_RESPONSE_IN_ATTN);
 
 	LOGI("%s high sensitivity mode.\n",
 	     tcm->high_sensitivity_mode ? "Enable" : "Disable");
@@ -1037,7 +860,7 @@ static struct kobj_attribute kobj_attr_high_sensitivity =
 	__ATTR(high_sensitivity, 0644, syna_sysfs_high_sensitivity_show,
 	       syna_sysfs_high_sensitivity_store);
 
-/*
+/**
  * syna_sysfs_fw_grip_show()
  *
  * Attribute to show current grip suppression mode.
@@ -1054,21 +877,15 @@ static struct kobj_attribute kobj_attr_high_sensitivity =
 static ssize_t syna_sysfs_fw_grip_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	int retval = 0;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
-
-	retval = scnprintf(buf, PAGE_SIZE, "%u\n", tcm->enable_fw_grip);
-
-	return retval;
+	return scnprintf(buf, PAGE_SIZE, "%u\n", tcm->enable_fw_grip);
 }
 
-/*
+/**
  * syna_sysfs_fw_grip_store()
  *
  * Attribute to set grip suppression mode.
@@ -1092,11 +909,9 @@ static ssize_t syna_sysfs_fw_grip_store(struct kobject *kobj,
 	int retval = count;
 	u8 input;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 
 	if (kstrtou8(buf, 16, &input)) {
@@ -1112,9 +927,9 @@ static ssize_t syna_sysfs_fw_grip_store(struct kobject *kobj,
 #endif
 
 	retval = syna_tcm_set_dynamic_config(tcm->tcm_dev,
-			DC_ENABLE_GRIP_SUPPRESSION,
-			(input & 0x01),
-			RESP_IN_ATTN);
+				DC_ENABLE_GRIP_SUPPRESSION,
+				(input & 0x01),
+				CMD_RESPONSE_IN_ATTN);
 
 	LOGI("Set fw grip suppression mode %u.\n", tcm->enable_fw_grip);
 
@@ -1127,7 +942,7 @@ static struct kobj_attribute kobj_attr_fw_grip =
 	__ATTR(fw_grip, 0644, syna_sysfs_fw_grip_show,
 	       syna_sysfs_fw_grip_store);
 
-/*
+/**
  * syna_sysfs_fw_palm_show()
  *
  * Attribute to show current palm rejection mode.
@@ -1144,21 +959,15 @@ static struct kobj_attribute kobj_attr_fw_grip =
 static ssize_t syna_sysfs_fw_palm_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
 {
-	int retval = 0;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
-
-	retval = scnprintf(buf, PAGE_SIZE, "%u\n", tcm->enable_fw_palm);
-
-	return retval;
+	return scnprintf(buf, PAGE_SIZE, "%u\n", tcm->enable_fw_palm);
 }
 
-/*
+/**
  * syna_sysfs_fw_palm_store()
  *
  * Attribute to set palm rejection mode.
@@ -1182,11 +991,9 @@ static ssize_t syna_sysfs_fw_palm_store(struct kobject *kobj,
 	int retval = count;
 	u8 input;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 
 	if (kstrtou8(buf, 16, &input)) {
@@ -1202,9 +1009,9 @@ static ssize_t syna_sysfs_fw_palm_store(struct kobject *kobj,
 #endif
 
 	retval = syna_tcm_set_dynamic_config(tcm->tcm_dev,
-			DC_ENABLE_PALM_REJECTION,
-			(input & 0x01),
-			RESP_IN_ATTN);
+				DC_ENABLE_PALM_REJECTION,
+				(input & 0x01),
+				CMD_RESPONSE_IN_ATTN);
 
 	LOGI("Set fw palm rejection mode %u.\n", tcm->enable_fw_palm);
 
@@ -1217,7 +1024,7 @@ static struct kobj_attribute kobj_attr_fw_palm =
 	__ATTR(fw_palm, 0644, syna_sysfs_fw_palm_show,
 	       syna_sysfs_fw_palm_store);
 
-/*
+/**
  * syna_sysfs_compression_threshold_show()
  *
  * Attribute get the heatmap compression threshold.
@@ -1237,17 +1044,15 @@ static ssize_t syna_sysfs_compression_threshold_show(struct kobject *kobj,
 	int retval = 0;
 	u16 output;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 
 	retval = syna_tcm_get_dynamic_config(tcm->tcm_dev,
 			DC_COMPRESSION_THRESHOLD,
 			&output,
-			RESP_IN_ATTN);
+			CMD_RESPONSE_IN_ATTN);
 	if (retval < 0) {
 		LOGE("Failed to get compression threshold.\n");
 		retval = scnprintf(buf, PAGE_SIZE, "-1\n");
@@ -1258,7 +1063,7 @@ static ssize_t syna_sysfs_compression_threshold_show(struct kobject *kobj,
 	return retval;
 }
 
-/*
+/**
  * syna_sysfs_compression_threshold_store()
  *
  * Attribute set the heatmap compression threshold.
@@ -1278,11 +1083,9 @@ static ssize_t syna_sysfs_compression_threshold_store(struct kobject *kobj,
 	int retval = count;
 	u8 input;
 	struct device *p_dev;
-	struct kobject *p_kobj;
 	struct syna_tcm *tcm;
 
-	p_kobj = g_sysfs_dir->parent;
-	p_dev = container_of(p_kobj, struct device, kobj);
+	p_dev = container_of(kobj->parent, struct device, kobj);
 	tcm = dev_get_drvdata(p_dev);
 
 	if (kstrtou8(buf, 10, &input)) {
@@ -1290,12 +1093,13 @@ static ssize_t syna_sysfs_compression_threshold_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 
+
 	tcm->hw_if->compression_threshold = input;
 
 	syna_tcm_set_dynamic_config(tcm->tcm_dev,
 			DC_COMPRESSION_THRESHOLD,
 			input,
-			RESP_IN_ATTN);
+			CMD_RESPONSE_IN_ATTN);
 
 	LOGI("Set the heatmap compression threshold as %u.\n",
 	     tcm->hw_if->compression_threshold);
@@ -1307,60 +1111,54 @@ static struct kobj_attribute kobj_attr_compression_threshold =
 	__ATTR(compression_threshold, 0644, syna_sysfs_compression_threshold_show,
 	       syna_sysfs_compression_threshold_store);
 
-/*
- * declaration of sysfs attributes
- */
+
+/* Definitions of sysfs attributes */
 static struct attribute *attrs[] = {
-	&kobj_attr_info.attr,
-	&kobj_attr_irq_en.attr,
 	&kobj_attr_int2.attr,
-	&kobj_attr_reset.attr,
-	&kobj_attr_pwr.attr,
+	&kobj_attr_info.attr,
 	&kobj_attr_scan_mode.attr,
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 	&kobj_attr_force_active.attr,
 #endif
-	&kobj_attr_get_raw_data.attr,
 	&kobj_attr_high_sensitivity.attr,
 	&kobj_attr_fw_grip.attr,
 	&kobj_attr_fw_palm.attr,
 	&kobj_attr_compression_threshold.attr,
+	&kobj_attr_debug.attr,
+	NULL,
+};
+static struct bin_attribute *bin_attrs[] = {
+	&bin_attr_get_raw_data,
 	NULL,
 };
 
 
 static struct attribute_group attr_group = {
 	.attrs = attrs,
+	.bin_attrs = bin_attrs,
 };
 
-/*
- * syna_sysfs_create_dir()
- *
- * Create a directory and register it with sysfs.
- * Then, create all defined sysfs files.
+/**
+ * @brief  Create a directory for the use of sysfs attributes.
  *
  * @param
  *    [ in] tcm:  the driver handle
- *    [ in] pdev: an instance of platform device
+ *    [ in] pdev: pointer to platform device
  *
  * @return
- *    on success, 0; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
-int syna_sysfs_create_dir(struct syna_tcm *tcm,
-		struct platform_device *pdev)
+int syna_sysfs_create_dir(struct syna_tcm *tcm, struct platform_device *pdev)
 {
 	int retval = 0;
 
-	g_sysfs_dir = kobject_create_and_add("sysfs",
-			&pdev->dev.kobj);
-	if (!g_sysfs_dir) {
+	tcm->sysfs_dir = kobject_create_and_add(SYSFS_ROOT_DIR, &pdev->dev.kobj);
+	if (!tcm->sysfs_dir) {
 		LOGE("Fail to create sysfs directory\n");
 		return -ENOTDIR;
 	}
 
-	tcm->sysfs_dir = g_sysfs_dir;
-
-	retval = sysfs_create_group(g_sysfs_dir, &attr_group);
+	retval = sysfs_create_group(tcm->sysfs_dir, &attr_group);
 	if (retval < 0) {
 		LOGE("Fail to create sysfs group\n");
 
@@ -1369,10 +1167,17 @@ int syna_sysfs_create_dir(struct syna_tcm *tcm,
 	}
 
 #ifdef HAS_TESTING_FEATURE
-	retval = syna_testing_create_dir(tcm, g_sysfs_dir);
-	if (retval < 0) {
-		LOGE("Fail to create testing sysfs\n");
+	tcm->sysfs_dir_testing = kobject_create_and_add("testing", tcm->sysfs_dir);
+	if (!tcm->sysfs_dir_testing) {
+		LOGE("Fail to create sysfs sub directory for testing\n");
+		sysfs_remove_group(tcm->sysfs_dir, &attr_group);
+		kobject_put(tcm->sysfs_dir);
+		return -ENOTDIR;
+	}
 
+	retval = syna_testing_register_attributes(tcm, tcm->sysfs_dir_testing);
+	if (retval < 0) {
+		LOGE("Fail to register testing attributes\n");
 		sysfs_remove_group(tcm->sysfs_dir, &attr_group);
 		kobject_put(tcm->sysfs_dir);
 		return retval;
@@ -1381,16 +1186,14 @@ int syna_sysfs_create_dir(struct syna_tcm *tcm,
 
 	return 0;
 }
-/*
- * syna_sysfs_remove_dir()
- *
- * Remove the allocate sysfs directory
+/**
+ * @brief  Remove the directory for the use of sysfs attributes.
  *
  * @param
  *    [ in] tcm: the driver handle
  *
  * @return
- *    on success, 0; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 void syna_sysfs_remove_dir(struct syna_tcm *tcm)
 {
@@ -1401,8 +1204,15 @@ void syna_sysfs_remove_dir(struct syna_tcm *tcm)
 
 	if (tcm->sysfs_dir) {
 #ifdef HAS_TESTING_FEATURE
-		syna_testing_remove_dir();
+		if (tcm->sysfs_dir_testing) {
+			syna_testing_remove_attributes(tcm->sysfs_dir_testing);
+			kobject_put(tcm->sysfs_dir_testing);
+		}
 #endif
+		if (tcm->sysfs_dir_utility) {
+			sysfs_remove_group(tcm->sysfs_dir_utility, &attr_debug_group);
+			kobject_put(tcm->sysfs_dir_utility);
+		}
 
 		sysfs_remove_group(tcm->sysfs_dir, &attr_group);
 

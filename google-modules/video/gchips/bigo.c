@@ -632,7 +632,7 @@ static int init_chardev(struct bigo_core *core)
 		goto err_cdev_add;
 	}
 
-	core->_class = class_create(THIS_MODULE, BIGO_DEVCLASS_NAME);
+	core->_class = class_create(BIGO_DEVCLASS_NAME);
 	if (IS_ERR(core->_class)) {
 		rc = PTR_ERR(core->_class);
 		goto err_class_create;
@@ -788,7 +788,7 @@ static int bigo_probe(struct platform_device *pdev)
 	}
 
 	mutex_init(&core->lock);
-	spin_lock_init(&core->prioq.lock);
+	mutex_init(&core->prioq.lock);
 	INIT_LIST_HEAD(&core->instances);
 	INIT_LIST_HEAD(&core->pm.opps);
 	INIT_LIST_HEAD(&core->pm.bw);

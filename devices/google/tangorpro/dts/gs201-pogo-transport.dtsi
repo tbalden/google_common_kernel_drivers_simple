@@ -28,19 +28,19 @@
 					     &pogo_trans_pogo_sel_hub
 					     &pogo_trans_hub_sel_hub>;
 				interrupt-parent = <&gpa8>;
-				pogo-transport-status = <&gpa8 3 GPIO_ACTIVE_LOW>;
-				pogo-transport-sel = <&gpp1 0 GPIO_ACTIVE_HIGH>;
+				pogo-transport-status-gpios = <&gpa8 3 GPIO_ACTIVE_LOW>;
+				pogo-transport-sel-gpios = <&gpp1 0 GPIO_ACTIVE_HIGH>;
 				data-phandle = <&max77759tcpc>;
 				pogo-psy-name = "dock";
 				equal-priority;
-				pogo-ovp-en = <&s2mpg12_gpio 2 GPIO_ACTIVE_LOW>;
+				pogo-ovp-en-gpios = <&s2mpg12_gpio 2 GPIO_ACTIVE_LOW>;
 
 				hub-embedded;
-				pogo-hub-reset = <&gpp0 0 GPIO_ACTIVE_HIGH>;
-				pogo-hub-sel = <&gpp2 0 GPIO_ACTIVE_HIGH>;
+				pogo-hub-reset-gpios = <&gpp0 0 GPIO_ACTIVE_HIGH>;
+				pogo-hub-sel-gpios = <&gpp2 0 GPIO_ACTIVE_HIGH>;
 
 				pogo-acc-capable;
-				pogo-acc-detect = <&gpa8 2 GPIO_ACTIVE_HIGH>;
+				pogo-acc-detect-gpios = <&gpa8 2 GPIO_ACTIVE_HIGH>;
 
 				usb-hub-supply = <&s_ldo28_reg>;
 				acc-detect-supply = <&m_ldo26_reg>;

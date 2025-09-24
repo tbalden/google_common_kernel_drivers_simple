@@ -29,6 +29,7 @@
 
 
 struct device* max77779_get_dev(struct device *dev, const char *name);
+int max77779_irq_of_parse_and_map(struct device_node *dev, int index);
 
 /* write to a register */
 int max77779_external_chg_reg_write(struct device *dev, u8 reg, u8 value);
@@ -115,22 +116,20 @@ struct max77779_foreach_cb_data {
 	bool otg_on;	/* power out, usually external */
 	bool frs_on;	/* power out, internal boost */
 
-	bool wlc_rx;	/* charging wireless */
+	int wlc_rx;	/* charging wireless */
 	bool wlc_tx;	/* battery share */
 
-	bool dc_on;	/* DC requested - wired or wireless */
+	int dc_on;	/* DC requested - wired or wireless */
 
 	u8 raw_value;	/* hard override */
 	bool use_raw;
 
-	bool fwupdate_on; /* enter firmware update mode */
+	uint8_t fwupdate_on; /* enter firmware update mode */
 
 	bool pogo_vin;	/* power in, pogo */
 	bool pogo_vout;	/* power out, pogo */
 
 	u8 reg;
-
-	struct gvotable_election *dc_avail_votable;	/* DC_AVAIL */
 };
 
 /* internal system values */
@@ -149,6 +148,7 @@ enum {
 
 	/* boost mode (0x9) during firmware update */
 	GBMS_CHGR_MODE_FWUPDATE_BOOST_ON = 0x20 + MAX77779_CHGR_MODE_BOOST_ON,
+	GBMS_CHGR_MODE_WLC_FWUPDATE	= 0x30 + MAX77779_CHGR_MODE_BOOST_UNO_ON,
 };
 
 

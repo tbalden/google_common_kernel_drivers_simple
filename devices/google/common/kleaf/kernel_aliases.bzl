@@ -4,7 +4,16 @@
 Defines helper functions for creating kernel aliases.
 """
 
-def kernel_aliases(name, flag, targets, packages):
+load(":kernel_targets.bzl", "KERNEL_TARGETS")
+
+def kernel_aliases(name, flag, packages):
+    """Define aliases for kernel targets.
+
+    Args:
+        name: Name.
+        flag: The flag used to select kernel package.
+        packages: Selectable kernel packages.
+    """
     for idx, pkg in enumerate(packages):
         native.config_setting(
             name = "{}_{}".format(name, idx),
@@ -13,9 +22,9 @@ def kernel_aliases(name, flag, targets, packages):
             },
         )
 
-    for target in targets:
+    for target in KERNEL_TARGETS:
         native.alias(
-            name = target,
+            name = "{}".format(target),
             actual = select({
                 ":{}_{}".format(name, idx): "{}:{}".format(pkg, target)
                 for idx, pkg in enumerate(packages)

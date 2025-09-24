@@ -4,6 +4,7 @@ load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@kernel_toolchain_info//:dict.bzl", "VARS")
 load("//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_genrule")
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch")
 load("//private/devices/google/common:constants.bzl", "PIXEL_GKI_MODULES_LIST")
 load("//private/devices/google/common/kleaf:extracted_system_dlkm.bzl", "extracted_system_dlkm")
 
@@ -11,6 +12,11 @@ package(
     default_visibility = [
         "//private/devices/google:__subpackages__",
     ],
+)
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
 )
 
 label_flag(
@@ -23,49 +29,31 @@ label_flag(
 )
 
 bool_flag(
-    name = "download_prebuilt_gki_fips140",
+    name = "use_prebuilt_fips140",
     build_setting_default = False,
 )
 
 config_setting(
-    name = "enable_download_fips140",
-    flag_values = {
-        ":download_prebuilt_gki_fips140": "1",
-    },
-)
-
-config_setting(
-    name = "disable_download_fips140",
-    flag_values = {
-        ":download_prebuilt_gki_fips140": "0",
-    },
+    name = "use_prebuilt_fips140_is_true",
+    flag_values = {":use_prebuilt_fips140": "1"},
 )
 
 _STRIP = "//prebuilts/clang/host/linux-x86/clang-{}:bin/llvm-strip".format(VARS["CLANG_VERSION"])
 
+_FIPS140_KO = "//prebuilts/gki/kernel_aarch64_fips140:fips140.ko"
+
 hermetic_genrule(
     name = "fips140",
-    srcs = ["@gki_prebuilt_fips140//fips140.ko"],
+    srcs = [_FIPS140_KO],
     outs = ["fips140.ko"],
     cmd = """
         $(location {strip}) --strip-debug -o $(location fips140.ko) \\
-                $(location @gki_prebuilt_fips140//fips140.ko)
-    """.format(strip = _STRIP),
+                $(location {fips140_ko})
+    """.format(
+        fips140_ko = _FIPS140_KO,
+        strip = _STRIP,
+    ),
     tools = [_STRIP],
-)
-
-# Do not use this flag directly, use --config=testing or --config=kunit,
-# which will enable this and any necessary dependencies.
-bool_flag(
-    name = "kunit",
-    build_setting_default = False,
-)
-
-config_setting(
-    name = "kunit_enabled",
-    flag_values = {
-        ":kunit": "1",
-    },
 )
 
 bool_flag(

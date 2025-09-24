@@ -1,25 +1,32 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "ddk_headers", "kernel_module_group")
 
-kernel_module(
-    name = "uwb.dw3000",
-    srcs = glob([
-        "**/*.c",
+ddk_headers(
+    name = "ddk_headers",
+    hdrs = glob([
         "**/*.h",
-        "**/Kbuild",
     ]),
-    outs = [
-        "drivers/net/ieee802154/dw3000.ko",
-        "drivers/net/ieee802154/dw3000-core-tests.ko",
-        "net/mcps802154/mcps802154.ko",
-        "net/mcps802154/mcps802154_region_fira.ko",
-        "net/mcps802154/mcps802154_region_nfcc_coex.ko",
-        "net/mcps802154/mcps802154_region_pctt.ko",
+    includes = [
+        ".",
+        "include",
     ],
-    kernel_build = "//private/devices/google/common:kernel",
+    visibility = [
+        ":__subpackages__",
+    ],
+)
+
+kernel_module_group(
+    name = "uwb.dw3000",
+    srcs = [
+        "//private/google-modules/uwb/qorvo/dw3000/kernel/drivers/net/ieee802154:dw3000",
+        "//private/google-modules/uwb/qorvo/dw3000/kernel/drivers/net/ieee802154:dw3000-core-tests",
+        "//private/google-modules/uwb/qorvo/dw3000/kernel/net/mcps802154",
+        "//private/google-modules/uwb/qorvo/dw3000/kernel/net/mcps802154:mcps802154_region_fira",
+        "//private/google-modules/uwb/qorvo/dw3000/kernel/net/mcps802154:mcps802154_region_nfcc_coex",
+        "//private/google-modules/uwb/qorvo/dw3000/kernel/net/mcps802154:mcps802154_region_pctt",
+    ],
     visibility = [
         "//private/devices/google:__subpackages__",
-        "//private/google-modules/soc/gs:__pkg__",
     ],
 )

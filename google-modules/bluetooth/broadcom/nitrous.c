@@ -17,7 +17,7 @@
 #include <linux/property.h>
 #include <linux/rfkill.h>
 #include <linux/rtc.h>
-#include <misc/logbuffer.h>
+#include <logbuffer.h>
 #include <linux/kfifo.h>
 #include <linux/slab.h>
 #include <soc/google/exynos-cpupm.h>
@@ -395,12 +395,10 @@ static void nitrous_lpm_remove_proc_entries(struct nitrous_bt_lpm *lpm)
 		remove_proc_entry("btwake", sleep_dir);
 		remove_proc_entry("sleep", bluetooth_dir);
 	}
-	if (lpm->wakelock_ctrl) {
+	if (lpm->wakelock_ctrl)
 		remove_proc_entry("wakelock_ctrl", bluetooth_dir);
-	}
-	if (lpm->timesync_state) {
+	if (lpm->timesync_state)
 		remove_proc_entry("timesync", bluetooth_dir);
-	}
 	remove_proc_entry("bluetooth", 0);
 	if (lpm->proc) {
 		devm_kfree(lpm->dev, lpm->proc);
@@ -408,7 +406,8 @@ static void nitrous_lpm_remove_proc_entries(struct nitrous_bt_lpm *lpm)
 	}
 }
 
-static void toggle_timesync(struct nitrous_bt_lpm *lpm) {
+static void toggle_timesync(struct nitrous_bt_lpm *lpm)
+{
 	int rc;
 
 	if (lpm->timesync_state == TIMESYNC_NOT_SUPPORTED)
@@ -417,10 +416,11 @@ static void toggle_timesync(struct nitrous_bt_lpm *lpm) {
 			IRQF_TRIGGER_RISING, "bt_timesync", lpm);
 	if (unlikely(rc)) {
 		lpm->timesync_state = TIMESYNC_SUPPORTED;
-		dev_logbuffer_logk(lpm->dev, lpm->log, LOGLEVEL_ERR, "Unable to request IRQ for bt_timesync GPIO");
+		dev_logbuffer_logk(lpm->dev, lpm->log, LOGLEVEL_ERR,
+				"Unable to request IRQ for bt_timesync GPIO");
 	} else {
 		lpm->timesync_state = TIMESYNC_ENABLED;
-		logbuffer_log(lpm->log, "Rquest IRQ for bt_timesync GPIO successful");
+		logbuffer_log(lpm->log, "Request IRQ for bt_timesync GPIO successful");
 	}
 }
 

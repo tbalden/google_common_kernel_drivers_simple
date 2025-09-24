@@ -113,8 +113,8 @@ properties:
     description: external boost OTG only.
     type: boolean
 
-  max77779,reverse_12-en:
-    description: reverse 1:2 mode supported.
+  max77779,chrg-byp-en:
+    description: Charger bypass mode enable.
     type: boolean
 
   max77779,rtx-ready:
@@ -122,6 +122,22 @@ properties:
 
   max77779,rtx-available:
     description: RTX usecase available gpio.
+
+  max77779,wlc-dc-otg-en:
+    description: Enable WLC_DC + OTG usecase. Default disabled. Default behavior to drop out of
+    wlc_dc and switch to wlc_rx_otg.
+
+  max77779,wlc-inlim-cv:
+    description: Enable qualifying CV with tier and battery voltage for wireless charging
+
+  max77779,fv-cv-margin:
+    description: Margin to use to qualify CV when wlc-inlim-cv is enabled
+
+  max77779,fv-cv-debounce:
+    description: debounce voltage used to keep CV when wlc-inlim-cv is enabled
+
+  max77779,fv-cv-dcr:
+    description:  DCR compensation factor used to qualify CV when wlc-inlim-cv is enabled
 
 required:
   - compatible

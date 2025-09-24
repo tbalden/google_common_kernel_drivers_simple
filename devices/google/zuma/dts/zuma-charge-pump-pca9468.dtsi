@@ -15,8 +15,6 @@ pca9468_dc: pca9468@57 {
 
 	pinctrl-names = "default";
 
-	pca9468,float-voltage = <4300000>; /* 4.3V */
-
 	pca9468,input-itopoff = <500000>; /* 500mA */
 	pca9468,switching-frequency = <3>; /* 980KHz */
 

@@ -33,7 +33,8 @@
 /* Config2: must not enable TAlert */
 #define MAX77779_FG_MODEL_VERSION_REG	MAX77779_FG_TAlrtTh
 
-#define MAX77779_FG_NDGB_ADDRESS 0x37
+#define MAX77779_FG_NDGB_ADDRESS_I2C 0x37
+#define MAX77779_FG_NDGB_ADDRESS_SPMI 0x7
 
 #define MAX77779_FG_MAX_LOG_REGS	30
 
@@ -94,7 +95,8 @@ static const struct maxfg_reg max77779_debug_fg[] = {
 
 struct max77779_fg_chip {
 	struct device *dev;
-	struct i2c_client *secondary;
+	struct i2c_client *secondary_i2c;
+	struct spmi_device *secondary_spmi;
 	struct device *pmic_dev;
 
 	int irq;
@@ -129,7 +131,6 @@ struct max77779_fg_chip {
 	u16 designcap;
 
 	bool init_complete;
-	bool resume_complete;
 	bool irq_disabled;
 	u16 health_status;
 	int fake_capacity;
@@ -203,12 +204,6 @@ struct max77779_fg_chip {
 	int aafv_cur_idx;
 	bool aafv_modified_fus;
 	struct aafv_fg_config aafv_cfgs[GBMS_AAFV_DATA_MAX];
-
-	/* index of battery EEPROM history */
-	int history_idx;
-
-	/* information for PROP_NEED_CHARGE_TO_FULL */
-	struct maxfg_bypss_charglimt bypass_chargelimit;
 };
 
 /** ------------------------------------------------------------------------ */

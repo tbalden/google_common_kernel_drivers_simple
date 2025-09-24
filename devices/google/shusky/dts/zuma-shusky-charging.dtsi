@@ -20,7 +20,7 @@
 							    "dc-mains";	// out-1
 
 				/* S2MPG12X01 -> GPIO_1 -> CHARGE_PUMP_EN */
-				google,dc-en = <&s2mpg14_gpio 1 0>;
+				google,dc-en-gpios = <&s2mpg14_gpio 1 0>;
 				/* DC enabled by default */
 				google,dc-en-value;
 				google,dc_limit-demand = <560000>;
@@ -114,8 +114,6 @@
 
 		interrupt-parent = <&gpa7>;
 		pca9468,irq-gpio = <&gpa7 4 GPIO_ACTIVE_LOW>; /* PLC_INT_L */
-
-		pca9468,float-voltage = <4300000>; /* 4.3V */
 
 		pca9468,ta-max-vol = <10500000>; /* 10.5V */
 

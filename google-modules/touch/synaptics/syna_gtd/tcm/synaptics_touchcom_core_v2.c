@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Synaptics TCM touchscreen driver
+ * Synaptics TouchComm C library
  *
- * Copyright (C) 2017-2020 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2017-2024 Synaptics Incorporated. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -29,7 +29,7 @@
  * DOLLARS.
  */
 
-/*
+/**
  * @file synaptics_touchcom_core_v2.c
  *
  * This file implements the TouchComm version 2 command-response protocol
@@ -45,11 +45,7 @@
 
 #define CHECK_PACKET_CRC
 
-/*
- * @section: Header of TouchComm v2 Message Packet
- *
- * The 4-byte header in the TouchComm v2 packet
- */
+/** Header of TouchComm v2 Message Packet */
 struct tcm_v2_message_header {
 	union {
 		struct {
@@ -61,32 +57,105 @@ struct tcm_v2_message_header {
 	};
 };
 
-/* helper to execute a tcm v2 command
- */
+/* Declaration for the processing of v2 command */
 static int syna_tcm_v2_execute_cmd_request(struct tcm_dev *tcm_dev,
 	unsigned char command, unsigned char *payload,
-	unsigned int total_length, unsigned int length);
+	unsigned int payload_length);
 
-/*
- * syna_tcm_v2_set_max_rw_size()
- *
- * Configure the max length for message reading and writing.
+
+/**
+ * @brief   Terminate the command processing
  *
  * @param
- *    [ in] tcm_dev: the device handle
+ *    [ in] tcm_dev: the TouchComm device handle
  *
  * @return
- *    none.
+ *    void.
  */
-static int syna_tcm_v2_set_max_rw_size(struct tcm_dev *tcm_dev)
+static void syna_tcm_v2_terminate(struct tcm_dev *tcm_dev)
+{
+	struct tcm_message_data_blob *tcm_msg = NULL;
+	syna_pal_completion_t *cmd_completion = NULL;
+
+	if (!tcm_dev) {
+		LOGE("Invalid tcm device handle\n");
+		return;
+	}
+
+	tcm_msg = &tcm_dev->msg_data;
+	cmd_completion = &tcm_msg->cmd_completion;
+
+	if (ATOMIC_GET(tcm_msg->command_status) != CMD_STATE_BUSY)
+		return;
+
+	LOGI("Terminate the processing of command %02X\n\n", tcm_msg->command);
+
+	ATOMIC_SET(tcm_msg->command_status, CMD_STATE_TERMINATED);
+	syna_pal_completion_complete(cmd_completion);
+}
+
+/**
+ * @brief   Set up the capability of message reading and writing.
+ *
+ * @param
+ *    [ in] tcm_dev: the TouchComm device handle
+ *    [ in] wr_size: the max. size for each write
+ *    [ in] rd_size: the max. size for each read
+ *
+ * @return
+ *    0 or positive value in case of success, a negative value otherwise.
+ */
+static int syna_tcm_v2_set_up_max_rw_size(struct tcm_dev *tcm_dev,
+		unsigned int wr_size, unsigned int rd_size)
 {
 	int retval;
+	unsigned char data[2] = { 0 };
+
+	if (!tcm_dev) {
+		LOGE("Invalid tcm device handle\n");
+		return -ERR_INVAL;
+	}
+
+	/* apply the max write size */
+	tcm_dev->max_wr_size = wr_size;
+	LOGD("Set max write length to %d bytes\n", tcm_dev->max_wr_size);
+
+	/* apply the max read size */
+	if (rd_size != tcm_dev->max_rd_size) {
+		tcm_dev->max_rd_size = rd_size;
+
+		data[0] = (unsigned char)tcm_dev->max_rd_size;
+		data[1] = (unsigned char)(tcm_dev->max_rd_size >> 8);
+
+		retval = syna_tcm_v2_execute_cmd_request(tcm_dev,
+				CMD_TCM2_SET_MAX_READ_LENGTH,
+				data,
+				sizeof(data));
+		if (retval < 0) {
+			LOGE("Fail to set max read size\n");
+			return retval;
+		}
+	}
+	LOGD("Set max read length to %d bytes\n", tcm_dev->max_rd_size);
+
+	return 0;
+}
+/**
+ * @brief   Check the max size of message reading and writing
+ *
+ * @param
+ *    [ in] tcm_dev: the TouchComm device handle
+ *
+ * @return
+ *    0 or positive value in case of success, a negative value otherwise.
+ */
+static int syna_tcm_v2_check_max_rw_size(struct tcm_dev *tcm_dev)
+{
 	unsigned int possible_rd_size = 0;
 	unsigned int rd_size = 0;
 	unsigned int wr_size = 0;
 	struct tcm_identification_info *id_info;
 	unsigned int build_id = 0;
-	unsigned char data[2] = { 0 };
 
 	if (!tcm_dev) {
 		LOGE("Invalid tcm device handle\n");
@@ -103,77 +172,51 @@ static int syna_tcm_v2_set_max_rw_size(struct tcm_dev *tcm_dev)
 
 	rd_size = syna_pal_le2_to_uint(id_info->max_read_size);
 	wr_size = syna_pal_le2_to_uint(id_info->max_write_size);
-	possible_rd_size = syna_pal_le2_to_uint(id_info->max_possible_read_size);
-	/* legacy firmware doesn't provide the possible size to read */
-	if (tcm_dev->msg_data.legacy)
-		possible_rd_size = rd_size;
+#ifdef VERSION_2_LEGACY_FW
+	possible_rd_size = rd_size;
+#else
+	possible_rd_size = syna_pal_le2_to_uint(id_info->current_read_size);
+#endif
 
 	rd_size = MIN(rd_size, possible_rd_size);
 
 	if ((wr_size == 0) || (rd_size == 0)) {
 		LOGE("Invalid max read:%d or write:%d size\n",
 			rd_size, wr_size);
-		retval = 0;
-		goto exit;
+		return -ERR_INVAL;
 	}
 
-	/* set max write size */
+	/* check the max write size between the identify report and the platform's settings */
 	if (wr_size != tcm_dev->max_wr_size) {
 		if (tcm_dev->max_wr_size == 0)
-			tcm_dev->max_wr_size = wr_size;
+			wr_size = tcm_dev->max_wr_size;
 		else
-			tcm_dev->max_wr_size =
-				MIN(wr_size, tcm_dev->max_wr_size);
-
-		LOGD("Set max write length to %d bytes\n",
-			tcm_dev->max_wr_size);
+			wr_size = MIN(wr_size, tcm_dev->max_wr_size);
 	}
 
-	/* set max read size */
+	/* check the max read size between the identify report and the platform's settings */
 	if (rd_size != tcm_dev->max_rd_size) {
-		if (tcm_dev->max_rd_size == 0)
-			tcm_dev->max_rd_size = rd_size;
-		else
-			tcm_dev->max_rd_size =
-				MIN(rd_size, tcm_dev->max_rd_size);
-
-		data[0] = (unsigned char)tcm_dev->max_rd_size;
-		data[1] = (unsigned char)(tcm_dev->max_rd_size >> 8);
-
-		retval = syna_tcm_v2_execute_cmd_request(tcm_dev,
-				CMD_TCM2_SET_MAX_READ_LENGTH,
-				data,
-				sizeof(data),
-				sizeof(data));
-		if (retval < 0) {
-			LOGE("Fail to set max read size\n");
-			goto exit;
-		}
-
-		LOGD("Set max read length to %d bytes\n", tcm_dev->max_rd_size);
+		if (tcm_dev->max_rd_size != 0)
+			rd_size = MIN(rd_size, tcm_dev->max_rd_size);
 	}
-	retval = 0;
-exit:
-	return retval;
+
+	return syna_tcm_v2_set_up_max_rw_size(tcm_dev, wr_size, rd_size);
 }
 
-/*
- * syna_tcm_v2_parse_idinfo()
- *
- * Copy the given data to the identification info structure
- * and parse the basic information, e.g. fw build id.
+/**
+ * @brief   Parse the identification info packet and get the essential info
  *
  * @param
- *    [ in] tcm_dev:  the device handle
+ *    [ in] tcm_dev:  the TouchComm device handle
  *    [ in] data:     data buffer
  *    [ in] size:     size of given data buffer
  *    [ in] data_len: length of actual data
  *
  * @return
- *    on success, 0 or positive value; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static int syna_tcm_v2_parse_idinfo(struct tcm_dev *tcm_dev,
-		unsigned char *data, unsigned int size, unsigned int data_len)
+	unsigned char *data, unsigned int size, unsigned int data_len)
 {
 	int retval;
 	unsigned int build_id = 0;
@@ -213,26 +256,24 @@ static int syna_tcm_v2_parse_idinfo(struct tcm_dev *tcm_dev,
 	return 0;
 }
 
-/*
- * syna_tcm_v2_dispatch_report()
+/**
+ * @brief   Handle the TouchCom report read in by the read_message(),
+ *          and copy the data from internal buffer.in to internal buffer.report.
  *
- * Handle the TouchCom report packet being received.
- *
- * If it's an identify report, parse the identification packet and signal
- * the command completion just in case.
- * Otherwise, copy the data from internal buffer.in to internal buffer.report
+ *          In addition, invoke the corresponding callback function if registered.
  *
  * @param
- *    [ in] tcm_dev: the device handle
+ *    [ in] tcm_dev: the TouchComm device handle
  *
  * @return
- *    none.
+ *    void.
  */
 static void syna_tcm_v2_dispatch_report(struct tcm_dev *tcm_dev)
 {
 	int retval;
 	struct tcm_message_data_blob *tcm_msg = NULL;
 	syna_pal_completion_t *cmd_completion = NULL;
+	unsigned char report_code;
 
 	if (!tcm_dev) {
 		LOGE("Invalid tcm device handle\n");
@@ -242,11 +283,10 @@ static void syna_tcm_v2_dispatch_report(struct tcm_dev *tcm_dev)
 	tcm_msg = &tcm_dev->msg_data;
 	cmd_completion = &tcm_msg->cmd_completion;
 
-	tcm_msg->report_code = tcm_msg->status_report_code;
+	report_code = tcm_msg->status_report_code;
 
 	if (tcm_msg->payload_length == 0) {
-		tcm_dev->report_buf.data_length = tcm_msg->payload_length;
-		ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
+		tcm_dev->report_buf.data_length = 0;
 		goto exit;
 	}
 
@@ -280,40 +320,30 @@ static void syna_tcm_v2_dispatch_report(struct tcm_dev *tcm_dev)
 	syna_tcm_buf_unlock(&tcm_msg->in);
 	syna_tcm_buf_unlock(&tcm_dev->report_buf);
 
-	/* The identify report may be resulted from reset or fw mode switching
-	 */
-	if (tcm_msg->report_code == REPORT_IDENTIFY) {
-
+	if (report_code == REPORT_IDENTIFY) {
+		/* parse the identify report */
 		syna_tcm_buf_lock(&tcm_msg->in);
-
 		retval = syna_tcm_v2_parse_idinfo(tcm_dev,
 				&tcm_msg->in.buf[MESSAGE_HEADER_SIZE],
 				tcm_msg->in.buf_size - MESSAGE_HEADER_SIZE,
 				tcm_msg->payload_length);
 		if (retval < 0) {
-			LOGE("Fail to identify device\n");
+			LOGE("Fail to parse identification data\n");
 			syna_tcm_buf_unlock(&tcm_msg->in);
 			return;
 		}
-
 		syna_tcm_buf_unlock(&tcm_msg->in);
 
-		/* in case, the identify info packet is caused by the command */
+		/* in case, the identify info packet is resulted from the command */
 		if (ATOMIC_GET(tcm_msg->command_status) == CMD_STATE_BUSY) {
 			switch (tcm_msg->command) {
 			case CMD_TCM2_GET_REPORT:
-				tcm_msg->response_code = STATUS_OK;
-				ATOMIC_SET(tcm_msg->command_status,
-					CMD_STATE_IDLE);
+				ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
 				syna_pal_completion_complete(cmd_completion);
 				goto exit;
 			case CMD_RESET:
-			case CMD_SMART_BRIDGE_RESET:
-				LOGD("Reset by command 0x%02X\n",
-					tcm_msg->command);
-				tcm_msg->response_code = STATUS_OK;
-				ATOMIC_SET(tcm_msg->command_status,
-					CMD_STATE_IDLE);
+				LOGD("Reset by command 0x%02X\n", tcm_msg->command);
+				ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
 				syna_pal_completion_complete(cmd_completion);
 				goto exit;
 			case CMD_REBOOT_TO_DISPLAY_ROM_BOOTLOADER:
@@ -322,59 +352,59 @@ static void syna_tcm_v2_dispatch_report(struct tcm_dev *tcm_dev)
 			case CMD_RUN_APPLICATION_FIRMWARE:
 			case CMD_ENTER_PRODUCTION_TEST_MODE:
 			case CMD_ROMBOOT_RUN_BOOTLOADER_FIRMWARE:
-				tcm_msg->response_code = STATUS_OK;
-				ATOMIC_SET(tcm_msg->command_status,
-					CMD_STATE_IDLE);
+				ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
 				syna_pal_completion_complete(cmd_completion);
 				goto exit;
 			default:
-				LOGI("Unexpected 0x%02X report received\n",
-					REPORT_IDENTIFY);
-				ATOMIC_SET(tcm_msg->command_status,
-					CMD_STATE_ERROR);
-				syna_pal_completion_complete(cmd_completion);
-				goto exit;
+				if (tcm_dev->testing_purpose) {
+					ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
+					syna_pal_completion_complete(cmd_completion);
+				} else {
+					LOGI("Unexpected 0x%02X report received\n", REPORT_IDENTIFY);
+					ATOMIC_SET(tcm_msg->command_status, CMD_STATE_ERROR);
+					syna_pal_completion_complete(cmd_completion);
+				}
+				break;
 			}
-		} else {
-			LOGN("Device has been reset\n");
-			/* invoke callback to handle unexpected reset if doesn't
-			 * result from command
-			 */
-			if (tcm_dev->cb_reset_occurrence)
-				tcm_dev->cb_reset_occurrence(
-					tcm_dev->cbdata_reset);
 		}
-	} else {
-		if (tcm_msg->command == CMD_TCM2_GET_REPORT) {
-			LOGD("Report %2X received\n", tcm_msg->report_code);
-			tcm_msg->response_code = STATUS_OK;
-			ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
-			syna_pal_completion_complete(cmd_completion);
-		}
+	}
+
+	if (tcm_msg->command == CMD_TCM2_GET_REPORT) {
+		LOGD("Report %2X received\n", report_code);
+		ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
+		syna_pal_completion_complete(cmd_completion);
+	}
+
+	/* handle the report by callbacks */
+	if (tcm_dev->cb_report_dispatcher[report_code].cb) {
+		syna_tcm_buf_lock(&tcm_dev->report_buf);
+		tcm_dev->cb_report_dispatcher[report_code].cb(
+				report_code,
+				tcm_dev->report_buf.buf,
+				tcm_dev->report_buf.data_length,
+				tcm_dev->cb_report_dispatcher[report_code].private_data);
+		syna_tcm_buf_unlock(&tcm_dev->report_buf);
 	}
 
 exit:
 	return;
 }
 
-/*
- * syna_tcm_v2_dispatch_response()
+/**
+ * @brief   Handle the response packet read in by the read_message(),
+ *          and copy the data from internal buffer.in to internal buffer.resp.
  *
- * Handle the response packet.
- *
- * Copy the data from internal buffer.in to internal buffer.resp,
- * and then signal the command completion.
+ *          Complete the completion event at the end of function.
  *
  * @param
- *    [ in] tcm_dev: the device handle
+ *    [ in] tcm_dev: the TouchComm device handle
  *
  * @return
- *    none.
+ *    void.
  */
 static void syna_tcm_v2_dispatch_response(struct tcm_dev *tcm_dev)
 {
 	int retval;
-	unsigned int resp_data_length;
 	struct tcm_message_data_blob *tcm_msg = NULL;
 	syna_pal_completion_t *cmd_completion = NULL;
 
@@ -389,16 +419,18 @@ static void syna_tcm_v2_dispatch_response(struct tcm_dev *tcm_dev)
 	if (ATOMIC_GET(tcm_msg->command_status) != CMD_STATE_BUSY)
 		return;
 
-	resp_data_length = tcm_msg->payload_length;
-
-	if (tcm_msg->response_code == STATUS_NO_REPORT_AVAILABLE) {
-		if (tcm_msg->command == CMD_TCM2_GET_REPORT)
-			tcm_msg->response_code = STATUS_OK;
+	if (tcm_msg->status_report_code == STATUS_NO_REPORT_AVAILABLE) {
+		tcm_dev->resp_buf.data_length = 0;
+		goto exit;
 	}
 
-	if (resp_data_length == 0) {
-		tcm_dev->resp_buf.data_length = resp_data_length;
-		ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
+	tcm_msg->response_code = tcm_msg->status_report_code;
+
+	if (tcm_msg->response_code == STATUS_ACK)
+		return;
+
+	if (tcm_msg->payload_length == 0) {
+		tcm_dev->resp_buf.data_length = 0;
 		goto exit;
 	}
 
@@ -406,7 +438,7 @@ static void syna_tcm_v2_dispatch_response(struct tcm_dev *tcm_dev)
 	syna_tcm_buf_lock(&tcm_dev->resp_buf);
 
 	retval = syna_tcm_buf_alloc(&tcm_dev->resp_buf,
-			resp_data_length + 1);
+		tcm_msg->payload_length);
 	if (retval < 0) {
 		LOGE("Fail to allocate memory for internal buf.resp\n");
 		syna_tcm_buf_unlock(&tcm_dev->resp_buf);
@@ -420,7 +452,7 @@ static void syna_tcm_v2_dispatch_response(struct tcm_dev *tcm_dev)
 			tcm_dev->resp_buf.buf_size,
 			&tcm_msg->in.buf[MESSAGE_HEADER_SIZE],
 			tcm_msg->in.buf_size - MESSAGE_HEADER_SIZE,
-			resp_data_length);
+			tcm_msg->payload_length);
 	if (retval < 0) {
 		LOGE("Fail to copy payload to internal resp_buf\n");
 		syna_tcm_buf_unlock(&tcm_msg->in);
@@ -429,9 +461,22 @@ static void syna_tcm_v2_dispatch_response(struct tcm_dev *tcm_dev)
 		goto exit;
 	}
 
-	tcm_dev->resp_buf.data_length = resp_data_length;
+	tcm_dev->resp_buf.data_length = tcm_msg->payload_length;
 
 	syna_tcm_buf_unlock(&tcm_msg->in);
+
+	if (tcm_msg->command == CMD_IDENTIFY) {
+		retval = syna_tcm_v2_parse_idinfo(tcm_dev,
+			tcm_dev->resp_buf.buf,
+			tcm_dev->resp_buf.buf_size,
+			tcm_dev->resp_buf.data_length);
+		if (retval < 0) {
+			LOGE("Fail to parse identify packet from resp_buf\n");
+			syna_tcm_buf_unlock(&tcm_dev->resp_buf);
+			goto exit;
+		}
+	}
+
 	syna_tcm_buf_unlock(&tcm_dev->resp_buf);
 
 	ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
@@ -440,30 +485,30 @@ exit:
 	syna_pal_completion_complete(cmd_completion);
 }
 
-/*
- * syna_tcm_v2_read()
- *
- * Read in a TouchCom packet from device.
- * Checking the CRC is necessary to ensure a valid message received.
+/**
+ * @brief   Read in a TouchCom packet from device.
+ *          Meanwhile, check the CRC to ensure a valid message.
  *
  * @param
- *    [ in] tcm_dev:    the device handle
+ *    [ in] tcm_dev:    the TouchComm device handle
  *    [ in] rd_length:  number of reading bytes;
  *                     '0' means to read the message header only
  *    [out] buf:        pointer to a buffer which is stored the retrieved data
  *    [out] buf_size:   size of the buffer pointed
  *
  * @return
- *    on success, 0 or positive value; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static int syna_tcm_v2_read(struct tcm_dev *tcm_dev, unsigned int rd_length,
-		unsigned char **buf, unsigned int *buf_size)
+	unsigned char **buf, unsigned int *buf_size)
 {
 	int retval;
 	struct tcm_v2_message_header *header;
 	int max_rd_size;
 	int xfer_len;
+#ifndef VERSION_2_LEGACY_FW
 	unsigned char seq;
+#endif
 	unsigned char crc6 = 0;
 	unsigned short crc16 = 0xFFFF;
 	struct tcm_message_data_blob *tcm_msg = NULL;
@@ -520,6 +565,7 @@ static int syna_tcm_v2_read(struct tcm_dev *tcm_dev, unsigned int rd_length,
 		retval = 0;
 		goto exit;
 	}
+#ifndef VERSION_2_LEGACY_FW
 	seq = (tcm_msg->seq_toggle & 0x01);
 	if ((((header->byte3) >> 6) & 0x01) != seq) {
 		LOGE("Mismatched sequence number, expected:%d\n", seq);
@@ -527,6 +573,7 @@ static int syna_tcm_v2_read(struct tcm_dev *tcm_dev, unsigned int rd_length,
 		retval = 0;
 		goto exit;
 	}
+#endif
 
 #ifdef CHECK_PACKET_CRC
 	/* check payload crc */
@@ -566,31 +613,28 @@ exit:
 	return retval;
 }
 
-/*
- * syna_tcm_v2_write()
- *
- * Construct the TouchCom v2 packet and send it to device.
- * Add 4-byte header at the beginning of a message and appended crc if needed.
+/**
+ * @brief   Assemble the TouchCom v2 packet and send the packet to device.
  *
  * @param
- *    [ in] tcm_dev:     the device handle
+ *    [ in] tcm_dev:     the TouchComm device handle
  *    [ in] command:     command code
  *    [ in] payload:     data payload if any
- *    [ in] payload_len: length of data payload to write
- *    [ in] header_len:  length in packet header
+ *    [ in] payload_len: length of data payload if have any
+ *    [ in] message_len: length of total message, which should be equal to or large than the payload length
  *    [ in] resend:      flag for re-sending the packet
  *
  * @return
- *    on success, 0 or positive value; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static int syna_tcm_v2_write(struct tcm_dev *tcm_dev, unsigned char command,
-		unsigned char *payload, unsigned int payload_len,
-		unsigned int header_len, bool resend)
+	unsigned char *payload, unsigned int payload_len,
+	unsigned int message_len, bool resend)
 {
 	int retval;
 	struct tcm_v2_message_header *header;
 	unsigned char bits = BITS_IN_MESSAGE_HEADER - 6;
-	int total_xfer_size = sizeof(struct tcm_v2_message_header);
+	int xfer_len;
 	unsigned short crc16;
 	struct tcm_message_data_blob *tcm_msg = NULL;
 	int offset;
@@ -611,15 +655,17 @@ static int syna_tcm_v2_write(struct tcm_dev *tcm_dev, unsigned char command,
 	/* predict reading is applied only when getting the report */
 	do_predict = (command == CMD_TCM2_GET_REPORT);
 
-	if (payload_len > 0) {
-		total_xfer_size += payload_len;
-		total_xfer_size += TCM_MSG_CRC_LENGTH;
-	}
+	if (payload_len > 0)
+		xfer_len = payload_len + TCM_MSG_CRC_LENGTH;
+	else
+		xfer_len = payload_len;
+
+	xfer_len += sizeof(struct tcm_v2_message_header);
 
 	syna_tcm_buf_lock(&tcm_msg->out);
 
 	/* allocate the internal out buffer */
-	retval = syna_tcm_buf_alloc(&tcm_msg->out, total_xfer_size);
+	retval = syna_tcm_buf_alloc(&tcm_msg->out, xfer_len);
 	if (retval < 0) {
 		LOGE("Fail to allocate memory for internal buf.out\n");
 		goto exit;
@@ -632,15 +678,20 @@ static int syna_tcm_v2_write(struct tcm_dev *tcm_dev, unsigned char command,
 		tcm_msg->seq_toggle++;
 
 	header->code = command;
-	header->length[0] = (unsigned char)header_len;
-	header->length[1] = (unsigned char)(header_len >> 8);
+	header->length[0] = (unsigned char)message_len;
+	header->length[1] = (unsigned char)(message_len >> 8);
 	header->byte3 = ((HOST_PRIMARY & 0x01) << 7);
 	header->byte3 |= ((tcm_msg->seq_toggle & 0x01) << 6);
 	header->byte3 |= syna_tcm_crc6(header->data, bits);
 
-	LOGD("Command packet: %02x %02x %02x %02x, length:%d\n",
-		header->data[0], header->data[1],
-		header->data[2], header->data[3], payload_len);
+	if (message_len != payload_len) {
+		LOGD("Command packet: %02x %02x %02x %02x, length in header:%d, actual payload size:%d\n",
+			header->data[0], header->data[1], header->data[2], header->data[3],
+			message_len, payload_len);
+	} else {
+		LOGD("Command packet: %02x %02x %02x %02x, length:%d\n",
+			header->data[0], header->data[1], header->data[2], header->data[3], message_len);
+	}
 
 	/* copy payload, if any */
 	if (payload_len > 0) {
@@ -665,7 +716,7 @@ static int syna_tcm_v2_write(struct tcm_dev *tcm_dev, unsigned char command,
 	/* write command packet to the bus */
 	retval = syna_tcm_write(tcm_dev,
 			tcm_msg->out.buf,
-			total_xfer_size);
+			xfer_len);
 	if (retval < 0) {
 		LOGE("Fail to write to device\n");
 		goto exit;
@@ -684,23 +735,18 @@ exit:
 
 	return retval;
 }
-
-/*
- * syna_tcm_v2_continued_read()
- *
- * Write a CMD_ACK to read in the remaining data payload continuously
- * until the end of data. All the retrieved data is appended to the
- * internal buffer.in.
+/**
+ * @brief   Continuously read in the remaining data payload until the end of data.
  *
  * @param
- *    [ in] tcm_dev:  the device handle
+ *    [ in] tcm_dev:  the TouchComm device handle
  *    [ in] length:   remaining data length in bytes
  *
  * @return
- *    on success, 0 or positive value; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static int syna_tcm_v2_continued_read(struct tcm_dev *tcm_dev,
-		unsigned int length)
+	unsigned int length)
 {
 	int retval;
 	unsigned char *tmp_buf;
@@ -759,15 +805,11 @@ static int syna_tcm_v2_continued_read(struct tcm_dev *tcm_dev,
 
 	for (idx = 0; idx < chunks; idx++) {
 retry:
-		/* ack command is required if
-		 *  1. for the new implementations, not the first packet
-		 *  2. for the legacy v2 firmware, ack is always needed
-		 */
-		if (tcm_msg->legacy)
-			need_ack_cmd = true;
-		else
-			need_ack_cmd = ((idx > 0) | (offset > MESSAGE_HEADER_SIZE));
-
+#ifdef VERSION_2_LEGACY_FW
+		need_ack_cmd = true;
+#else
+		need_ack_cmd = ((idx > 0) || (offset > MESSAGE_HEADER_SIZE));
+#endif
 		if (need_ack_cmd || (retry_cnt > 0)) {
 			retval = syna_tcm_v2_write(tcm_dev,
 					command,
@@ -849,20 +891,18 @@ exit:
 	return retval;
 }
 
-/*
- * syna_tcm_v2_get_response()
- *
- * Read in the response packet from device.
- * If containing payload data, use continued_read() function and read the
- * remaining payload data.
+/**
+ * @brief   Read in the immediate response packet from device.
+ *          If containing payload data, call continued_read() to retrieve
+ *          the whole packet.
  *
  * @param
- *    [ in] tcm_dev: the device handle
+ *    [ in] tcm_dev: the TouchComm device handle
  *
  * @return
- *    on success, 0 or positive value; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
-static int syna_tcm_v2_get_response(struct tcm_dev *tcm_dev)
+static int syna_tcm_v2_get_immediate_response(struct tcm_dev *tcm_dev)
 {
 	int retval;
 	struct tcm_v2_message_header *header;
@@ -878,6 +918,9 @@ static int syna_tcm_v2_get_response(struct tcm_dev *tcm_dev)
 	}
 
 	tcm_msg = &tcm_dev->msg_data;
+
+	/* bus turnaround delay */
+	syna_pal_sleep_us(tcm_msg->turnaround_time[0], tcm_msg->turnaround_time[1]);
 
 	/* if predict read enabled, plus the predicted length
 	 * and determine the length to read
@@ -946,65 +989,29 @@ static int syna_tcm_v2_get_response(struct tcm_dev *tcm_dev)
 	return retval;
 }
 
-/*
- * syna_tcm_v2_send_cmd()
- *
- * Forward the given command and payload to syna_tcm_v2_write().
- *
- * @param
- *    [ in] tcm_dev:     the device handle
- *    [ in] command:     command code
- *    [ in] payload:     data payload if any
- *    [ in] length:      total length of payload if have any
- *    [ in] payload_len: length to transfer
- *    [ in] resend:      flag for re-sending the packet
- *
- * @return
- *    on success, 0 or positive value; otherwise, negative value on error.
- */
-static inline int syna_tcm_v2_send_cmd(struct tcm_dev *tcm_dev,
-		unsigned char command, unsigned char *payload,
-		unsigned int length, unsigned int payload_len, bool resend)
-{
-	return syna_tcm_v2_write(tcm_dev,
-			command,
-			payload,
-			payload_len,
-			length,
-			resend);
-}
-
-/*
- * syna_tcm_v2_execute_cmd_request()
- *
- * Process the command message.
- * The helper is responsible for sending the given command and its payload,
- * to device. Once the total size of message is over the wr_chunk, divide
- * into continued writes
- *
- * In addition, the response to the command generated by the device will be
- * read in immediately.
+/**
+ * @brief   Process the message and write the message to device.
+ *          In addition, the response to the command will be read in immediately.
  *
  * @param
- *    [ in] tcm_dev:        the device handle
+ *    [ in] tcm_dev:        the TouchComm device handle
  *    [ in] command:        command code
  *    [ in] payload:        data payload if any
- *    [ in] total_length:   total length of payload
- *    [ in] length:         length of data payload to write
+ *    [ in] payload_length: length of payload in bytes
  *
  * @return
- *    on success, 0 or positive value; otherwise, negative value on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static int syna_tcm_v2_execute_cmd_request(struct tcm_dev *tcm_dev,
-		unsigned char command, unsigned char *payload,
-		unsigned int total_length, unsigned int length)
+	unsigned char command, unsigned char *payload,
+	unsigned int payload_length)
 {
 	int retval;
 	unsigned int idx;
 	unsigned int offset;
 	unsigned int chunks;
-	unsigned int xfer_size;
-	unsigned int remaining_size;
+	unsigned int xfer_length;
+	unsigned int remaining_length;
 	int retry_cnt = 0;
 	unsigned int chunk_space;
 	struct tcm_message_data_blob *tcm_msg = NULL;
@@ -1017,15 +1024,16 @@ static int syna_tcm_v2_execute_cmd_request(struct tcm_dev *tcm_dev,
 	tcm_msg = &tcm_dev->msg_data;
 	chunk_space = tcm_dev->max_wr_size;
 
-	remaining_size = length;
+	remaining_length = payload_length;
 
 	/* available space for payload = total size - header - crc */
 	if (chunk_space == 0)
-		chunk_space = remaining_size;
+		chunk_space = remaining_length;
 	else
 		chunk_space = chunk_space - (MESSAGE_HEADER_SIZE + 2);
 
-	chunks = syna_pal_ceil_div(remaining_size, chunk_space);
+	chunks = syna_pal_ceil_div(remaining_length, chunk_space);
+
 	chunks = chunks == 0 ? 1 : chunks;
 
 	offset = 0;
@@ -1034,30 +1042,26 @@ static int syna_tcm_v2_execute_cmd_request(struct tcm_dev *tcm_dev,
 	 * to the command
 	 */
 	for (idx = 0; idx < chunks; idx++) {
-		if (remaining_size > chunk_space)
-			xfer_size = chunk_space;
+		if (remaining_length > chunk_space)
+			xfer_length = chunk_space;
 		else
-			xfer_size = remaining_size;
-
+			xfer_length = remaining_length;
 retry:
 		/* send command to device */
 		command = (idx == 0) ? command : CMD_CONTINUE_WRITE;
-		retval = syna_tcm_v2_send_cmd(tcm_dev,
+		retval = syna_tcm_v2_write(tcm_dev,
 				command,
 				&payload[offset],
-				total_length,
-				xfer_size,
+				xfer_length,
+				remaining_length,
 				(retry_cnt > 0));
 		if (retval < 0) {
 			LOGE("Fail to send command 0x%02x\n", command);
 			goto exit;
 		}
 
-		/* bus turnaround delay */
-		syna_pal_sleep_us(TAT_DELAY_US_MIN, TAT_DELAY_US_MAX);
-
 		/* get the response to the command immediately */
-		retval = syna_tcm_v2_get_response(tcm_dev);
+		retval = syna_tcm_v2_get_immediate_response(tcm_dev);
 		if (retval < 0) {
 			LOGE("Fail to get the response to command 0x%02x\n",
 				command);
@@ -1065,18 +1069,11 @@ retry:
 		}
 
 		/* check the response code */
-		tcm_msg->response_code = tcm_msg->status_report_code;
-		switch (tcm_msg->response_code) {
+		switch (tcm_msg->status_report_code) {
 		case STATUS_NO_REPORT_AVAILABLE:
 		case STATUS_OK:
 		case STATUS_ACK:
 			retry_cnt = 0;
-			/* typically, the total length and payload length should
-			 * be the same. if not, it probably belong to continuous
-			 * write operation and be controlled out of core lib
-			 */
-			if ((idx + 1 == chunks) && (total_length != length))
-				tcm_msg->response_code = STATUS_OK;
 			break;
 		case STATUS_PACKET_CORRUPTED:
 		case STATUS_RETRY_REQUESTED:
@@ -1084,61 +1081,62 @@ retry:
 			break;
 		default:
 			/* go to next if returned status belongs to a report */
-			if (tcm_msg->response_code >= REPORT_IDENTIFY)
+			if (tcm_msg->status_report_code >= REPORT_IDENTIFY)
 				goto next;
 			/* otherwise, unknown error */
-			LOGE("Incorrect status code 0x%02x of command 0x%02x\n",
-				tcm_msg->response_code, command);
+			LOGE("Incorrect status code 0x%02x of command 0x%02x or 0x%02x\n",
+				tcm_msg->status_report_code, command, tcm_msg->command);
 			goto exit;
 		}
 
 		if (retry_cnt > 0) {
 			if (command == CMD_RESET) {
 				LOGE("Command CMD_RESET corrupted, exit\n");
-				/* assume ACK and wait for interrupt assertion
-				 * once the response of reset is corrupted
-				 */
-				tcm_msg->response_code = STATUS_ACK;
+				/* assume ACK and wait for interrupt assertion */
+				tcm_msg->status_report_code = STATUS_ACK;
 				goto exit;
 			} else if (retry_cnt > COMMAND_RETRY_TIMES) {
-				LOGE("Command 0x%02x corrupted\n", command);
+				LOGE("Fal to run command 0x%02x due to message corrupted\n", command);
+				retval = -ERR_TCMMSG;
 				goto exit;
 			}
 
-			LOGN("Command 0x%02x, retry %d\n", command, retry_cnt);
-			syna_pal_sleep_us(WR_DELAY_US_MIN, WR_DELAY_US_MAX);
+			LOGN("Message corrupted at command 0x%02x, retry %d\n", command, retry_cnt);
+			syna_pal_sleep_us(tcm_msg->retry_time[0], tcm_msg->retry_time[1]);
 
 			goto retry;
 		}
 next:
-		offset += xfer_size;
+		offset += xfer_length;
 
-		remaining_size -= xfer_size;
+		remaining_length -= xfer_length;
 
 		if (chunks > 1)
-			syna_pal_sleep_us(WR_DELAY_US_MIN, WR_DELAY_US_MAX);
+			syna_pal_sleep_us(tcm_msg->turnaround_time[0], tcm_msg->turnaround_time[1]);
 	}
+
+	/* process the retrieved packet */
+	if (tcm_msg->status_report_code >= REPORT_IDENTIFY)
+		syna_tcm_v2_dispatch_report(tcm_dev);
+	else
+		syna_tcm_v2_dispatch_response(tcm_dev);
 
 exit:
 	return retval;
 }
 
-/*
- * syna_tcm_v2_read_message()
- *
- * Send a CMD_GET_REPORT to acquire a TouchCom v2 report packet from device.
- * Meanwhile, the retrieved data will be stored in the internal buffer.resp
- * or buffer.report.
+/**
+ * @brief   Acquire a TouchComm v2 packet from device.
  *
  * @param
- *    [ in] tcm_dev:            the device handle
+ *    [ in] tcm_dev:            the TouchComm device handle
  *    [out] status_report_code: status code or report code received
  *
  * @return
- *    0 or positive value on success; otherwise, on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static int syna_tcm_v2_read_message(struct tcm_dev *tcm_dev,
-		unsigned char *status_report_code)
+	unsigned char *status_report_code)
 {
 	int retval;
 	struct tcm_message_data_blob *tcm_msg = NULL;
@@ -1157,6 +1155,8 @@ static int syna_tcm_v2_read_message(struct tcm_dev *tcm_dev,
 	if (status_report_code)
 		*status_report_code = STATUS_INVALID;
 
+	tcm_msg->status_report_code = STATUS_IDLE;
+
 	tcm_msg->crc_bytes = 0;
 
 	syna_pal_mutex_lock(rw_mutex);
@@ -1165,7 +1165,7 @@ static int syna_tcm_v2_read_message(struct tcm_dev *tcm_dev,
 	retval = syna_tcm_v2_execute_cmd_request(tcm_dev,
 			CMD_TCM2_GET_REPORT,
 			NULL,
-			0, 0);
+			0);
 	if (retval < 0) {
 		LOGE("Fail to send command CMD_TCM2_GET_REPORT\n");
 
@@ -1176,32 +1176,18 @@ static int syna_tcm_v2_read_message(struct tcm_dev *tcm_dev,
 		goto exit;
 	}
 
-	/* duplicate the data to external buffer */
-	syna_tcm_buf_lock(&tcm_dev->external_buf);
-	if (tcm_msg->payload_length > 0) {
-		retval = syna_tcm_buf_alloc(&tcm_dev->external_buf,
-				tcm_msg->payload_length);
-		if (retval < 0) {
-			LOGE("Fail to allocate memory, external_buf invalid\n");
-			syna_tcm_buf_unlock(&tcm_dev->external_buf);
-			goto exit;
-		} else {
-			retval = syna_pal_mem_cpy(&tcm_dev->external_buf.buf[0],
-				tcm_msg->payload_length,
-				&tcm_msg->in.buf[MESSAGE_HEADER_SIZE],
-				tcm_msg->in.buf_size - MESSAGE_HEADER_SIZE,
-				tcm_msg->payload_length);
-			if (retval < 0) {
-				LOGE("Fail to copy data to external buffer\n");
-				syna_tcm_buf_unlock(&tcm_dev->external_buf);
-				goto exit;
-			}
-		}
+	/* duplicate the data to the external buffer */
+	if (tcm_dev->cb_data_duplicator[tcm_msg->status_report_code].cb) {
+		syna_tcm_buf_lock(&tcm_msg->in);
+		tcm_dev->cb_data_duplicator[tcm_msg->status_report_code].cb(
+			tcm_msg->status_report_code,
+			&tcm_msg->in.buf[MESSAGE_HEADER_SIZE],
+			tcm_msg->payload_length,
+			tcm_dev->cb_data_duplicator[tcm_msg->status_report_code].private_data);
+		syna_tcm_buf_unlock(&tcm_msg->in);
 	}
-	tcm_dev->external_buf.data_length = tcm_msg->payload_length;
-	syna_tcm_buf_unlock(&tcm_dev->external_buf);
 
-	if (tcm_msg->response_code == STATUS_NO_REPORT_AVAILABLE)
+	if (tcm_msg->status_report_code == STATUS_NO_REPORT_AVAILABLE)
 		goto exit;
 
 	/* process the retrieved packet */
@@ -1219,42 +1205,63 @@ exit:
 
 	return retval;
 }
-
-/*
- * syna_tcm_v2_write_message()
- *
- * Write message including command and its payload to TouchCom device.
- * Then, the response of the command generated by the device will be
- * read in and stored in internal buffer.resp.
+/**
+ * @brief   A block function to wait for the ATTN assertion.
  *
  * @param
- *    [ in] tcm_dev:        the device handle
+ *    [ in] tcm_dev:       the TouchComm device handle
+ *    [ in] timeout:       timeout time waiting for the assertion
+ * @return
+ *    void.
+ */
+static void syna_tcm_v2_wait_for_attn(struct tcm_dev *tcm_dev, int timeout)
+{
+	if (!tcm_dev) {
+		LOGE("Invalid tcm device handle\n");
+		return;
+	}
+
+	/* if set, invoke the custom function to wait for the ATTN assertion;
+	 * otherwise, wait for the completion event.
+	 */
+	if (tcm_dev->hw->ops_wait_for_attn)
+		tcm_dev->hw->ops_wait_for_attn(tcm_dev->hw, timeout);
+	else
+		syna_pal_completion_wait_for(&tcm_dev->msg_data.cmd_completion, timeout);
+}
+/**
+ * @brief   The entry of the command processing.
+ *          Send a command and payload to the device.
+ *          After that, the response of the command will also be read in
+ *
+ * @param
+ *    [ in] tcm_dev:        the TouchComm device handle
  *    [ in] command:        TouchComm command
  *    [ in] payload:        data payload, if any
- *    [ in] length_total:   length of total payload
- *    [ in] length:         length of payload data, if any
+ *    [ in] payload_length: length of data payload, if any
  *    [out] resp_code:      response code returned
- *    [ in] delay_ms_resp:  delay time for response reading.
- *                          a positive value presents the time for polling;
+ *    [ in] resp_reading:   method to read in the response
+ *                          a positive value presents the ms time delay for polling;
  *                          or, set '0' or 'RESP_IN_ATTN' for ATTN driven
  *
  * @return
- *    0 or positive value on success; otherwise, on error.
+ *    0 or positive value in case of success, a negative value otherwise.
  */
 static int syna_tcm_v2_write_message(struct tcm_dev *tcm_dev,
-		unsigned char command, unsigned char *payload,
-		unsigned int length_total, unsigned int length,
-		unsigned char *resp_code, unsigned int delay_ms_resp)
+	unsigned char command, unsigned char *payload,
+	unsigned int payload_length, unsigned char *resp_code,
+	unsigned int resp_reading)
 {
 	int retval;
-	int timeout = 0;
-	int polling_ms = 0;
+	unsigned int timeout = 0;
+	int wait_ms = 0;
 	struct tcm_message_data_blob *tcm_msg = NULL;
 	syna_pal_mutex_t *cmd_mutex = NULL;
 	syna_pal_mutex_t *rw_mutex = NULL;
 	syna_pal_completion_t *cmd_completion = NULL;
-	bool has_irq_ctrl = false;
 	bool in_polling = false;
+	bool irq_disabled = false;
+	unsigned int cmd_response_timeout;
 
 	if (!tcm_dev) {
 		LOGE("Invalid tcm device handle\n");
@@ -1270,32 +1277,13 @@ static int syna_tcm_v2_write_message(struct tcm_dev *tcm_dev,
 		*resp_code = STATUS_INVALID;
 
 	/* indicate which mode is used */
-	in_polling = (delay_ms_resp != RESP_IN_ATTN);
-	if (in_polling)
-		delay_ms_resp = (delay_ms_resp < 100) ? 100 : delay_ms_resp;
-
-	/* irq control is enabled only when the operations is implemented
-	 * and the current status of irq is enabled.
-	 * do not enable irq if it is disabled by someone.
-	 */
-	has_irq_ctrl = (bool)(tcm_dev->hw_if->ops_enable_irq != NULL);
-	has_irq_ctrl &= tcm_dev->hw_if->bdata_attn.irq_enabled;
-
-	/* disable irq when using polling mode */
-	if (has_irq_ctrl && in_polling && tcm_dev->hw_if->ops_enable_irq)
-		tcm_dev->hw_if->ops_enable_irq(tcm_dev->hw_if, false);
-
-	if (length_total != length) {
-		LOGD("Command: 0x%02x, payload length: %d (given: %d)\n",
-			command, length_total, length);
-	} else {
-		LOGD("Command: 0x%02x, payload length: %d\n", command, length);
-	}
+	in_polling = (resp_reading != CMD_RESPONSE_IN_ATTN);
 
 	syna_pal_mutex_lock(cmd_mutex);
 
 	syna_pal_mutex_lock(rw_mutex);
 
+	ATOMIC_SET(tcm_dev->command_processing, 1);
 	ATOMIC_SET(tcm_msg->command_status, CMD_STATE_BUSY);
 
 	/* reset the command completion */
@@ -1303,12 +1291,17 @@ static int syna_tcm_v2_write_message(struct tcm_dev *tcm_dev,
 
 	tcm_msg->command = command;
 
+	LOGD("Command: 0x%02x, payload size: %d\n", command, payload_length);
+
+	/* disable irq in case of polling mode */
+	if (in_polling)
+		irq_disabled = (syna_tcm_enable_irq(tcm_dev, false) > 0);
+
 	/* request a command execution */
 	retval = syna_tcm_v2_execute_cmd_request(tcm_dev,
 			command,
 			payload,
-			length_total,
-			length);
+			payload_length);
 	if (retval < 0) {
 		LOGE("Fail to send command 0x%02x to device\n", command);
 		syna_pal_mutex_unlock(rw_mutex);
@@ -1317,211 +1310,184 @@ static int syna_tcm_v2_write_message(struct tcm_dev *tcm_dev,
 
 	syna_pal_mutex_unlock(rw_mutex);
 
-	/* waiting for the resp data only at STATUS_ACK */
-	if (tcm_msg->response_code >= REPORT_IDENTIFY) {
-		syna_tcm_v2_dispatch_report(tcm_dev);
-		goto check_response;
-	}
-
-	if (tcm_msg->response_code != STATUS_ACK) {
-		syna_tcm_v2_dispatch_response(tcm_dev);
-		goto check_response;
-	}
-
-	/* handle the report generated by the command
-	 *
-	 * assuming to select the polling mode, the while-loop below will
-	 * repeatedly read in the respose data based on the given polling
-	 * time; otherwise, wait until receiving a completion event from
-	 * interrupt thread.
-	 */
+	/* process the command response either in polling or by ATTN */
 	timeout = 0;
-	if (!in_polling)
-		polling_ms = CMD_RESPONSE_TIMEOUT_MS;
-	else
-		polling_ms = delay_ms_resp;
-
+	wait_ms = (!in_polling) ? tcm_msg->command_timeout_time : resp_reading;
+	cmd_response_timeout = tcm_msg->command_timeout_time;
 	do {
-		/* wait for the completion event triggered by read_message */
-		retval = syna_pal_completion_wait_for(cmd_completion,
-				polling_ms);
+		timeout += wait_ms;
 
-		/* break when getting a valid resp; otherwise, do polling */
-		if (ATOMIC_GET(tcm_msg->command_status) == CMD_STATE_IDLE)
-			goto check_response;
-		if (in_polling) {
-			ATOMIC_SET(tcm_msg->command_status, CMD_STATE_BUSY);
+		if (in_polling)
+			syna_pal_sleep_ms(wait_ms);
+		else
+			syna_tcm_v2_wait_for_attn(tcm_dev, wait_ms);
 
-			/* retrieve the message packet back */
+		/* stop the processing if terminated */
+		if (ATOMIC_GET(tcm_msg->command_status) == CMD_STATE_TERMINATED) {
+			retval = 0;
+			goto exit;
+		}
+
+		/* read in a message if the processing is not completed */
+		if (ATOMIC_GET(tcm_msg->command_status) == CMD_STATE_BUSY) {
 			retval = syna_tcm_v2_read_message(tcm_dev, NULL);
-			/* keep in polling if still not having a valid resp */
 			if (retval < 0)
-				syna_pal_completion_reset(cmd_completion);
+				continue;
 		}
 
-		timeout += polling_ms;
+		/* break the loop once the response to command was ready */
+		if (ATOMIC_GET(tcm_msg->command_status) != CMD_STATE_BUSY)
+			break;
 
-	} while (timeout < CMD_RESPONSE_TIMEOUT_MS);
+	} while (timeout < tcm_msg->command_timeout_time);
 
-	/* check the status of response data
-	 * according to the touchcomm spec, each command message
-	 * should have an associated response message.
-	 */
-check_response:
+
 	if (ATOMIC_GET(tcm_msg->command_status) != CMD_STATE_IDLE) {
-		if (timeout >= CMD_RESPONSE_TIMEOUT_MS) {
-			LOGE("Timed out wait for response of command 0x%02x\n",
-				command);
+		if (timeout >= cmd_response_timeout) {
+			LOGE("Timed out wait for response of command 0x%02x (%dms)\n",
+				command, timeout);
 			retval = -ERR_TIMEDOUT;
-			goto exit;
 		} else {
-			LOGE("Fail to get valid response of command 0x%02x\n",
-				command);
+			LOGE("Fail to get valid response 0x%02x of command 0x%02x\n",
+				tcm_msg->status_report_code, command);
 			retval = -ERR_TCMMSG;
-			goto exit;
 		}
+		goto exit;
 	}
 
-	/* copy response code to the caller */
-	if (resp_code)
-		*resp_code = tcm_msg->status_report_code;
-
-	if (tcm_msg->response_code != STATUS_OK) {
-		LOGE("Error code 0x%02x of command 0x%02x\n",
-			tcm_msg->response_code, tcm_msg->command);
-		retval = -ERR_TCMMSG;
-	} else {
-		retval = 0;
-	}
+	retval = 0;
 
 exit:
+	if (resp_code)
+		*resp_code = tcm_msg->response_code;
+
 	tcm_msg->command = CMD_NONE;
 
+	/* recovery the irq only when running in polling mode
+	 * and irq has been disabled previously
+	 */
+	if (in_polling && irq_disabled)
+		syna_tcm_enable_irq(tcm_dev, true);
+
 	ATOMIC_SET(tcm_msg->command_status, CMD_STATE_IDLE);
+	ATOMIC_SET(tcm_dev->command_processing, 0);
 
 	syna_pal_mutex_unlock(cmd_mutex);
 
-	/* recovery the irq if using polling mode */
-	if (has_irq_ctrl && in_polling && tcm_dev->hw_if->ops_enable_irq)
-		tcm_dev->hw_if->ops_enable_irq(tcm_dev->hw_if, true);
-
 	return retval;
 }
-/*
- * syna_tcm_v2_set_ops()
+/**
+ * @brief   Process the startup packet of TouchComm V2 firmware
  *
- * Assign read / write operations
+ *          For TouchComm v2 protocol, each packet must have a valid crc-6.
+ *          If so, send an identify command to identify the device and complete
+ *          the pre-initialization.
  *
  * @param
- *    [ in] tcm_dev: the device handle
+ *    [ in] tcm_dev: the TouchComm device handle
+ *    [ in] bypass:  flag to bypass the detection
+ *    [ in] do_reset: flag to issue a reset if falling down to error
  *
  * @return
- *    none
+ *    0 or positive value in case of success, a negative value otherwise.
  */
-void syna_tcm_v2_set_ops(struct tcm_dev *tcm_dev)
-{
-	if (!tcm_dev) {
-		LOGE("Invalid tcm device handle\n");
-		return;
-	}
-
-	/* expose the read / write operations */
-	tcm_dev->read_message = syna_tcm_v2_read_message;
-	tcm_dev->write_message = syna_tcm_v2_write_message;
-	tcm_dev->set_max_rw_size = syna_tcm_v2_set_max_rw_size;
-
-	tcm_dev->msg_data.predict_length = 0;
-	tcm_dev->protocol = TOUCHCOMM_V2;
-
-	if (tcm_dev->msg_data.legacy)
-		LOGI("Apply legacy TouchComm V2 firmware\n");
-}
- /*
-  * syna_tcm_v2_detect()
-  *
-  * Function to process the startup packet of TouchComm V2 firmware
-  *
-  * For TouchCom v2 protocol, each packet must have a valid crc-6 at the end.
-  * If so, send an identify command to identify the device and complete the
-  * pre-initialization.
-  *
-  * @param
-  *    [ in] tcm_dev: the device handle
-  *    [ in] data:    raw 4-byte data
-  *    [ in] size:    length of input data in bytes
-  *
-  * @return
-  *    on success, 0 or positive value; otherwise, negative value on error.
-  */
-int syna_tcm_v2_detect(struct tcm_dev *tcm_dev, unsigned char *data,
-		unsigned int size)
+int syna_tcm_v2_detect(struct tcm_dev *tcm_dev, bool bypass, bool do_reset)
 {
 	int retval;
+	unsigned char *data;
+	unsigned int info_size = (unsigned int)sizeof(struct tcm_identification_info);
 	struct tcm_message_data_blob *tcm_msg = NULL;
 	unsigned char resp_code = 0;
 	unsigned short default_rc = 0x5a;
+	unsigned char command;
+#ifdef VERSION_2_LEGACY_FW
+	unsigned int bytes_to_read;
+	unsigned char temp[4] = { 0 };
+#endif
 
 	if (!tcm_dev) {
 		LOGE("Invalid tcm device handle\n");
 		return -ERR_INVAL;
 	}
 
-	if ((!data) || (size < MESSAGE_HEADER_SIZE)) {
-		LOGE("Invalid parameters\n");
-		return -ERR_INVAL;
-	}
-
-	if (syna_tcm_crc6(data, BITS_IN_MESSAGE_HEADER) != 0)
-		return -ERR_NODEV;
+	if (bypass)
+		goto set_ops;
 
 	tcm_msg = &tcm_dev->msg_data;
 
-	/* send 'GET_REPORT' command to read in the startup packet */
+	syna_pal_mutex_lock(&tcm_msg->rw_mutex);
+	syna_tcm_buf_lock(&tcm_msg->in);
+
+	retval = syna_tcm_buf_alloc(&tcm_msg->in, info_size + MESSAGE_HEADER_SIZE);
+	if (retval < 0) {
+		LOGE("Fail to allocate memory for buf_in\n");
+		syna_tcm_buf_unlock(&tcm_msg->in);
+		syna_pal_mutex_unlock(&tcm_msg->rw_mutex);
+		return retval;
+	}
+
+	data = tcm_msg->in.buf;
+#ifdef VERSION_2_LEGACY_FW
+	bytes_to_read = MESSAGE_HEADER_SIZE;
+	temp[0] = 0x07;
+	retval = syna_tcm_write(tcm_dev, &temp[0], 1);
+	if (retval < 0) {
+		LOGE("Fail to write data directly\n");
+		syna_tcm_buf_unlock(&tcm_msg->in);
+		syna_pal_mutex_unlock(&tcm_msg->rw_mutex);
+		return retval;
+	}
+
+	retval = syna_tcm_read(tcm_dev, data, MESSAGE_HEADER_SIZE);
+	if (retval < 0) {
+		LOGE("Fail to retrieve start-up data from bus\n");
+		syna_tcm_buf_unlock(&tcm_msg->in);
+		syna_pal_mutex_unlock(&tcm_msg->rw_mutex);
+		return retval;
+	}
+	LOGD("start-up data %02x %02x %02x %02x ... (read %d bytes)\n",
+		data[0], data[1], data[2], data[3], bytes_to_read);
+
+	if (syna_tcm_crc6(data, BITS_IN_MESSAGE_HEADER) != 0) {
+		syna_tcm_buf_unlock(&tcm_msg->in);
+		syna_pal_mutex_unlock(&tcm_msg->rw_mutex);
+		return -ERR_NODEV;
+	}
+
+#endif
+
+	syna_tcm_buf_unlock(&tcm_msg->in);
+	syna_pal_mutex_unlock(&tcm_msg->rw_mutex);
+
+	/* the identify report should be the first packet at startup
+	 * otherwise, send the command to identify
+	 */
 	retval = syna_tcm_v2_read_message(tcm_dev, &resp_code);
 	if ((retval < 0) || (resp_code != REPORT_IDENTIFY)) {
-		/* if not, send an identify command instead */
-		retval = syna_tcm_v2_write_message(tcm_dev,
-				CMD_IDENTIFY,
-				NULL,
-				0,
-				0,
-				&resp_code,
-				RESP_IN_POLLING);
-		if ((retval < 0) || (resp_code != STATUS_OK)) {
-			/* if still not working, do reset */
-			retval = syna_tcm_v2_write_message(tcm_dev,
-					CMD_RESET,
-					NULL,
-					0,
-					0,
-					&resp_code,
-					RESET_DELAY_MS);
-			if (retval < 0) {
-				LOGE("Fail to identify at startup\n");
-				return -ERR_TCMMSG;
-			}
+		command = (do_reset) ? CMD_RESET : CMD_IDENTIFY;
+		retval = syna_tcm_v2_write_message(tcm_dev, command,
+				NULL, 0, &resp_code, tcm_msg->command_polling_time);
+		if ((retval < 0) || (resp_code != REPORT_IDENTIFY)) {
+			LOGE("Fail to identify at startup\n");
+			return -ERR_TCMMSG;
 		}
 	}
 
 	/* parse the identify info packet if needed */
 	if (tcm_dev->dev_mode == MODE_UNKNOWN) {
 		syna_tcm_buf_lock(&tcm_msg->in);
-
 		retval = syna_tcm_v2_parse_idinfo(tcm_dev,
-				&tcm_msg->in.buf[MESSAGE_HEADER_SIZE],
-				tcm_msg->in.buf_size,
-				tcm_msg->payload_length);
+				(unsigned char *)&data[MESSAGE_HEADER_SIZE],
+				tcm_msg->in.buf_size, info_size);
+		syna_tcm_buf_unlock(&tcm_msg->in);
 		if (retval < 0) {
 			LOGE("Fail to parse identify report at startup\n");
-			syna_tcm_buf_unlock(&tcm_msg->in);
 			return -ERR_TCMMSG;
 		}
-
-		syna_tcm_buf_unlock(&tcm_msg->in);
 	}
 
 	/* set up the max. reading length at startup */
-	retval = syna_tcm_v2_set_max_rw_size(tcm_dev);
+	retval = syna_tcm_v2_check_max_rw_size(tcm_dev);
 	if (retval < 0) {
 		LOGE("Fail to setup the max length to read/write\n");
 		return -ERR_TCMMSG;
@@ -1533,12 +1499,19 @@ int syna_tcm_v2_detect(struct tcm_dev *tcm_dev, unsigned char *data,
 	tcm_dev->msg_data.has_extra_rc = false;
 	tcm_dev->msg_data.rc_byte = (unsigned char)default_rc;
 
-	LOGI("Message including CRC:(%s) extra RC:(%s)\n",
+	LOGI("TouchCom v2 detected\n");
+	LOGI("Support of message CRC(%s) and extra RC(%s)\n",
 			(tcm_msg->has_crc) ? "yes" : "no",
 			(tcm_msg->has_extra_rc) ? "yes" : "no");
 
-	/* set up read/write operations */
-	syna_tcm_v2_set_ops(tcm_dev);
+set_ops:
+	tcm_dev->read_message = syna_tcm_v2_read_message;
+	tcm_dev->write_message = syna_tcm_v2_write_message;
+	tcm_dev->set_max_rw_size = syna_tcm_v2_set_up_max_rw_size;
+	tcm_dev->terminate = syna_tcm_v2_terminate;
+
+	tcm_dev->msg_data.predict_length = 0;
+	tcm_dev->protocol = TOUCHCOMM_V2;
 
 	return 0;
 }

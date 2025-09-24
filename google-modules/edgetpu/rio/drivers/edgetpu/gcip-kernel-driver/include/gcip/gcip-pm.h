@@ -8,7 +8,6 @@
 #ifndef __GCIP_PM_H__
 #define __GCIP_PM_H__
 
-#include <linux/atomic.h>
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
@@ -26,8 +25,6 @@ struct gcip_pm {
 	bool power_down_pending;
 	/* The worker to asynchronously call gcip_pm_put(). */
 	struct work_struct put_async_work;
-	/* The number of @count to be decreased in the @put_async_work. */
-	atomic_t put_async_count;
 
 	/* Callbacks. See struct gcip_pm_args. */
 	void *data;

@@ -23,7 +23,7 @@
 #include <linux/of.h>
 #include <linux/mutex.h>
 #include <linux/atomic.h>
-#include <linux/of_gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/kfifo.h>
 #include <linux/poll.h>
 #include <linux/input.h>
@@ -42,8 +42,7 @@
 #define QBT_TOUCH_FD_VERSION_2 2
 #define QBT_TOUCH_FD_VERSION_3 3
 struct finger_detect_gpio {
-	int gpio;
-	int active_low;
+	struct gpio_desc *gpio;
 	int irq;
 	struct work_struct work;
 	int last_gpio_state;
@@ -89,7 +88,7 @@ struct fd_userspace_buf {
 	struct fd_event fd_events[MAX_FW_EVENTS];
 };
 struct fw_ipc_info {
-	int gpio;
+	struct gpio_desc *gpio;
 	int irq;
 	bool irq_enabled;
 	struct work_struct work;
@@ -110,7 +109,7 @@ struct qbt_drvdata {
 	struct fw_ipc_info	fw_ipc;
 	struct finger_detect_gpio fd_gpio;
 	struct finger_detect_touch fd_touch;
-	uint32_t intr2_gpio;
+	struct gpio_desc *intr2_gpio;
 	uint32_t current_slot_state[MT_MAX_FINGERS];
 	DECLARE_KFIFO(fd_events, struct fd_event, MAX_FW_EVENTS);
 	DECLARE_KFIFO(ipc_events, struct ipc_event, MAX_FW_EVENTS);
@@ -403,8 +402,8 @@ static void qbt_touch_work_func(struct work_struct *work)
 				}
 			if (config->intr2_enable) {
 				pr_debug("Setting INTR2 GPIO to %d\n", intr2_state);
-				if (gpio_is_valid(drvdata->intr2_gpio))
-					__gpio_set_value(drvdata->intr2_gpio, intr2_state);
+				if (drvdata->intr2_gpio)
+					gpiod_set_value(drvdata->intr2_gpio, intr2_state);
 				else
 					pr_debug("INTR2 GPIO not available\n");
 			}
@@ -708,8 +707,8 @@ static long qbt_ioctl(
 			goto end;
 		}
 		pr_debug("Setting INTR2 GPIO to %d\n", test.state);
-		if (gpio_is_valid(drvdata->intr2_gpio))
-			__gpio_set_value(drvdata->intr2_gpio, test.state);
+		if (drvdata->intr2_gpio)
+			gpiod_set_value(drvdata->intr2_gpio, test.state);
 		else
 			pr_debug("INTR2 GPIO is not available\n");
 		break;
@@ -912,8 +911,7 @@ static int qbt_dev_register(struct qbt_drvdata *drvdata)
 		pr_err("cdev_add failed for ipc %d\n", ret);
 		goto err_cdev_add;
 	}
-	drvdata->qbt_class = class_create(THIS_MODULE,
-						 drvdata->qbt_node);
+	drvdata->qbt_class = class_create(drvdata->qbt_node);
 	if (IS_ERR(drvdata->qbt_class)) {
 		ret = PTR_ERR(drvdata->qbt_class);
 		pr_err("class_create failed %d\n", ret);
@@ -959,8 +957,8 @@ static void qbt_gpio_report_event(struct qbt_drvdata *drvdata, int state)
 			&& state == drvdata->fd_gpio.last_gpio_state)
 		return;
 	pr_debug("gpio %d: report state %d current_time %lu uS\n",
-		drvdata->fd_gpio.gpio, state,
-		(unsigned long)ktime_to_us(ktime_get()));
+		 desc_to_gpio(drvdata->fd_gpio.gpio), state,
+		 (unsigned long)ktime_to_us(ktime_get()));
 	drvdata->fd_gpio.event_reported = 1;
 	drvdata->fd_gpio.last_gpio_state = state;
 	event.state = state;
@@ -1020,9 +1018,8 @@ static void qbt_gpio_work_func(struct work_struct *work)
 		return;
 	}
 	drvdata = container_of(work, struct qbt_drvdata, fd_gpio.work);
-	state = (__gpio_get_value(drvdata->fd_gpio.gpio) ?
-			QBT_EVENT_FINGER_DOWN : QBT_EVENT_FINGER_UP)
-			^ drvdata->fd_gpio.active_low;
+	state = (gpiod_get_value(drvdata->fd_gpio.gpio) ?
+		 QBT_EVENT_FINGER_DOWN : QBT_EVENT_FINGER_UP);
 	qbt_gpio_report_event(drvdata, state);
 	pm_relax(drvdata->dev);
 }
@@ -1092,22 +1089,6 @@ static irqreturn_t qbt_ipc_irq_handler(int irq, void *dev_id)
 	schedule_work(&drvdata->fw_ipc.work);
 	return IRQ_HANDLED;
 }
-static int setup_intr2_irq(struct platform_device *pdev,
-		struct qbt_drvdata *drvdata)
-{
-	int rc = 0;
-	const char *desc = "qbt_intr2";
-	rc = devm_gpio_request_one(&pdev->dev, drvdata->intr2_gpio,
-		GPIOF_OUT_INIT_LOW, desc);
-	if (rc < 0) {
-		pr_err("failed to request intr2 gpio %d, error %d\n",
-			drvdata->intr2_gpio, rc);
-		goto end;
-	}
-end:
-	pr_debug("rc %d\n", rc);
-	return rc;
-}
 static int setup_fd_gpio_irq(struct platform_device *pdev,
 		struct qbt_drvdata *drvdata)
 {
@@ -1118,18 +1099,11 @@ static int setup_fd_gpio_irq(struct platform_device *pdev,
 		pr_err("Skipping as WUHB_INT is disconnected\n");
 		goto end;
 	}
-	rc = devm_gpio_request_one(&pdev->dev, drvdata->fd_gpio.gpio,
-		GPIOF_IN, desc);
-	if (rc < 0) {
-		pr_err("failed to request gpio %d, error %d\n",
-			drvdata->fd_gpio.gpio, rc);
-		goto end;
-	}
-	irq = gpio_to_irq(drvdata->fd_gpio.gpio);
+	irq = gpiod_to_irq(drvdata->fd_gpio.gpio);
 	if (irq < 0) {
 		rc = irq;
 		pr_err("unable to get irq number for gpio %d, error %d\n",
-			drvdata->fd_gpio.gpio, rc);
+		       desc_to_gpio(drvdata->fd_gpio.gpio), rc);
 		goto end;
 	}
 	drvdata->fd_gpio.irq = irq;
@@ -1151,21 +1125,14 @@ static int setup_ipc_irq(struct platform_device *pdev,
 {
 	int rc = 0;
 	const char *desc = "qbt_ipc";
-	drvdata->fw_ipc.irq = gpio_to_irq(drvdata->fw_ipc.gpio);
+	drvdata->fw_ipc.irq = gpiod_to_irq(drvdata->fw_ipc.gpio);
 	INIT_WORK(&drvdata->fw_ipc.work, qbt_irq_report_event);
 	pr_debug("irq %d gpio %d\n",
-			drvdata->fw_ipc.irq, drvdata->fw_ipc.gpio);
+		 drvdata->fw_ipc.irq, desc_to_gpio(drvdata->fw_ipc.gpio));
 	if (drvdata->fw_ipc.irq < 0) {
 		rc = drvdata->fw_ipc.irq;
 		pr_err("no irq for gpio %d, error=%d\n",
-			drvdata->fw_ipc.gpio, rc);
-		goto end;
-	}
-	rc = devm_gpio_request_one(&pdev->dev, drvdata->fw_ipc.gpio,
-			GPIOF_IN, desc);
-	if (rc < 0) {
-		pr_err("failed to request gpio %d, error %d\n",
-			drvdata->fw_ipc.gpio, rc);
+		       desc_to_gpio(drvdata->fw_ipc.gpio), rc);
 		goto end;
 	}
 	rc = devm_request_threaded_irq(&pdev->dev,
@@ -1195,30 +1162,38 @@ static int qbt_read_device_tree(struct platform_device *pdev,
 	struct qbt_drvdata *drvdata)
 {
 	int rc = 0;
-	int gpio;
-	enum of_gpio_flags flags;
-	drvdata->intr2_gpio = of_get_named_gpio(pdev->dev.of_node,
-			"qcom,intr2-gpio", 0);
-	if (!gpio_is_valid(drvdata->intr2_gpio))
-		pr_err("intr2 gpio not found, gpio=%d\n", drvdata->intr2_gpio);
+	struct gpio_desc *gpio;
+	drvdata->intr2_gpio = devm_gpiod_get_optional(&pdev->dev, "qcom,intr2",
+						      GPIOD_OUT_LOW);
+	if (IS_ERR(drvdata->intr2_gpio)) {
+		rc = PTR_ERR(drvdata->intr2_gpio);
+		pr_err("failed to request intr2 gpio, error %d\n", rc);
+		goto end;
+	}
+	if (!drvdata->intr2_gpio)
+		pr_warn("intr2 gpio not found\n");
 	/* read IPC gpio */
-	drvdata->fw_ipc.gpio = of_get_named_gpio(pdev->dev.of_node,
-		"qcom,ipc-gpio", 0);
-	if (drvdata->fw_ipc.gpio < 0) {
-		rc = drvdata->fw_ipc.gpio;
-		pr_err("ipc gpio not found, error=%d\n", rc);
+	drvdata->fw_ipc.gpio = devm_gpiod_get(&pdev->dev, "qcom,ipc",
+					      GPIOD_IN);
+	if (IS_ERR(drvdata->fw_ipc.gpio)) {
+		rc = PTR_ERR(drvdata->fw_ipc.gpio);
+		pr_err("failed to request ipc gpio, error %d\n", rc);
 		goto end;
 	}
-	gpio = of_get_named_gpio_flags(pdev->dev.of_node,
-				"qcom,finger-detect-gpio", 0, &flags);
-	if (gpio < 0) {
-		pr_err("failed to get gpio flags\n");
+	gpio = devm_gpiod_get_optional(&pdev->dev, "qcom,finger-detect",
+				       GPIOD_IN);
+	if (IS_ERR(gpio)) {
+		rc = PTR_ERR(gpio);
+		pr_err("failed to request fd gpio, error %d\n", rc);
+		goto end;
+	}
+	if (gpio) {
+		drvdata->is_wuhb_connected = 1;
+		drvdata->fd_gpio.gpio = gpio;
+	} else {
 		drvdata->is_wuhb_connected = 0;
-		goto end;
+		pr_warn("fd gpio not found\n");
 	}
-	drvdata->is_wuhb_connected = 1;
-	drvdata->fd_gpio.gpio = gpio;
-	drvdata->fd_gpio.active_low = flags & OF_GPIO_ACTIVE_LOW;
 end:
 	return rc;
 }
@@ -1257,8 +1232,6 @@ static int qbt_probe(struct platform_device *pdev)
 	INIT_KFIFO(drvdata->ipc_events);
 	init_waitqueue_head(&drvdata->read_wait_queue_fd);
 	init_waitqueue_head(&drvdata->read_wait_queue_ipc);
-	if (gpio_is_valid(drvdata->intr2_gpio))
-		rc = setup_intr2_irq(pdev, drvdata);
 	rc = setup_fd_gpio_irq(pdev, drvdata);
 	if (rc < 0)
 		goto end;

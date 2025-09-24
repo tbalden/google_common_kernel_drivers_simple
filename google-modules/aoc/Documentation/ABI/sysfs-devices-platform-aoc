@@ -7,3 +7,23 @@ Description:
 		if a request for AOC fabric to reach a certain state has timed out.
 
 Users:		AOC kernel driver, aocd process in userspace.
+
+What:		/sys/devices/platform/[0-9]+.aoc/voltage_pf[0-7]
+Date:		August 2024
+KernelVersion:	2.6.22
+Contact:	alexiacobucci@google.com
+Description:
+		Read-only node used by AOC's kernel driver to share stats on AOC's
+		voltage levels.
+
+Users:		userspace processes
+
+What:		/sys/devices/platform/[0-9]+.aoc/control/memory_votes_[a-z0-9]*
+Date:		April 2025
+KernelVersion:	2.6.22
+Contact:	alexiacobucci@google.com
+Description:
+		Read-only node used by AOC's kernel driver to share stats on AOC's
+		memory interface votes for a given core.
+
+Users:		userspace processes

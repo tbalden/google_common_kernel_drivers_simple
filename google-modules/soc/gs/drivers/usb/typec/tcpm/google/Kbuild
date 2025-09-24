@@ -9,6 +9,8 @@ obj-$(CONFIG_TYPEC_MAX77759)                += tcpci_max77759.o max77759_helper.
 obj-$(CONFIG_TYPEC_MAX77759)                += bc_max77759.o max777x9_contaminant.o
 obj-$(CONFIG_TYPEC_MAX77759_CONTAMINANT)    += max77759_contaminant.o
 obj-$(CONFIG_TYPEC_MAX77779_CONTAMINANT)    += max77779_contaminant.o
+obj-$(CONFIG_TYPEC_MAX777X9_I2C)            += tcpci_max777x9_i2c.o
+obj-$(CONFIG_TYPEC_MAX777X9_SPMI)           += tcpci_max777x9_spmi.o
 obj-$(CONFIG_POGO_TRANSPORT)		    += pogo_transport.o
 obj-$(CONFIG_TYPEC_COOLING_DEV)             += usbc_cooling_dev.o
 

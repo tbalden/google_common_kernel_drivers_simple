@@ -2728,7 +2728,7 @@ static inline u16 pcie_read_ap2cp_irq(struct mem_link_device *mld)
 
 struct shmem_srinfo {
 	unsigned int size;
-	char buf[0];
+	char buf[];
 };
 
 /* not in use */
@@ -4134,11 +4134,8 @@ struct link_device *create_link_device(struct platform_device *pdev, u32 link_ty
 	 * Alloc an instance of mem_link_device structure
 	 */
 	mld = kzalloc(sizeof(struct mem_link_device), GFP_KERNEL);
-	if (!mld) {
-		mif_err("%s<->%s: ERR! mld kzalloc fail\n",
-			modem->link_name, modem->name);
+	if (!mld)
 		return NULL;
-	}
 
 	/*
 	 * Retrieve modem-specific attributes value

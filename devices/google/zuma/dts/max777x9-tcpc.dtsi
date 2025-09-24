@@ -13,7 +13,7 @@ max77759tcpc: max77759tcpc@25 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&usb_pd_irq &gpa7_5>;
 	interrupt-parent = <&gpa8>;
-	usbpd,usbpd_int = <&gpa8 3 GPIO_ACTIVE_LOW>;
+	usbpd,usbpd_int-gpio = <&gpa8 3 GPIO_ACTIVE_LOW>;
 	usb-psy-name = "usb";
 	/* Enable when BMS is up */
 	chg-psy-name = "gcpm";

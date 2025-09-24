@@ -12,6 +12,7 @@
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_connector.h>
+#include <linux/errno.h>
 
 #include "gs_drm/gs_display_mode.h"
 
@@ -21,6 +22,13 @@
 #ifndef INVALID_PANEL_ID
 #define INVALID_PANEL_ID 0xFFFFFFFF
 #endif
+
+#define PANEL_SERIAL_MAX 40
+
+#define DISPLAY_PANEL_INDEX_PRIMARY 0
+#define DISPLAY_PANEL_INDEX_SECONDARY 1
+
+#define MAX_ALLOWED_MIPI_CLOCK_NUM 8
 
 enum gs_hbm_mode {
 	GS_HBM_OFF = 0,
@@ -36,11 +44,40 @@ enum gs_mipi_sync_mode {
 	GS_MIPI_CMD_SYNC_GHBM = BIT(3),
 	GS_MIPI_CMD_SYNC_BL = BIT(4),
 	GS_MIPI_CMD_SYNC_OP_RATE = BIT(5),
+	GS_MIPI_CMD_SYNC_PWM_MODE = BIT(6),
+};
+
+struct gs_mipi_clks {
+	u32 clks[MAX_ALLOWED_MIPI_CLOCK_NUM];
 };
 
 enum gs_drm_connector_lhbm_hist_roi_type {
 	GS_HIST_ROI_FULL_SCREEN,
 	GS_HIST_ROI_CIRCLE,
+};
+
+/**
+ * enum gs_pwm_mode - the mode with different PWM rates
+ * @GS_PWM_RATE_STANDARD: standard rate
+ * @GS_PWM_RATE_HIGH: high rate
+ */
+enum gs_pwm_mode {
+	GS_PWM_RATE_STANDARD = 0,
+	GS_PWM_RATE_HIGH,
+	GS_PWM_RATE_MAX,
+};
+
+/*
+ * enum gs_panel_power_state - the panel's current power state
+ * @GS_PANEL_POWER_STATE_MP_OFF: Medium Power is disabled
+ * @GS_PANEL_POWER_STATE_MP: Medium Power is enabled
+ *
+ * TODO: b/402868084 - add other power states to be controlled by HWC
+ */
+enum gs_panel_power_state {
+	GS_PANEL_POWER_STATE_MP_OFF = 0,
+	GS_PANEL_POWER_STATE_MP,
+	GS_PANEL_POWER_STATE_MAX,
 };
 
 struct gs_drm_connector;
@@ -51,6 +88,7 @@ struct gs_drm_connector_properties {
 	struct drm_property *min_luminance;
 	struct drm_property *hdr_formats;
 	struct drm_property *lp_mode;
+	struct drm_property *all_modes;
 	struct drm_property *global_hbm_mode;
 	struct drm_property *local_hbm_on;
 	struct drm_property *dimming_on;
@@ -64,6 +102,11 @@ struct gs_drm_connector_properties {
 	struct drm_property *rr_switch_duration;
 	struct drm_property *operation_rate;
 	struct drm_property *frame_interval;
+	struct drm_property *refresh_ctl_insert_frames;
+	struct drm_property *refresh_ctl_min_refresh_rate;
+	struct drm_property *refresh_ctl_auto_frame_enabled;
+	struct drm_property *pwm_mode;
+	struct drm_property *panel_power_state;
 };
 
 struct gs_display_partial {
@@ -199,6 +242,28 @@ struct gs_drm_connector_state {
 	 * help connector target the proper timing for sending cmd.
 	 */
 	ktime_t crtc_last_present_ts;
+
+	/** @min_refresh_rate: minimum allowed refresh rate */
+	u32 min_refresh_rate;
+
+	/** @insert_frames: number of frames to insert */
+	u32 insert_frames;
+
+	/** @auto_fi: Whether panel is doing automatic frame insertion */
+	bool auto_fi;
+
+	/** @pwm_mode: panel PWM mode */
+	enum gs_pwm_mode pwm_mode;
+
+	/** @panel_power_state: panel's current power state */
+	enum gs_panel_power_state panel_power_state;
+
+	/**
+	 * @frame_start_ts: the most recent frame transfer's start time
+	 *
+	 * If there is no active frame transfer at this time, the value will be 0
+	 */
+	ktime_t frame_start_ts;
 };
 
 #define to_gs_connector_state(connector_state) \
@@ -213,7 +278,21 @@ struct gs_drm_connector_funcs {
 	int (*atomic_get_property)(struct gs_drm_connector *gs_connector,
 				   const struct gs_drm_connector_state *gs_state,
 				   struct drm_property *property, uint64_t *val);
+	/**
+	 * @late_register:
+	 *
+	 * This optional hook is for registering additional userspace interfaces
+	 * for the connector. This is called by the entry in
+	 * `drm_connector_funcs` by the same name, and the default
+	 * implementation connects sysfs and debugfs nodes for the connector.
+	 *
+	 * Returns:
+	 *
+	 * 0 on success, or a negative error code on failure.
+	 */
 	int (*late_register)(struct gs_drm_connector *gs_connector);
+	/** @get_max_mipi_datarate: passthrough for gs_drm_connector_get_safe_min_mipi_datarate() */
+	int (*get_max_mipi_datarate)(struct gs_drm_connector *gs_connector, bool is_lp);
 	/**
 	 * @register_op_hz_notifier: Registers a notifier of op_hz changing for
 	 * touch interface
@@ -226,6 +305,21 @@ struct gs_drm_connector_funcs {
 	 */
 	int (*unregister_op_hz_notifier)(struct gs_drm_connector *gs_connector,
 					 struct notifier_block *nb);
+	/**
+	 * @panel_update_connector_state: callback for the panel to update
+	 * the gs_drm_connector_state with its current values, for the cases
+	 * where panel-side changes might not be reflected in the connector state
+	 */
+	void (*panel_update_connector_state)(const struct gs_drm_connector *gs_connector,
+					     struct gs_drm_connector_state *state);
+	/** @get_mipi_allowed_datarates: Gets the allowed datarate */
+	int (*get_mipi_allowed_datarates)(struct gs_drm_connector *gs_connector,
+					 struct gs_mipi_clks *mipi_clks);
+	/**
+	 * @panel_update_dev_stat: passthrough for updating dev_stat variable
+	 *                         with the panel's current state.
+	 */
+	void (*panel_update_dev_stat)(const struct gs_drm_connector *gs_connector, u32 *dev_stat);
 };
 
 struct gs_drm_connector_helper_funcs {
@@ -283,6 +377,12 @@ struct gs_drm_connector {
 	 */
 	u32 panel_id;
 	/**
+	 * @panel_serial_param_ptr: pointer to module param string for panel_serial
+	 * The panel is responsible for either copying this string's contents or
+	 * reading the serial number directly and storing it within gs_panel
+	 */
+	const char *panel_serial_param_ptr;
+	/**
 	 * @needs_commit: connector will always get atomic commit callback for any
 	 * pipeline updates for as long as this flag is set
 	 */
@@ -300,12 +400,9 @@ struct gs_drm_connector {
 
 #define to_gs_connector(connector) container_of((connector), struct gs_drm_connector, base)
 
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
 bool is_gs_drm_connector(const struct drm_connector *connector);
 #define is_gs_drm_connector_state(conn_state) is_gs_drm_connector(conn_state->connector)
-
-int gs_drm_connector_create_properties(struct drm_connector *connector);
-struct gs_drm_connector_properties *
-gs_drm_connector_get_properties(struct gs_drm_connector *gs_conector);
 
 static inline struct gs_drm_connector_state *
 crtc_get_new_gs_connector_state(const struct drm_atomic_state *state,
@@ -325,6 +422,9 @@ crtc_get_new_gs_connector_state(const struct drm_atomic_state *state,
 
 	return NULL;
 }
+int gs_drm_connector_create_properties(struct drm_connector *connector);
+struct gs_drm_connector_properties *
+gs_drm_connector_get_properties(struct gs_drm_connector *gs_conector);
 
 static inline struct gs_drm_connector_state *
 crtc_get_old_gs_connector_state(const struct drm_atomic_state *state,
@@ -391,6 +491,39 @@ int gs_connector_bind(struct device *dev, struct device *master, void *data);
  * optional, and the panel_id is a 6-8 character hex string.
  */
 void gs_connector_set_panel_name(const char *new_name, size_t len, int idx);
+#else
+static inline bool is_gs_drm_connector(const struct drm_connector *connector)
+{
+	return false;
+}
+#define is_gs_drm_connector_state(conn_state) false
+
+static inline struct gs_drm_connector_state *
+crtc_get_gs_connector_state(const struct drm_atomic_state *state,
+			    const struct drm_crtc_state *crtc_state)
+{
+	return NULL;
+}
+static inline int gs_drm_connector_create_properties(struct drm_connector *connector)
+{
+	return -ENODEV;
+}
+static inline struct gs_drm_connector_properties *
+gs_drm_connector_get_properties(struct gs_drm_connector *gs_conector)
+{
+	return NULL;
+}
+
+static inline int gs_connector_bind(struct device *dev, struct device *master, void *data)
+{
+	return -ENODEV;
+}
+
+static inline void gs_connector_set_panel_name(const char *new_name, size_t len, int idx)
+{
+	return;
+}
+#endif
 
 int gs_drm_mode_bts_fps(const struct drm_display_mode *mode, unsigned int min_bts_fps);
 int gs_bts_fps_to_drm_mode_clock(const struct drm_display_mode *mode, int bts_fps);
@@ -402,6 +535,20 @@ int gs_bts_fps_to_drm_mode_clock(const struct drm_display_mode *mode, int bts_fp
  * @gray_level: lhbm_gray_level to store
  */
 void gs_drm_connector_update_gray_level_callback(struct drm_connector *connector, int gray_level);
+
+/**
+ * gs_drm_connector_get_safe_min_mipi_datarate() - get mipi datarate min from panel
+ *
+ * Gets largest minimum dsi datarate from each of the panel modes for the panel
+ * connected to the given connector. If no panel connected, or other information
+ * missing, returns a negative value.
+ *
+ * @gs_connector: handle for gs_drm_connector
+ * @is_lp: Whether we are calculating across normal modes or low-power modes
+ * Return: largest minimum datarate for all panel modes, in Mbps, or negative
+ *         value on error
+ */
+int gs_drm_connector_get_safe_min_mipi_datarate(struct gs_drm_connector *gs_connector, bool is_lp);
 
 /* Op Hz Notifier */
 

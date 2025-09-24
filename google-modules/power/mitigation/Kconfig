@@ -2,7 +2,7 @@
 
 config GOOGLE_BCL
 	tristate "Google Battery current limiter"
-	depends on SOC_GS101 || SOC_GS201 || SOC_ZUMA
+	depends on SOC_GS101 || SOC_GS201 || SOC_ZUMA || SOC_LGA || SOC_RDO
 	# GOOGLE_MODEMCTL is an optional dependency.
 	depends on GOOGLE_MODEMCTL || !GOOGLE_MODEMCTL
 	help

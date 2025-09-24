@@ -80,8 +80,6 @@ extern struct thermal_cap thermal_cap[CONFIG_VH_SCHED_MAX_CPU_NR];
 
 extern unsigned int vh_sched_max_load_balance_interval;
 extern unsigned int vh_sched_min_granularity_ns;
-extern unsigned int vh_sched_wakeup_granularity_ns;
-extern unsigned int vh_sched_latency_ns;
 
 extern char boost_at_fork_task_name[LIB_PATH_LENGTH];
 extern raw_spinlock_t boost_at_fork_task_name_lock;
@@ -336,11 +334,14 @@ static inline unsigned long task_util(struct task_struct *p)
 	return READ_ONCE(p->se.avg.util_avg);
 }
 
+static inline unsigned long task_runnable(struct task_struct *p)
+{
+	return READ_ONCE(p->se.avg.runnable_avg);
+}
+
 static inline unsigned long _task_util_est(struct task_struct *p)
 {
-	struct util_est ue = READ_ONCE(p->se.avg.util_est);
-
-	return max(ue.ewma, (ue.enqueued & ~UTIL_AVG_UNCHANGED));
+	return READ_ONCE(p->se.avg.util_est) & ~UTIL_AVG_UNCHANGED;
 }
 
 static inline unsigned long task_util_est(struct task_struct *p)
@@ -601,11 +602,11 @@ struct vendor_rq_struct {
 	atomic_t num_adpf_tasks;
 };
 
-ANDROID_VENDOR_CHECK_SIZE_ALIGN(u64 android_vendor_data1[96], struct vendor_rq_struct t);
+ANDROID_VENDOR_CHECK_SIZE_ALIGN(u64 android_oem_data1[16], struct vendor_rq_struct t);
 
 static inline struct vendor_rq_struct *get_vendor_rq_struct(struct rq *rq)
 {
-	return (struct vendor_rq_struct *)rq->android_vendor_data1;
+	return (struct vendor_rq_struct *)rq->android_oem_data1;
 }
 
 static inline bool get_adpf(struct task_struct *p, bool inherited)
@@ -1252,10 +1253,8 @@ static inline void __update_util_est_invariance(struct rq *rq,
 	if (!do_update)
 		return;
 
-	se_enqueued = READ_ONCE(se->avg.util_est.enqueued) & ~UTIL_AVG_UNCHANGED;
-	se_enqueued = max_t(unsigned long, se->avg.util_est.ewma, se_enqueued);
-
-	cfs_rq_enqueued = READ_ONCE(cfs_rq->avg.util_est.enqueued);
+	se_enqueued = READ_ONCE(se->avg.util_est) & ~UTIL_AVG_UNCHANGED;
+	cfs_rq_enqueued = READ_ONCE(cfs_rq->avg.util_est);
 
 	if (update_cfs_rq) {
 #if IS_ENABLED(CONFIG_USE_VENDOR_GROUP_UTIL)
@@ -1266,12 +1265,12 @@ static inline void __update_util_est_invariance(struct rq *rq,
 		lsub_positive(&cfs_rq_enqueued, se_enqueued);
 	}
 
-	WRITE_ONCE(se->avg.util_est.enqueued, new_util_est);
+	WRITE_ONCE(se->avg.util_est, new_util_est);
 	trace_sched_util_est_se_tp(se);
 
 	if (update_cfs_rq) {
 		cfs_rq_enqueued += new_util_est;
-		WRITE_ONCE(cfs_rq->avg.util_est.enqueued, cfs_rq_enqueued);
+		WRITE_ONCE(cfs_rq->avg.util_est, cfs_rq_enqueued);
 		trace_sched_util_est_cfs_tp(cfs_rq);
 
 #if IS_ENABLED(CONFIG_USE_VENDOR_GROUP_UTIL)

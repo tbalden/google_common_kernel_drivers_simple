@@ -242,7 +242,7 @@ static int gbms_storage_register_internal(struct gbms_storage_desc *desc,
 	if (index == gbms_providers_count)
 		gbms_providers_count += 1;
 
-#ifdef CONFIG_DEBUG_FS
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 	if (!IS_ERR_OR_NULL(rootdir) && name) {
 		/* TODO: create debugfs entries for the providers */
 	}
@@ -551,7 +551,7 @@ int gbms_storage_offline(const char *name, bool flush)
 EXPORT_SYMBOL_GPL(gbms_storage_offline);
 
 /* ------------------------------------------------------------------------ */
-#ifdef CONFIG_DEBUG_FS
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 
 static int gbms_storage_show_cache(struct seq_file *m, void *data)
 {
@@ -1032,7 +1032,7 @@ static int gbms_storage_device_init(struct gbms_storage_device *gdev,
 	if (alloc_chrdev_region(&gdev->hcmajor, 0, 1, name) < 0)
 		goto no_gdev;
 	/* ls /sys/class */
-	gdev->hcclass = class_create(THIS_MODULE, name);
+	gdev->hcclass = class_create(name);
 	if (gdev->hcclass == NULL)
 		goto no_gdev;
 	/* ls /dev/ */
@@ -1324,7 +1324,7 @@ static void __exit gbms_storage_exit(void)
 {
 	int ret;
 
-#ifdef CONFIG_DEBUG_FS
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 	if (!IS_ERR_OR_NULL(rootdir))
 		debugfs_remove(rootdir);
 #endif

@@ -347,10 +347,7 @@
 	};
 
 	pixel-reboot {
-		compatible = "google,pixel-reboot";
-		syscon = <&pmu_system_controller>;
-		reboot-cmd-offset = <0x0810>;
-		force-warm-reboot-on-thermal-shutdown;
+		compatible = "google,pixel-reboot-v2";
 	};
 
 	/* GPIO_CUSTOM_ALIVE */

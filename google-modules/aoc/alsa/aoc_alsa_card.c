@@ -1108,7 +1108,7 @@ static int of_parse_dai_cpu(struct device *dev,
 	dai->num_cpus = 1;
 	component->of_node = of_node;
 
-	ret = snd_soc_of_get_dai_name(of_cpu_root, &component->dai_name);
+	ret = snd_soc_of_get_dai_name(of_cpu_root, &component->dai_name, 0);
 	if (ret) {
 		if (ret == -EPROBE_DEFER) {
 			pr_info("%s: wait cpu_dai for %s", __func__, dai->name);
@@ -1869,6 +1869,7 @@ static int snd_aoc_init(struct aoc_chip *chip)
 
 	chip->pcm_wait_time_in_ms = DEFAULT_PCM_WAIT_TIME_IN_MSECS;
 	chip->voice_pcm_wait_time_in_ms = DEFAULT_VOICE_PCM_WAIT_TIME_IN_MSECS;
+	chip->aoc_waiting_time_in_ms = DEFAULT_AOC_WAITING_TIME_IN_MSECS;
 
 	/* Default values for playback volume and mute */
 	chip->volume = 1000;

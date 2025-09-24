@@ -20,7 +20,11 @@
 
 #include <soc/google/exynos_pm_qos.h>
 
+#if IS_ENABLED(CONFIG_SOC_GS101) || IS_ENABLED(CONFIG_SOC_GS201) || IS_ENABLED(CONFIG_SOC_ZUMA)
 #include <performance/gs_perf_mon/gs_perf_mon.h>
+#else
+#include <perf/core/gs_perf_mon.h>
+#endif
 #include "../../../../../devfreq/google/governor_memlat.h"
 #include "sched_events.h"
 #include "sched_priv.h"
@@ -44,6 +48,7 @@ struct sugov_tunables {
 	unsigned int		down_rate_limit_us;
 	unsigned int		down_rate_limit_scale_pow;
 	unsigned int		response_time_ms;
+	unsigned int		cpu_busy_limit_ms;
 
 	/* The field below for PMU poll */
 	unsigned int		lcpi_threshold;
@@ -92,6 +97,7 @@ struct sugov_policy {
 #if IS_ENABLED(CONFIG_PIXEL_EM)
 	struct pixel_em_profile *em_profile;
 #endif
+	bool			use_em_mapping;
 };
 
 struct sugov_cpu {
@@ -110,6 +116,7 @@ struct sugov_cpu {
 	/* The field below is for single-CPU policies only: */
 #if IS_ENABLED(CONFIG_NO_HZ_COMMON)
 	unsigned long		saved_idle_calls;
+	u64			is_busy_start;
 #endif
 };
 
@@ -168,20 +175,27 @@ static inline bool sugov_em_profile_changed(struct sugov_policy *sg_policy)
 #if IS_ENABLED(CONFIG_PIXEL_EM)
 	struct pixel_em_profile **profile_ptr_snapshot;
 	struct pixel_em_profile *profile;
+	bool ret = false;
+
+	if (sg_policy->use_em_mapping != static_branch_likely(&use_em_for_freq_mapping)) {
+		sg_policy->use_em_mapping = static_branch_likely(&use_em_for_freq_mapping);
+		ret = true;
+	}
 
 	profile_ptr_snapshot = READ_ONCE(vendor_sched_pixel_em_profile);
 	if (!profile_ptr_snapshot)
-		return false;
+		goto out;
 
 	profile = READ_ONCE(*profile_ptr_snapshot);
 
 	if (sg_policy->em_profile != profile) {
 		sg_policy->em_profile = profile;
-		return true;
+		ret = true;
 	}
-#endif
 
-	return false;
+#endif
+out:
+	return ret;
 }
 
 static inline unsigned int
@@ -206,16 +220,27 @@ sugov_calc_freq_response_ms(struct sugov_policy *sg_policy)
 		if (!cluster || !cluster->num_opps)
 			goto out;
 
-		if (cluster->num_opps >= 2) {
-			sec_max_opp = &cluster->opps[cluster->num_opps-2];
-			cap = sec_max_opp->capacity + 1;
-		} else {
-			sec_max_opp = &cluster->opps[0];
+		if (static_branch_likely(&use_em_for_freq_mapping) || cluster->num_opps < 2) {
+			sec_max_opp = &cluster->opps[cluster->num_opps-1];
 			cap = sec_max_opp->capacity;
+			goto out;
 		}
+
+		sec_max_opp = &cluster->opps[cluster->num_opps-2];
+		cap = sec_max_opp->capacity + 1;
 	}
-out:
 #endif
+out:
+	/*
+	 * Due to a rounding error the time to reach SCHED_CAPACITY_SCALE is
+	 * too high and inaccurate. Reduce it by 1 which should be more
+	 * representative value.
+	 */
+	if (static_branch_likely(&use_em_for_freq_mapping) &&
+	    TICK_USEC > USEC_PER_MSEC && cap == SCHED_CAPACITY_SCALE) {
+		cap -= 1;
+	}
+
 	/*
 	 * We will request max_freq as soon as util crosses the capacity at
 	 * second highest frequency. So effectively our response time is the
@@ -695,6 +720,9 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	sg_policy->prev_cached_raw_freq = sg_policy->cached_raw_freq;
 	sg_policy->cached_raw_freq = freq;
 
+	/* Workaround a bug so that we can ignore efficiencies_available */
+	policy->efficiencies_available = false;
+
 	freq = cpufreq_driver_resolve_freq(policy, freq);
 
 	/* Workaround a bug in GKI where we can escape policy limits */
@@ -798,13 +826,9 @@ unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
 	 *              max - irq
 	 *   U' = irq + --------- * U
 	 *                 max
-	 *
-	 * We don't need to apply dvfs headroom to scale_irq_capacity() as util
-	 * (U) already got the headroom applied. Only the 'irq' part needs to
-	 * be multiplied by the headroom.
 	 */
 	util = scale_irq_capacity(util, irq, max);
-	util += type == FREQUENCY_UTIL ? apply_dvfs_headroom(irq, cpu, false) : irq;
+	util += irq;
 
 	/*
 	 * Bandwidth required by DEADLINE must always be granted while, for
@@ -817,7 +841,7 @@ unsigned long schedutil_cpu_util_pixel_mod(int cpu, unsigned long util_cfs,
 	 * an interface. So, we only do the latter for now.
 	 */
 	if (type == FREQUENCY_UTIL)
-		util += apply_dvfs_headroom(cpu_bw_dl(rq), cpu, false);
+		util += cpu_bw_dl(rq);
 
 	return min(max, util);
 }
@@ -968,16 +992,38 @@ apply_boost:
 }
 
 #if IS_ENABLED(CONFIG_NO_HZ_COMMON)
-static bool sugov_cpu_is_busy(struct sugov_cpu *sg_cpu)
+static bool sugov_cpu_is_busy(struct sugov_cpu *sg_cpu, u64 time)
 {
-	unsigned long idle_calls = tick_nohz_get_idle_calls_cpu(sg_cpu->cpu);
-	bool ret = idle_calls == sg_cpu->saved_idle_calls;
+	unsigned int cpu_busy_limit_ms = sg_cpu->sg_policy->tunables->cpu_busy_limit_ms;
+	unsigned long idle_calls;
+	bool ret;
+
+	if (cpumask_weight(sg_cpu->sg_policy->policy->cpus) != 1 || !cpu_busy_limit_ms)
+		return false;
+
+	idle_calls = tick_nohz_get_idle_calls_cpu(sg_cpu->cpu);
+	ret = idle_calls == sg_cpu->saved_idle_calls;
 
 	sg_cpu->saved_idle_calls = idle_calls;
+
+	if (ret) {
+		u64 diff;
+
+		if (!sg_cpu->is_busy_start)
+			sg_cpu->is_busy_start = time;
+
+		diff = time - sg_cpu->is_busy_start;
+		if (diff > (cpu_busy_limit_ms * NSEC_PER_MSEC))
+			ret = false;
+	}
+
+	if (!ret)
+		sg_cpu->is_busy_start = 0;
+
 	return ret;
 }
 #else
-static inline bool sugov_cpu_is_busy(struct sugov_cpu *sg_cpu) { return false; }
+static inline bool sugov_cpu_is_busy(struct sugov_cpu *sg_cpu, u64 time) { return false; }
 #endif /* CONFIG_NO_HZ_COMMON */
 
 /*
@@ -1013,7 +1059,7 @@ static void sugov_update_single(struct update_util_data *hook, u64 time,
 		return;
 
 	/* Limits may have changed, don't skip frequency update */
-	busy = !sg_cpu->sg_policy->need_freq_update && sugov_cpu_is_busy(sg_cpu);
+	busy = !sg_cpu->sg_policy->need_freq_update && sugov_cpu_is_busy(sg_cpu, time);
 
 	sugov_get_util(sg_cpu);
 
@@ -1128,7 +1174,7 @@ sugov_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
 		next_f = sugov_next_freq_shared(sg_cpu, time);
 
 		/* Limits may have changed, don't skip frequency update */
-		busy = !sg_cpu->sg_policy->need_freq_update && sugov_cpu_is_busy(sg_cpu);
+		busy = !sg_cpu->sg_policy->need_freq_update && sugov_cpu_is_busy(sg_cpu, time);
 
 		/*
 		 * Do not reduce the frequency if a single cpu policy has not
@@ -1136,7 +1182,6 @@ sugov_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
 		 * premature then.
 		 */
 		if (static_branch_likely(&auto_dvfs_headroom_enable) &&
-		    cpumask_weight(sg_cpu->sg_policy->policy->cpus) == 1 &&
 		    !uclamp_rq_is_capped(cpu_rq(sg_cpu->cpu)) &&
 		    busy && next_f < sg_cpu->sg_policy->next_freq) {
 			next_f = sg_cpu->sg_policy->next_freq;
@@ -1162,6 +1207,9 @@ sugov_update_shared(struct update_util_data *hook, u64 time, unsigned int flags)
 		else
 			sugov_deferred_update(sg_cpu->sg_policy);
 
+		if (sugov_em_profile_changed(sg_cpu->sg_policy))
+			sugov_update_response_time_mult(sg_cpu->sg_policy, true);
+
 #if IS_ENABLED(CONFIG_PIXEL_EM_FREQUENCY_SCALING)
 		scaling_freq_update(sg_cpu->sg_policy);
 #endif
@@ -1176,9 +1224,6 @@ static void sugov_work(struct kthread_work *work)
 	unsigned int freq;
 	unsigned long flags;
 	bool relax_pmu_throttle;
-
-	if (sugov_em_profile_changed(sg_policy))
-		sugov_update_response_time_mult(sg_policy, true);
 
 	/*
 	 * Hold sg_policy->update_lock shortly to handle the case where:
@@ -1619,6 +1664,29 @@ static ssize_t response_time_ms_nom_show(struct gov_attr_set *attr_set, char *bu
 
 static struct governor_attr response_time_ms_nom = __ATTR_RO(response_time_ms_nom);
 
+static ssize_t cpu_busy_limit_ms_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+
+	return sprintf(buf, "%u\n", tunables->cpu_busy_limit_ms);
+}
+
+static ssize_t
+cpu_busy_limit_ms_store(struct gov_attr_set *attr_set, const char *buf, size_t count)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	int cpu_busy_limit_ms;
+
+	if (kstrtouint(buf, 10, &cpu_busy_limit_ms))
+		return -EINVAL;
+
+	tunables->cpu_busy_limit_ms = cpu_busy_limit_ms;
+
+	return count;
+}
+
+static struct governor_attr cpu_busy_limit_ms = __ATTR_RW(cpu_busy_limit_ms);
+
 static ssize_t lcpi_threshold_show(struct gov_attr_set *attr_set, char *buf)
 {
 	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
@@ -1721,6 +1789,7 @@ static struct attribute *sugov_attrs[] = {
 	&down_rate_limit_scale_pow.attr,
 	&response_time_ms.attr,
 	&response_time_ms_nom.attr,
+	&cpu_busy_limit_ms.attr,
 
 	// For PMU Limit
 	&lcpi_threshold.attr,
@@ -1888,6 +1957,9 @@ static int sugov_init(struct cpufreq_policy *policy)
 	struct sugov_tunables *tunables;
 	int ret = 0;
 
+	/* To avoid to skip inefficient OPPs */
+	policy->efficiencies_available = false;
+
 	/* State should be equivalent to EXIT */
 	if (policy->governor_data)
 		return -EBUSY;
@@ -1928,6 +2000,7 @@ static int sugov_init(struct cpufreq_policy *policy)
 	tunables->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 	tunables->down_rate_limit_scale_pow = 1;
 	tunables->response_time_ms = sugov_calc_freq_response_ms(sg_policy);
+	tunables->cpu_busy_limit_ms = 10;
 	tunables->pmu_limit_enable = false;
 	tunables->lcpi_threshold = 1000;
 	tunables->spc_threshold = 100;

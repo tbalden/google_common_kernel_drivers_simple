@@ -356,9 +356,9 @@ static long get_wait_time(struct snd_pcm_substream *substream)
 	case IDX_INCALL_CAP1_TX:
 	case IDX_INCALL_CAP2_TX:
 	case IDX_INCALL_CAP3_TX:
-		return msecs_to_jiffies(chip->voice_pcm_wait_time_in_ms);
+		return chip->voice_pcm_wait_time_in_ms;
 	default:
-		return msecs_to_jiffies(chip->pcm_wait_time_in_ms);
+		return chip->pcm_wait_time_in_ms;
 	}
 }
 
@@ -512,9 +512,9 @@ static int snd_aoc_pcm_trigger(struct snd_soc_component *component,
 }
 
 /* Copy data from user space to hardware buffer  */
-static int snd_aoc_pcm_playback_copy_user(struct snd_soc_component *component,
+static int snd_aoc_pcm_playback_copy(struct snd_soc_component *component,
 					  struct snd_pcm_substream *substream, int channel,
-					  unsigned long pos, void __user *buf, unsigned long count)
+					  unsigned long pos, struct iov_iter *buf, unsigned long count)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
@@ -528,9 +528,9 @@ static int snd_aoc_pcm_playback_copy_user(struct snd_soc_component *component,
 }
 
 /* Copy data from hardware buffer to user space */
-static int snd_aoc_pcm_capture_copy_user(struct snd_soc_component *component,
+static int snd_aoc_pcm_capture_copy(struct snd_soc_component *component,
 					 struct snd_pcm_substream *substream, int channel,
-					 unsigned long pos, void __user *buf, unsigned long count)
+					 unsigned long pos, struct iov_iter *buf, unsigned long count)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct aoc_alsa_stream *alsa_stream = runtime->private_data;
@@ -544,15 +544,15 @@ static int snd_aoc_pcm_capture_copy_user(struct snd_soc_component *component,
 }
 
 /* Copy data between hardware buffer and user space */
-static int snd_aoc_pcm_copy_user(struct snd_soc_component *component,
+static int snd_aoc_pcm_copy(struct snd_soc_component *component,
 				 struct snd_pcm_substream *substream, int channel,
-				 unsigned long pos, void __user *buf, unsigned long count)
+				 unsigned long pos, struct iov_iter *buf, unsigned long count)
 {
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		return snd_aoc_pcm_playback_copy_user(component, substream, channel, pos, buf,
+		return snd_aoc_pcm_playback_copy(component, substream, channel, pos, buf,
 						      count);
 	} else { /* Capture */
-		return snd_aoc_pcm_capture_copy_user(component, substream, channel, pos, buf,
+		return snd_aoc_pcm_capture_copy(component, substream, channel, pos, buf,
 						     count);
 	}
 }
@@ -620,7 +620,7 @@ static const struct snd_soc_component_driver aoc_pcm_component = {
 	.ioctl = snd_aoc_pcm_lib_ioctl,
 	.hw_params = snd_aoc_pcm_hw_params,
 	.hw_free = snd_aoc_pcm_hw_free,
-	.copy_user = snd_aoc_pcm_copy_user,
+	.copy = snd_aoc_pcm_copy,
 	.prepare = snd_aoc_pcm_prepare,
 	.trigger = snd_aoc_pcm_trigger,
 	.pointer = snd_aoc_pcm_pointer,

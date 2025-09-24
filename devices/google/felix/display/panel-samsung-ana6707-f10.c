@@ -1355,8 +1355,8 @@ static int ana6707_f10_panel_probe(struct mipi_dsi_device *dsi)
 	spanel->auto_mode_vrefresh = 0;
 	spanel->delayed_idle = false;
 	spanel->is_pixel_off = false;
-	spanel->tzd = thermal_zone_device_register("inner-disp",
-				0, 0, spanel, &spanel_tzd_ops, NULL, 0, 0);
+	spanel->tzd = thermal_tripless_zone_device_register("inner-disp",
+							    spanel, &spanel_tzd_ops, NULL);
 	if (IS_ERR(spanel->tzd))
 		dev_err(spanel->base.dev, "failed to register inner"
 			" display thermal zone: %ld", PTR_ERR(spanel->tzd));

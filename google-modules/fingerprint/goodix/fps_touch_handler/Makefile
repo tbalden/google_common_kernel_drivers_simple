@@ -6,8 +6,6 @@ M ?= $(shell pwd)
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../google-modules/fingerprint/goodix/fps_touch_handler
 EXTRA_CFLAGS	+= -I$(KERNEL_SRC)/../google-modules/gs/soc/include
 
-EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/touch/common/Module.symvers
-
 include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
 
 modules modules_install clean compile_commands.json:

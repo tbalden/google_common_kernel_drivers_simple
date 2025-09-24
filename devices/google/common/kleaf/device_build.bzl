@@ -4,6 +4,10 @@
 Define build targets for a device.
 """
 
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@bazel_skylib//rules:select_file.bzl", "select_file")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
+load("@rules_pkg//pkg:pkg.bzl", "pkg_zip")
 load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 load(
     "//build/kernel/kleaf:kernel.bzl",
@@ -39,6 +43,7 @@ def device_build(
         module_outs = [],
         ext_dtbos = [],
         ext_modules = [],
+        kunit_modules = [],
         ddk_uapi_headers = [],
         build_dtb = False,
         build_dtbo = False,
@@ -48,7 +53,8 @@ def device_build(
         vendor_ramdisk_modules_lists = [],
         system_dlkm_modules_blocklists = [],
         vendor_dlkm_modules_blocklists = [],
-        insmod_cfgs = []):
+        insmod_cfgs = [],
+        extra_dist_targets = []):
     """Define build targets for a device.
 
     Define the following targets and their dependencies for a device:
@@ -60,6 +66,7 @@ def device_build(
         {name}/dtbs
         {name}/dtbos
         {name}/ext_modules
+        {name}/kunit_modules
         {name}/ddk_uapi_headers
         {name}/kernel_images
         {name}/dtb_image
@@ -84,6 +91,7 @@ def device_build(
         module_outs: The list of in-tree modules building from kernel sources.
         ext_dtbos: Extra dtbos.
         ext_modules: Out-of-tree modules. Combined with the base device.
+        kunit_modules: Kunit modules, packed into kunit_tests.zip. Combined with the base device.
         ddk_uapi_headers: DDK uapi headers which will be merged into kernel-uapi-headers.tar.gz.
             Combined with the base device.
         build_dtb: If True, build dtb.img from dtb_outs.
@@ -102,6 +110,7 @@ def device_build(
             from being loaded from vendor_dlkm.img. Combined with the base device.
         insmod_cfgs: Insmod cfg files which will be copied to etc/ in vendor_dlkm.img. Combined with
             the base device.
+        extra_dist_targets: Extra targets added to dist.
     """
 
     if base_device:
@@ -110,6 +119,7 @@ def device_build(
         base_kconfig_exts = ["{}/kconfig_ext".format(base_device)]
         base_defconfig_fragments = ["{}/defconfig_fragments".format(base_device)]
         base_ext_modules = ["{}/ext_modules".format(base_device)]
+        base_kunit_modules = ["{}/kunit_modules".format(base_device)]
         base_ddk_uapi_headers = ["{}/ddk_uapi_headers".format(base_device)]
         base_vendor_ramdisk_modules_lists = ["{}/vendor_ramdisk_modules_list".format(base_device)]
         base_system_dlkm_modules_blocklists = ["{}/system_dlkm_modules_blocklist".format(base_device)]
@@ -125,6 +135,7 @@ def device_build(
         base_kconfig_exts = []
         base_defconfig_fragments = []
         base_ext_modules = []
+        base_kunit_modules = []
         base_ddk_uapi_headers = []
         base_vendor_ramdisk_modules_lists = []
         base_system_dlkm_modules_blocklists = []
@@ -137,6 +148,7 @@ def device_build(
     target_defconfig_fragments = "{}/defconfig_fragments".format(name)
     target_kernel_sources = "{}/kernel_sources".format(name)
     target_dtstree = "{}/dtstree".format(name)
+    target_kmi_symbol_list = "{}/kmi_symbol_list".format(name)
     target_kernel = "{}/kernel".format(name)
     target_dtbs = "{}/dtbs".format(name)
     target_dtbos = "{}/dtbos".format(name)
@@ -144,6 +156,10 @@ def device_build(
     target_kernel_modules_install = "{}/kernel_modules_install".format(name)
     target_kernel_unstripped_modules_archive = "{}/kernel_unstripped_modules_archive".format(name)
     target_merged_kernel_uapi_headers = "{}/merged_kernel_uapi_headers".format(name)
+    target_kunit_modules = "{}/kunit_modules".format(name)
+    target_kunit_modules_install = "{}/kunit_modules_install".format(name)
+    target_kunit_modules_pkg = "{}/kunit_modules_pkg".format(name)
+    target_kunit_tests_zip = "{}/kunit_tests_zip".format(name)
     target_ddk_uapi_headers = "{}/ddk_uapi_headers".format(name)
     target_merged_ddk_uapi_headers = "{}/merged_ddk_uapi_headers".format(name)
     target_merged_kernel_and_ddk_uapi_headers = "{}/merged_kernel_and_ddk_uapi_headers".format(name)
@@ -160,6 +176,8 @@ def device_build(
     target_merged_dlkm_modules_blocklist = "{}/merged_dlkm_modules_blocklist".format(name)
     target_insmod_cfgs = "{}/insmod_cfgs".format(name)
     target_kernel_images = "{}/kernel_images".format(name)
+    target_boot_image_selection = "{}/boot_image_selection".format(name)
+    target_boot_image = "{}/boot_image".format(name)
     target_dtb_image = "{}/dtb_image".format(name)
     target_dist_files = "{}/dist_files".format(name)
     target_dist = "{}/dist".format(name)
@@ -212,6 +230,12 @@ def device_build(
             visibility = ["//visibility:private"],
         )
 
+    select_file(
+        name = target_kmi_symbol_list,
+        srcs = "//common:aarch64_additional_kmi_symbol_lists",
+        subpath = "android/abi_gki_aarch64_pixel",
+    )
+
     kernel_build(
         name = target_kernel,
         srcs = [target_kernel_sources],
@@ -225,7 +249,7 @@ def device_build(
         defconfig_fragments = [target_defconfig_fragments],
         kconfig_ext = target_kconfig_ext,
         make_goals = ["modules", "dtbs"],
-        kmi_symbol_list = "//common:pixel_symbol_list",
+        kmi_symbol_list = target_kmi_symbol_list,
         module_outs = module_outs,
         strip_modules = True,
         visibility = ["//visibility:private"],
@@ -264,6 +288,38 @@ def device_build(
         name = target_merged_kernel_uapi_headers,
         kernel_build = target_kernel,
         kernel_modules = [target_ext_modules],
+        visibility = ["//visibility:private"],
+    )
+
+    kernel_module_group(
+        name = target_kunit_modules,
+        srcs = base_kunit_modules + kunit_modules,
+    )
+
+    kernel_modules_install(
+        name = target_kunit_modules_install,
+        kernel_build = target_kernel,
+        kernel_modules = [target_kunit_modules],
+        visibility = ["//visibility:private"],
+    )
+
+    pkg_files(
+        name = target_kunit_modules_pkg,
+        srcs = [
+            "//common:kernel_aarch64/lib/kunit/kunit.ko",
+            target_kunit_modules_install,
+        ],
+        prefix = "kunit_test_modules",
+        visibility = ["//visibility:private"],
+    )
+
+    pkg_zip(
+        name = target_kunit_tests_zip,
+        srcs = [
+            "//private/devices/google/common/testing:kunit_test_scripts",
+            target_kunit_modules_pkg,
+        ],
+        out = "{}/kunit_tests.zip".format(name),
         visibility = ["//visibility:private"],
     )
 
@@ -408,7 +464,22 @@ def device_build(
         visibility = ["//visibility:private"],
     )
 
+    select_file(
+        name = target_boot_image_selection,
+        srcs = "//common:kernel_aarch64_gki_artifacts",
+        subpath = "boot-lz4.img",
+        visibility = ["//visibility:private"],
+    )
+
+    copy_file(
+        name = target_boot_image,
+        src = target_boot_image_selection,
+        out = "{}/boot.img".format(name),
+        visibility = ["//visibility:private"],
+    )
+
     dist_targets = [
+        target_boot_image,
         target_dtbs,
         target_dtbos,
         target_insmod_cfgs,
@@ -416,14 +487,16 @@ def device_build(
         target_kernel_images,
         target_kernel_modules_install,
         target_kernel_unstripped_modules_archive,
+        target_kmi_symbol_list,
+        target_kunit_modules_install,
+        target_kunit_tests_zip,
         target_merged_ddk_uapi_headers,
         target_merged_kernel_and_ddk_uapi_headers,
+        "//build/kernel:gki_certification_tools",
         "//common:kernel_aarch64",
-        "//common:kernel_aarch64_gki_boot_image",
         "//common:kernel_aarch64_headers",
-        "//common:pixel_symbol_list",
         "//private/devices/google/common:kernel_gki_modules",
-    ]
+    ] + extra_dist_targets
 
     if build_system_dlkm:
         dist_targets += [
@@ -447,10 +520,10 @@ def device_build(
         dist_targets.append(target_dtb_image)
 
     dist_targets += select({
-        "//private/devices/google/common:enable_download_fips140": [
+        "//private/devices/google/common:use_prebuilt_fips140_is_true": [
             "//private/devices/google/common:fips140",
         ],
-        "//private/devices/google/common:disable_download_fips140": [],
+        "//conditions:default": [],
     })
 
     native.filegroup(

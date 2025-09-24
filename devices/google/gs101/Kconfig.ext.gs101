@@ -8,6 +8,8 @@ source "$(KCONFIG_SOC_GS_PREFIX)drivers/clk/gs/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/Kconfig"
 
+source "$(KCONFIG_SOC_GS_PREFIX)drivers/soc/google/gsa/Kconfig"
+
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/input/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/char/hw_random/Kconfig"
@@ -62,7 +64,11 @@ source "$(KCONFIG_SOC_GS_PREFIX)drivers/phy/Kconfig"
 
 source "$(KCONFIG_SOC_GS_PREFIX)drivers/bts/Kconfig"
 
-source "$(KCONFIG_SOC_GS_PREFIX)drivers/block/zram/Kconfig"
+source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/aoc/Kconfig"
+
+source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/aoc/alsa/Kconfig"
+
+source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/aoc/usb/Kconfig"
 
 source "$(KCONFIG_EXT_MODULES_PREFIX)private/google-modules/bms/misc/Kconfig"
 

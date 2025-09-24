@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_module", "kernel_module_group")
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
+)
 
 filegroup(
     name = "reset.kconfig",
@@ -13,27 +18,31 @@ filegroup(
     ],
 )
 
-kernel_module(
-    name = "reset",
-    srcs = glob([
-        "**/*.c",
-        "**/*.h",
-    ]) + [
-        "Kbuild",
+ddk_module(
+    name = "pixel-reboot",
+    srcs = [
+        "pixel-reboot.c",
+    ],
+    out = "pixel-reboot.ko",
+    kernel_build = "//private/devices/google/common:kernel",
+    deps = [
+        "//common:all_headers_aarch64",
+        "//private/google-modules/bms:google-bms",
         "//private/google-modules/bms:headers",
         "//private/google-modules/bms/misc:headers",
-        "//private/google-modules/soc/gs:gs_soc_headers",
+        "//private/google-modules/soc/gs:gs_soc_module",
+        "//private/google-modules/soc/gs:headers",
+        "//private/google-modules/soc/rdo:rdo_soc_headers",
+        "//private/google-modules/soc/rdo:rdo_soc_module",
     ],
-    outs = [
-        "pixel-reboot.ko",
+)
+
+kernel_module_group(
+    name = "reset",
+    srcs = [
+        ":pixel-reboot",
     ],
-    kernel_build = "//private/devices/google/common:kernel",
     visibility = [
         "//private/devices/google:__subpackages__",
-        "//private/google-modules/soc/gs:__pkg__",
-    ],
-    deps = [
-        "//private/google-modules/bms",
-        "//private/google-modules/soc/gs:gs_soc_module",
     ],
 )

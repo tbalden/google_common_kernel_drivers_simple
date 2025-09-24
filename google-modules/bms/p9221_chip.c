@@ -8,6 +8,7 @@
 
 #include <linux/device.h>
 #include <linux/pm.h>
+#include <linux/gpio/consumer.h>
 #include <linux/gpio/driver.h>
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
@@ -3071,13 +3072,13 @@ int p9221_chip_init_funcs(struct p9221_charger_data *chgr, u16 chip_id)
 }
 
 #if IS_ENABLED(CONFIG_GPIOLIB)
-int p9xxx_gpio_set_value(struct p9221_charger_data *chgr, int gpio, int value)
+int p9xxx_gpio_set_value(struct p9221_charger_data *chgr, struct gpio_desc *gpio, int value)
 {
-	if (gpio <= 0)
+	if (!gpio)
 		return -EINVAL;
 
-	logbuffer_log(chgr->log, "%s: set gpio %d to %d", __func__, gpio, value);
-	gpio_set_value_cansleep(gpio, value);
+	logbuffer_log(chgr->log, "%s: set gpio %d to %d", __func__, desc_to_gpio(gpio), value);
+	gpiod_set_value_cansleep(gpio, value);
 
 	return 0;
 }
@@ -3085,7 +3086,7 @@ int p9xxx_gpio_set_value(struct p9221_charger_data *chgr, int gpio, int value)
 static int p9xxx_gpio_get_direction(struct gpio_chip *chip,
 				    unsigned int offset)
 {
-	return GPIOF_DIR_OUT;
+	return GPIO_LINE_DIRECTION_OUT;
 }
 
 static int p9xxx_gpio_get(struct gpio_chip *chip, unsigned int offset)
@@ -3145,20 +3146,19 @@ static void p9xxx_gpio_set(struct gpio_chip *chip, unsigned int offset, int valu
 			ret = charger->chip_set_vout_max(charger, P9412_BPP_VOUT_DFLT);
 		break;
 	case P9XXX_GPIO_VBUS_EN:
-		if (charger->pdata->wlc_en < 0)
+		if (!charger->pdata->wlc_en)
 			break;
-		value = (!!value) ^ charger->pdata->wlc_en_act_low;
-		gpio_direction_output(charger->pdata->wlc_en, value);
+		gpiod_direction_output(charger->pdata->wlc_en, value);
 		break;
 	case P9XXX_GPIO_DC_SW_EN:
 		ret = p9xxx_gpio_set_value(charger, charger->pdata->dc_switch_gpio, value);
 		break;
 	case P9XXX_GPIO_ONLINE_SPOOF:
 		mutex_lock(&charger->irq_det_lock);
-		if (charger->pdata->irq_det_gpio >= 0 &&
+		if (charger->pdata->irq_det_gpio &&
 		    value && charger->online && !charger->online_spoof) {
-			if (charger->pdata->ldo_en_gpio > 0) {
-				gpio_set_value_cansleep(charger->pdata->ldo_en_gpio, 1);
+			if (charger->pdata->ldo_en_gpio) {
+				gpiod_set_raw_value_cansleep(charger->pdata->ldo_en_gpio, 1);
 				logbuffer_prlog(charger->log,
 					"online_spoof=1 ldo_en=1 online=%d", charger->online);
 			} else {
@@ -3168,7 +3168,8 @@ static void p9xxx_gpio_set(struct gpio_chip *chip, unsigned int offset, int valu
 			enable_irq_wake(charger->pdata->irq_det_int);
 			charger->online_spoof = true;
 			cancel_delayed_work(&charger->stop_online_spoof_work);
-			charger->det_status = gpio_get_value_cansleep(charger->pdata->irq_det_gpio);
+			charger->det_status =
+				gpiod_get_raw_value_cansleep(charger->pdata->irq_det_gpio);
 			/* Prevent device removal while spoofing is enabled */
 			if (charger->det_status == 1) {
 				__pm_stay_awake(charger->det_status_ws);
@@ -3177,8 +3178,8 @@ static void p9xxx_gpio_set(struct gpio_chip *chip, unsigned int offset, int valu
 			}
 		}
 		mutex_unlock(&charger->irq_det_lock);
-		if (!value && charger->pdata->ldo_en_gpio > 0) {
-			gpio_set_value_cansleep(charger->pdata->ldo_en_gpio, 0);
+		if (!value && charger->pdata->ldo_en_gpio) {
+			gpiod_set_raw_value_cansleep(charger->pdata->ldo_en_gpio, 0);
 			logbuffer_prlog(charger->log, "pxxx_gpio online_spoof=0 ldo_en_gpio=0");
 		}
 		pr_debug("%s: GPIO offset=%d value=%d charger->det_status:%d online=%d",

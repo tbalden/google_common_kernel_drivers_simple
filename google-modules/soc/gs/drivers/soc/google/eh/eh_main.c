@@ -62,7 +62,129 @@
 #ifdef CONFIG_SOC_ZUMA
 #include <soc/google/exynos-cpupm.h>
 #endif
+#if IS_ENABLED(CONFIG_SOC_LGA)
+#include <ip-idle-notifier/google_ip_idle_notifier.h>
+#endif
+#if IS_ENABLED(CONFIG_PKVM_S2MPU_V9) || IS_ENABLED(CONFIG_PKVM_S2MPU)
 #include <soc/google/pkvm-s2mpu.h>
+#endif
+
+#if IS_ENABLED(CONFIG_SOC_LGA)
+static bool eh_hwacg_active(struct eh_device *eh_dev)
+{
+	return eh_dev->hwacg_state;
+}
+
+static void __eh_hwacg_enable(struct eh_device *eh_dev)
+{
+	union val64 val = { .number = 1 };
+
+	if (!is_mbfs_handle_invalid(eh_dev->hwacg_handle) &&
+	    eh_dev->hwacg_state != true) {
+		mbfs_write_file(eh_dev->hwacg_handle, val);
+		eh_dev->hwacg_state = true;
+	};
+}
+
+static void eh_hwacg_enable(struct eh_device *eh_dev)
+{
+	mutex_lock(&eh_dev->hwacg_lock);
+	__eh_hwacg_enable(eh_dev);
+	mutex_unlock(&eh_dev->hwacg_lock);
+}
+
+static void __eh_hwacg_disable(struct eh_device *eh_dev)
+{
+	union val64 val = { .number = 0 };
+
+	if (!is_mbfs_handle_invalid(eh_dev->hwacg_handle) &&
+	    eh_dev->hwacg_state != false) {
+		mbfs_write_file(eh_dev->hwacg_handle, val);
+		eh_dev->hwacg_state = false;
+	}
+}
+
+static void eh_hwacg_idle_check_cb(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct eh_device *eh_dev = container_of(dwork, struct eh_device,
+						eh_hwacg_dwork);
+
+	mutex_lock(&eh_dev->hwacg_lock);
+	if (time_after(jiffies, eh_dev->eh_last_updated_jiffies +
+		       msecs_to_jiffies(eh_dev->eh_hwacg_threshold_ms)))
+		__eh_hwacg_enable(eh_dev);
+	else
+		schedule_delayed_work(&eh_dev->eh_hwacg_dwork,
+				      msecs_to_jiffies(eh_dev->eh_hwacg_threshold_ms));
+	mutex_unlock(&eh_dev->hwacg_lock);
+}
+
+static void eh_hwacg_refresh_idle_timer(struct eh_device *eh_dev)
+{
+	/* Aligned word update should be atomic in linux kernel */
+	eh_dev->eh_last_updated_jiffies = jiffies;
+
+	/*
+	 * In a worst-case scenario, HWACG might temporarily remain enabled,
+	 * but subsequent I/O operations will eventually observe the updated
+	 * eh_hwacg_active state due to existing locks in their path.
+	 */
+	if (eh_hwacg_active(eh_dev)) {
+		mutex_lock(&eh_dev->hwacg_lock);
+		if (eh_hwacg_active(eh_dev)) {
+			__eh_hwacg_disable(eh_dev);
+			schedule_delayed_work(&eh_dev->eh_hwacg_dwork,
+					      msecs_to_jiffies(eh_dev->eh_hwacg_threshold_ms));
+		}
+		mutex_unlock(&eh_dev->hwacg_lock);
+	}
+}
+
+static void cancel_hwacg_workqueue(struct eh_device *eh_dev)
+{
+	cancel_delayed_work_sync(&eh_dev->eh_hwacg_dwork);
+}
+
+#define EH_HWACG_PATH "cpm/pwr/hw_lpms/eh/PsmHwacgEn"
+
+static int eh_hwacg_init(struct eh_device *eh_dev)
+{
+	enum mbfs_error_code mbfs_ret;
+	union mbfs_client_handle hwacg_handle;
+	union val64 hwacg_init_state;
+
+	eh_dev->eh_hwacg_threshold_ms = 3000;
+	eh_dev->hwacg_handle = MBFS_INVALID_HANDLE;
+	mutex_init(&eh_dev->hwacg_lock);
+	INIT_DELAYED_WORK(&eh_dev->eh_hwacg_dwork, eh_hwacg_idle_check_cb);
+
+	mbfs_ret = mbfs_get_handle(EH_HWACG_PATH, &hwacg_handle);
+	if (mbfs_ret) {
+		/* The MBFS probe cannot be completed at this time */
+		pr_info("failed to parse mbfs %s, %s\n", EH_HWACG_PATH,
+			get_mbfs_error_string(mbfs_ret));
+		return mbfs_error2linux(mbfs_ret);
+	}
+
+	eh_dev->hwacg_handle = hwacg_handle;
+	mbfs_ret = mbfs_read_file(hwacg_handle, &hwacg_init_state);
+	if (mbfs_ret) {
+		/* Something heavily broken and beyond recovery */
+		pr_err("failed to read mbfs file %s\n",
+		       get_mbfs_error_string(mbfs_ret));
+		return mbfs_error2linux(mbfs_ret);
+	}
+	eh_dev->hwacg_state = hwacg_init_state.number;
+
+	return 0;
+}
+#else
+static void eh_hwacg_enable(struct eh_device *eh_dev) {}
+static void eh_hwacg_refresh_idle_timer(struct eh_device *eh_dev) {}
+static int eh_hwacg_init(struct eh_device *eh_dev) { return 0; }
+static void cancel_hwacg_workqueue(struct eh_device *eh_dev) {}
+#endif
 
 /* These are the possible values for the status field from the specification */
 enum eh_cdesc_status {
@@ -115,6 +237,7 @@ static DEFINE_SPINLOCK(eh_dev_list_lock);
 
 static DECLARE_WAIT_QUEUE_HEAD(eh_compress_wait);
 static unsigned int eh_default_fifo_size = 512;
+static unsigned int eh_hwid;
 
 #define EH_SW_FIFO_SIZE	(1 << 16)
 
@@ -313,9 +436,9 @@ static int eh_reset(struct eh_device *eh_dev)
 	if (eh_dev->quirks & EH_QUIRK_IGNORE_GCTRL_RESET)
 		return 0;
 
-	eh_write_register(eh_dev, EH_REG_GCTRL, -1);
+	eh_write_register(eh_dev, EH_REG_GCTRL, BIT(EH_GCTRL_RESET_SHIFT));
 	for (trial = 0; trial < EH_RESET_MAX_TRIAL; trial++) {
-		if (!eh_read_register(eh_dev, EH_REG_GCTRL))
+		if (!(eh_read_register(eh_dev, EH_REG_GCTRL) & BIT(EH_GCTRL_RESET_SHIFT)))
 			return 0;
 		udelay(EH_RESET_DELAY_US);
 	}
@@ -452,6 +575,43 @@ static void request_to_sw_fifo(struct eh_device *eh_dev,
 	wake_up(&eh_dev->comp_wq);
 }
 
+/*
+ * Return zero on success. Otherwise, return error number
+ */
+static int eh_declare_state_init(struct platform_device *pdev,
+				 struct eh_device *eh_dev)
+{
+	int ret = 0;
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+	ret = exynos_get_idle_ip_index(dev_name(&pdev->dev));
+	if (ret < 0)
+		return ret;
+	eh_dev->ip_index = ret;
+	ret = 0;
+#elif IS_ENABLED(CONFIG_SOC_LGA)
+	ret = of_property_read_u32(pdev->dev.of_node, "ip-idle-index", &eh_dev->ip_index);
+#endif
+	return ret;
+}
+
+static void eh_declare_busy(struct eh_device *eh_dev)
+{
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+	exynos_update_ip_idle_status(eh_dev->ip_index, 0);
+#elif IS_ENABLED(CONFIG_SOC_LGA)
+	google_update_ip_idle_status(eh_dev->ip_index, STATE_BUSY);
+#endif
+}
+
+static void eh_declare_idle(struct eh_device *eh_dev)
+{
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+	exynos_update_ip_idle_status(eh_dev->ip_index, 1);
+#elif IS_ENABLED(CONFIG_SOC_LGA)
+	google_update_ip_idle_status(eh_dev->ip_index, STATE_IDLE);
+#endif
+}
+
 static int request_to_hw_fifo(struct eh_device *eh_dev, struct page *page,
 			      void *priv, bool wake_up)
 {
@@ -464,9 +624,8 @@ static int request_to_hw_fifo(struct eh_device *eh_dev, struct page *page,
 		return -EBUSY;
 	}
 
-#ifdef CONFIG_SOC_ZUMA
-	exynos_update_ip_idle_status(eh_dev->ip_index, 0);
-#endif
+	eh_declare_busy(eh_dev);
+
 	write_idx = fifo_write_index(eh_dev);
 
 	eh_setup_descriptor(eh_dev, page, write_idx);
@@ -719,30 +878,8 @@ static int eh_comp_thread(void *data)
 		int ret;
 		bool slept = false;
 
-#ifdef CONFIG_SOC_ZUMA
-		/*
-		 * On the worst case with race with request_to_hw_fifo,
-		 * this call could update IP as idle state but that
-		 * should be okay because the eh_comp_thread will never
-		 * sleep due to wake_up in the request_to_hw_fifo and
-		 * nr_request positive number check and PM let never
-		 * allowing entering SICD mode as long as system has a
-		 * runnable process.
-		 */
-		exynos_update_ip_idle_status(eh_dev->ip_index, 1);
-#endif
-		wait_event_freezable(eh_dev->comp_wq, ready_to_run(eh_dev, &slept));
+		eh_hwacg_refresh_idle_timer(eh_dev);
 
-		/*
-		 * The condition check above is racy so the schedule
-		 * couldn't schedule out the process but it should be
-		 * rare and the stat doesn't need to be precise.
-		 */
-		if (slept)
-			eh_dev->nr_run++;
-#ifdef CONFIG_SOC_ZUMA
-		exynos_update_ip_idle_status(eh_dev->ip_index, 0);
-#endif
 		ret = eh_process_compress(eh_dev);
 		if (unlikely(ret < 0)) {
 			unsigned long error;
@@ -774,11 +911,33 @@ static int eh_comp_thread(void *data)
 
 		if (!fifo_full(eh_dev))
 			flush_sw_fifo(eh_dev);
+
+		/*
+		 * On the worst case with race with request_to_hw_fifo,
+		 * this call could update IP as idle state but that
+		 * should be okay because the eh_comp_thread will never
+		 * sleep due to wake_up in the request_to_hw_fifo and
+		 * nr_request positive number check and PM let never
+		 * allowing entering SICD mode as long as system has a
+		 * runnable process.
+		 */
+		eh_declare_idle(eh_dev);
+
+		wait_event_freezable(eh_dev->comp_wq, ready_to_run(eh_dev, &slept));
+
+		/*
+		 * The condition check above is racy so the schedule
+		 * couldn't schedule out the process but it should be
+		 * rare and the stat doesn't need to be precise.
+		 */
+		if (slept)
+			eh_dev->nr_run++;
+
+		eh_declare_busy(eh_dev);
 	}
 
-#ifdef CONFIG_SOC_ZUMA
-	exynos_update_ip_idle_status(eh_dev->ip_index, 1);
-#endif
+	eh_declare_idle(eh_dev);
+
 	return 0;
 }
 
@@ -970,13 +1129,17 @@ static int eh_hw_init(struct eh_device *eh_dev, unsigned short fifo_size,
 		      phys_addr_t regs, unsigned short quirks)
 {
 	int ret;
-	unsigned long feature;
+	unsigned long feature, hwid;
 
 	eh_dev->quirks = quirks;
 
 	eh_dev->regs = ioremap(regs, EH_REGS_SIZE);
 	if (!eh_dev->regs)
 		return -ENOMEM;
+
+	hwid = eh_read_register(eh_dev, EH_REG_HWID);
+	eh_hwid = EH_HWID_DEVICE(hwid);
+	pr_info("Detected hardware version 0x%x", eh_hwid);
 
 	feature = eh_read_register(eh_dev, EH_REG_HWFEATURES2);
 	eh_dev->decompr_cmd_count = EH_FEATURES2_DECOMPR_CMDS(feature);
@@ -1032,6 +1195,9 @@ iounmap:
 #define EH_ATTR_RO(_name) \
 	static struct kobj_attribute _name##_attr = __ATTR_RO(_name)
 
+#define EH_ATTR_RW(_name) \
+	static struct kobj_attribute _name##_attr = __ATTR_RW(_name)
+
 static ssize_t nr_stall_show(struct kobject *kobj, struct kobj_attribute *attr,
 			  char *buf)
 {
@@ -1070,11 +1236,58 @@ static ssize_t sw_fifo_size_show(struct kobject *kobj, struct kobj_attribute *at
 }
 EH_ATTR_RO(sw_fifo_size);
 
+#if IS_ENABLED(CONFIG_SOC_LGA)
+static ssize_t hwacg_state_show(struct kobject *kobj, struct kobj_attribute *attr,
+		char *buf)
+{
+	struct eh_device *eh_dev = container_of(kobj, struct eh_device, kobj);
+
+	return sysfs_emit(buf, "%d\n", eh_dev->hwacg_state);
+}
+EH_ATTR_RO(hwacg_state);
+
+static ssize_t hwacg_threshold_ms_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t len)
+{
+	unsigned long val;
+	struct eh_device *eh_dev = container_of(kobj, struct eh_device, kobj);
+
+	if (kstrtoul(buf, 10, &val))
+		return -EINVAL;
+
+	mutex_lock(&eh_dev->hwacg_lock);
+	eh_dev->eh_hwacg_threshold_ms = val;
+	mutex_unlock(&eh_dev->hwacg_lock);
+
+	return len;
+}
+
+static ssize_t hwacg_threshold_ms_show(struct kobject *kobj, struct kobj_attribute *attr,
+		char *buf)
+{
+	struct eh_device *eh_dev = container_of(kobj, struct eh_device, kobj);
+	unsigned long val;
+
+
+	mutex_lock(&eh_dev->hwacg_lock);
+	val = eh_dev->eh_hwacg_threshold_ms;
+	mutex_unlock(&eh_dev->hwacg_lock);
+
+	return sysfs_emit(buf, "%lu\n", val);
+}
+EH_ATTR_RW(hwacg_threshold_ms);
+#endif
+
 static struct attribute *eh_attrs[] = {
 	&nr_stall_attr.attr,
 	&nr_run_attr.attr,
 	&nr_compressed_attr.attr,
 	&sw_fifo_size_attr.attr,
+#if IS_ENABLED(CONFIG_SOC_LGA)
+	&hwacg_state_attr.attr,
+	&hwacg_threshold_ms_attr.attr,
+#endif
 	NULL,
 };
 ATTRIBUTE_GROUPS(eh);
@@ -1126,6 +1339,18 @@ static int eh_init(struct device *device, struct eh_device *eh_dev,
 	return ret;
 }
 
+static unsigned int eh_dcmd_get_csize_shift_pos(struct eh_device *eh_dev)
+{
+	unsigned int shift;
+
+	if (eh_hwid >= EH_HWID_V2)
+		shift = EH_DCMD_INFO_SIZE_SHIFT;
+	else
+		shift = EH_DCMD_CSIZE_SIZE_SHIFT;
+
+	return shift;
+}
+
 static void eh_setup_dcmd(struct eh_device *eh_dev, unsigned int index,
 			  void *src, unsigned int slen, struct page *dst_page)
 {
@@ -1133,6 +1358,7 @@ static void eh_setup_dcmd(struct eh_device *eh_dev, unsigned int index,
 	phys_addr_t src_paddr;
 	unsigned long alignment;
 	unsigned long csize_data;
+	unsigned int csize_shift;
 	unsigned long src_data;
 	unsigned long dst_data;
 
@@ -1160,8 +1386,12 @@ static void eh_setup_dcmd(struct eh_device *eh_dev, unsigned int index,
 			alignment = PAGE_SIZE;
 	}
 
-	csize_data = slen << EH_DCMD_CSIZE_SIZE_SHIFT;
-	eh_write_register(eh_dev, EH_REG_DCMD_CSIZE(index), csize_data);
+	csize_shift = eh_dcmd_get_csize_shift_pos(eh_dev);
+	csize_data = slen;
+	csize_data <<= csize_shift;
+
+	if (eh_hwid < EH_HWID_V2)
+		eh_write_register(eh_dev, EH_REG_DCMD_CSIZE(index), csize_data);
 
 #ifdef CONFIG_GOOGLE_EH_DCMD_STATUS_IN_MEMORY
 	eh_dev->decompr_status[index] = EH_DCMD_PENDING
@@ -1181,6 +1411,10 @@ static void eh_setup_dcmd(struct eh_device *eh_dev, unsigned int index,
 	dst_data = page_to_phys(dst_page);
 	dst_data |= ((unsigned long)EH_DCMD_PENDING)
 		    << EH_DCMD_DEST_STATUS_SHIFT;
+
+	if (eh_hwid >= EH_HWID_V2)
+		dst_data |= csize_data;
+
 	eh_write_register(eh_dev, EH_REG_DCMD_DEST(index), dst_data);
 }
 
@@ -1204,6 +1438,12 @@ req_to_sw_fifo:
 	return 0;
 }
 EXPORT_SYMBOL(eh_compress_page);
+
+void eh_prepare_decompress(struct eh_device *eh_dev)
+{
+	eh_hwacg_refresh_idle_timer(eh_dev);
+}
+EXPORT_SYMBOL(eh_prepare_decompress);
 
 /*
  * eh_decompress_page
@@ -1299,6 +1539,13 @@ static int eh_of_probe(struct platform_device *pdev)
 	int sw_fifo_size = EH_SW_FIFO_SIZE;
 
 	pr_info("starting probing\n");
+	eh_dev = kzalloc(sizeof(*eh_dev), GFP_KERNEL);
+	if (!eh_dev)
+		return -ENOMEM;
+
+	ret = eh_hwacg_init(eh_dev);
+	if (ret)
+		goto free_ehdev;
 
 #if IS_ENABLED(CONFIG_PKVM_S2MPU_V9)
 	ret = pkvm_s2mpu_of_link_v9(&pdev->dev);
@@ -1306,10 +1553,11 @@ static int eh_of_probe(struct platform_device *pdev)
 	ret = pkvm_s2mpu_of_link(&pdev->dev);
 #endif
 	if (ret == -EAGAIN) {
-		return -EPROBE_DEFER;
+		ret =  -EPROBE_DEFER;
+		goto free_ehdev;
 	} else if (ret) {
 		dev_err(&pdev->dev, "can't link with s2mpu, error %d\n", ret);
-		return ret;
+		goto free_ehdev;
 	}
 
 	pm_runtime_enable(&pdev->dev);
@@ -1339,33 +1587,23 @@ static int eh_of_probe(struct platform_device *pdev)
 			    NULL))
 		quirks |= EH_QUIRK_IGNORE_GCTRL_RESET;
 
-	eh_dev = kzalloc(sizeof(*eh_dev), GFP_KERNEL);
-	if (!eh_dev) {
-		ret = -ENOMEM;
-		goto put_disable_clk;
-	}
-
 	of_property_read_u32(pdev->dev.of_node, "eh,sw-fifo-size", &sw_fifo_size);
 	ret = eh_init(&pdev->dev, eh_dev, eh_default_fifo_size, sw_fifo_size,
 		      mem->start, error_irq, quirks);
 	if (ret)
-		goto free_ehdev;
-#ifdef CONFIG_SOC_ZUMA
-	ret = exynos_get_idle_ip_index(dev_name(&pdev->dev));
+		goto put_disable_clk;
+
+	ret = eh_declare_state_init(pdev, eh_dev);
 	if (ret < 0) {
-		pr_err("fail to get idle ip index\n");
-		goto free_ehdev;
+		pr_err("fail to get idle ip index %d\n", ret);
+		goto put_disable_clk;
 	}
-	eh_dev->ip_index = ret;
-#endif
 	eh_dev->clk = clk;
 	platform_set_drvdata(pdev, eh_dev);
 
 	pr_info("starting probing done\n");
 	return 0;
 
-free_ehdev:
-	kfree(eh_dev);
 put_disable_clk:
 	clk_disable_unprepare(clk);
 put_clk:
@@ -1374,6 +1612,8 @@ put_pm_runtime:
 	pm_runtime_put_sync(&pdev->dev);
 disable_pm_runtime:
 	pm_runtime_disable(&pdev->dev);
+free_ehdev:
+	kfree(eh_dev);
 
 	pr_err("Fail to probe %d\n", ret);
 	return ret;
@@ -1382,6 +1622,8 @@ disable_pm_runtime:
 static int eh_of_remove(struct platform_device *pdev)
 {
 	struct eh_device *eh_dev = platform_get_drvdata(pdev);
+
+	cancel_hwacg_workqueue(eh_dev);
 
 	clk_disable_unprepare(eh_dev->clk);
 	clk_put(eh_dev->clk);
@@ -1412,6 +1654,9 @@ static int eh_suspend(struct device *dev)
 	data = eh_read_register(eh_dev, EH_REG_CDESC_CTRL);
 	data &= ~(1UL << EH_CDESC_CTRL_COMPRESS_ENABLE_SHIFT);
 	eh_write_register(eh_dev, EH_REG_CDESC_CTRL, data);
+
+	cancel_hwacg_workqueue(eh_dev);
+	eh_hwacg_enable(eh_dev);
 
 	/* disable EH clock */
 	clk_disable_unprepare(eh_dev->clk);

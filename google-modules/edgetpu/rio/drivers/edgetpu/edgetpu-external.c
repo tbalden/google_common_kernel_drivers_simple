@@ -16,7 +16,6 @@
 
 #include "edgetpu-config.h"
 #include "edgetpu-device-group.h"
-#include "edgetpu-iif.h"
 #include "edgetpu-internal.h"
 #include "edgetpu-mailbox.h"
 #include "edgetpu-mobile-platform.h"
@@ -209,7 +208,7 @@ static int edgetpu_external_mailbox_alloc(struct device *edgetpu_dev,
 					 group->mbox_attr.client_priv);
 	if (ret)
 		goto error_put_group;
-	down_write(&group->lock);
+	mutex_lock(&group->lock);
 	ext_mailbox = group->ext_mailbox;
 	if (!ext_mailbox) {
 		ret = -ENOENT;
@@ -217,7 +216,7 @@ static int edgetpu_external_mailbox_alloc(struct device *edgetpu_dev,
 	}
 	ret = edgetpu_external_mailbox_info_get(info, ext_mailbox);
 unlock:
-	up_write(&group->lock);
+	mutex_unlock(&group->lock);
 error_put_group:
 	edgetpu_device_group_put(group);
 out:
@@ -297,7 +296,7 @@ static int edgetpu_external_start_offload(struct device *edgetpu_dev,
 	group = edgetpu_device_group_get(client->group);
 	mutex_unlock(&client->group_lock);
 
-	down_write(&group->lock);
+	mutex_lock(&group->lock);
 	etdomain = edgetpu_group_domain_locked(group);
 	if (edgetpu_mmu_domain_detached(etdomain)) {
 		ret = -EINVAL;
@@ -311,7 +310,7 @@ static int edgetpu_external_start_offload(struct device *edgetpu_dev,
 		offload_info->client_id = etdomain->pasid;
 
 out_group_unlock:
-	up_write(&group->lock);
+	mutex_unlock(&group->lock);
 	edgetpu_device_group_put(group);
 out:
 	fput(file);
@@ -324,10 +323,10 @@ static int edgetpu_external_get_iif_manager(struct device *edgetpu_dev,
 	struct platform_device *pdev = to_platform_device(edgetpu_dev);
 	struct edgetpu_dev *etdev = platform_get_drvdata(pdev);
 
-	if (!etdev->etiif->iif_mgr)
+	if (!etdev->iif_mgr)
 		return -ENODEV;
 
-	*iif_manager_ptr = iif_manager_get(etdev->etiif->iif_mgr);
+	*iif_manager_ptr = iif_manager_get(etdev->iif_mgr);
 
 	return 0;
 }

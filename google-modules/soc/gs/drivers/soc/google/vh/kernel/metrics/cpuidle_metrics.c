@@ -300,18 +300,25 @@ int cpuidle_metrics_init(struct kobject *metrics_kobj)
 	}
 
 	for_each_possible_cpu (cpu) {
-		struct device_node *cpu_node, *state_node;
+		struct device_node *cpu_node, *state_node, *domain_node;
 		struct power_stats *stats = &per_cpu(all_cpu_stats, cpu);
 		spin_lock_init(&per_cpu(cpu_spinlocks, cpu));
 
 		/* find min residency per cpu */
 		cpu_node = of_cpu_device_node_get(cpu);
 		state_node = of_parse_phandle(cpu_node, "cpu-idle-states", 0);
+		if (!state_node) {
+			domain_node = of_parse_phandle(cpu_node, "power-domains", 0);
+			state_node = of_parse_phandle(domain_node, "domain-idle-states", 0);
+			max = of_count_phandle_with_args(domain_node, "domain-idle-states", NULL);
+		} else {
+			max = of_count_phandle_with_args(cpu_node, "cpu-idle-states", NULL);
+		}
+
 		ret = of_property_read_u32(state_node, "min-residency-us", &target_residency);
 		stats->target_residency = target_residency;
 
 		/* find maximum idle state */
-		max = of_count_phandle_with_args(cpu_node, "cpu-idle-states", NULL);
 		if (max > cpuidle_state_max)
 			cpuidle_state_max = max;
 	}

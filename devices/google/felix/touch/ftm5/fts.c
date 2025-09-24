@@ -51,6 +51,7 @@
 
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/consumer.h>
 
 #ifdef KERNEL_ABOVE_2_6_38
@@ -5353,13 +5354,11 @@ static int parse_dt(struct device *dev, struct fts_hw_platform_data *bdata)
 		}
 	}
 
-	bdata->irq_gpio = of_get_named_gpio_flags(np, "st,irq-gpio", 0, NULL);
+	bdata->irq_gpio = of_get_named_gpio(np, "st,irq-gpio", 0);
 	dev_info(dev, "irq_gpio = %d\n", bdata->irq_gpio);
 
 	if (of_property_read_bool(np, "st,reset-gpio")) {
-		bdata->reset_gpio = of_get_named_gpio_flags(np,
-							    "st,reset-gpio", 0,
-							    NULL);
+		bdata->reset_gpio = of_get_named_gpio(np, "st,reset-gpio", 0);
 		dev_info(dev, "reset_gpio = %d\n", bdata->reset_gpio);
 	} else
 		bdata->reset_gpio = GPIO_NOT_DEFINED;

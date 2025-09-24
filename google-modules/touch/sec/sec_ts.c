@@ -13,7 +13,7 @@
 struct sec_ts_data *tsp_info;
 
 #include "sec_ts.h"
-#include <samsung/exynos_drm_connector.h>
+#include <exynos_drm_connector.h>
 
 #if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
 #include <gs_drm/gs_drm_connector.h>
@@ -2559,12 +2559,12 @@ static int sec_ts_populate_encoded_channel(struct sec_ts_data *ts,
 	i = 0;
 	for (y = mutual_strength->rx_size - 1; y >= 0; y--)
 		for (x = mutual_strength->tx_size - 1; x >= 0; x--)
-			((uint16_t *) mutual_strength->data)[i++] =
+			((uint16_t *) mutual_strength->data_flex)[i++] =
 			    ts->heatmap_buff[x * mutual_strength->rx_size + y];
 
 	sec_ts_update_v4l2_mutual_strength(ts, mutual_strength->tx_size,
 					   mutual_strength->rx_size,
-					   (int16_t *) mutual_strength->data);
+					   (int16_t *) mutual_strength->data_flex);
 
 	return 0;
 }
@@ -2666,7 +2666,7 @@ static void sec_ts_populate_mutual_channel(struct sec_ts_data *ts,
 			heatmap_value =
 			    ts->heatmap_buff[x * mutual_strength->rx_size + y];
 			((uint16_t *)
-			 mutual_strength->data)[frame_index++] =
+			 mutual_strength->data_flex)[frame_index++] =
 			    be16_to_cpu(heatmap_value);
 		}
 	}
@@ -2674,7 +2674,7 @@ static void sec_ts_populate_mutual_channel(struct sec_ts_data *ts,
 	if (target_data_type == TYPE_SIGNAL_DATA) {
 		sec_ts_update_v4l2_mutual_strength(ts,
 		    mutual_strength->tx_size, mutual_strength->rx_size,
-		    (int16_t *) mutual_strength->data);
+		    (int16_t *) mutual_strength->data_flex);
 	}
 }
 
@@ -2773,13 +2773,13 @@ static void sec_ts_populate_self_channel(struct sec_ts_data *ts,
 	for (x = self_strength->tx_size - 1; x >= 0; x--) {
 		heatmap_value = ts->heatmap_buff[x];
 		((uint16_t *)
-		 self_strength->data)[frame_index++] =
+		 self_strength->data_flex)[frame_index++] =
 		    be16_to_cpu(heatmap_value);
 	}
 	for (y = self_strength->rx_size - 1; y >= 0; y--) {
 		heatmap_value = ts->heatmap_buff[self_strength->tx_size + y];
 		((uint16_t *)
-		 self_strength->data)[frame_index++] =
+		 self_strength->data_flex)[frame_index++] =
 		    be16_to_cpu(heatmap_value);
 	}
 }
@@ -4446,7 +4446,6 @@ static int sec_ts_fw_init(struct sec_ts_data *ts)
 	ts->dex_name = "";
 
 	ts->input_dev->name = "sec_touchscreen";
-	ts->input_dev->uniq = "google_touchscreen";
 	sec_ts_set_input_prop(ts, ts->input_dev, INPUT_PROP_DIRECT);
 #ifdef USE_OPEN_CLOSE
 	ts->input_dev->open = sec_ts_input_open;
@@ -4893,7 +4892,7 @@ static int sec_ts_probe(struct spi_device *client)
 #endif
 
 #ifndef CONFIG_SEC_SYSFS
-	sec_class = class_create(THIS_MODULE, "sec");
+	sec_class = class_create("sec");
 #endif
 
 	device_init_wakeup(&client->dev, true);

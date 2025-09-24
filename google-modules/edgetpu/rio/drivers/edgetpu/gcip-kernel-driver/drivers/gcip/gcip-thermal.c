@@ -56,7 +56,6 @@ static int gcip_thermal_set_cur_state(struct thermal_cooling_device *cdev, unsig
 {
 	struct gcip_thermal *thermal = cdev->devdata;
 	int i, ret = 0;
-	bool got_pm = false;
 
 	if (state >= thermal->num_states) {
 		dev_err(thermal->dev, "Invalid thermal cooling state %lu\n", state);
@@ -72,9 +71,10 @@ static int gcip_thermal_set_cur_state(struct thermal_cooling_device *cdev, unsig
 	if (state == thermal->state)
 		goto out;
 
-	got_pm = !gcip_pm_get_if_powered(thermal->pm, false);
-	if (got_pm)
+	if (!gcip_pm_get_if_powered(thermal->pm, false)) {
 		ret = thermal->set_rate(thermal->data, state_map[state].rate);
+		gcip_pm_put_async(thermal->pm);
+	}
 
 	if (ret)
 		dev_err(thermal->dev, "Failed to set thermal cooling state: %d\n", ret);
@@ -82,8 +82,6 @@ static int gcip_thermal_set_cur_state(struct thermal_cooling_device *cdev, unsig
 		thermal->state = state;
 out:
 	mutex_unlock(&thermal->lock);
-	if (got_pm)
-		gcip_pm_put_async(thermal->pm);
 
 	return ret;
 }
@@ -311,7 +309,6 @@ static int gcip_thermal_enable_set(void *data, u64 val)
 {
 	struct gcip_thermal *thermal = (struct gcip_thermal *)data;
 	int ret = 0;
-	bool got_pm = false;
 
 	mutex_lock(&thermal->lock);
 
@@ -320,9 +317,10 @@ static int gcip_thermal_enable_set(void *data, u64 val)
 		 * If the device is not powered, the value will be restored by
 		 * gcip_thermal_restore_on_powering in next fw boot.
 		 */
-		got_pm = !gcip_pm_get_if_powered(thermal->pm, false);
-		if (got_pm)
+		if (!gcip_pm_get_if_powered(thermal->pm, false)) {
 			ret = thermal->control(thermal->data, val);
+			gcip_pm_put_async(thermal->pm);
+		}
 
 		if (!ret) {
 			thermal->enabled = val;
@@ -336,8 +334,6 @@ static int gcip_thermal_enable_set(void *data, u64 val)
 
 	mutex_unlock(&thermal->lock);
 
-	if (got_pm)
-		gcip_pm_put_async(thermal->pm);
 	return ret;
 }
 
@@ -461,7 +457,6 @@ struct gcip_thermal *gcip_thermal_create(const struct gcip_thermal_args *args)
 int gcip_thermal_suspend_device(struct gcip_thermal *thermal)
 {
 	int ret = 0;
-	bool got_pm;
 
 	if (IS_ERR_OR_NULL(thermal))
 		return 0;
@@ -473,13 +468,12 @@ int gcip_thermal_suspend_device(struct gcip_thermal *thermal)
 	 * because we still want to prevent the client from using device.
 	 */
 	thermal->device_suspended = true;
-	got_pm = !gcip_pm_get_if_powered(thermal->pm, false);
-	if (got_pm)
+	if (!gcip_pm_get_if_powered(thermal->pm, false)) {
 		ret = thermal->set_rate(thermal->data, 0);
+		gcip_pm_put_async(thermal->pm);
+	}
 
 	mutex_unlock(&thermal->lock);
-	if (got_pm)
-		gcip_pm_put_async(thermal->pm);
 
 	return ret;
 }
@@ -487,16 +481,16 @@ int gcip_thermal_suspend_device(struct gcip_thermal *thermal)
 int gcip_thermal_resume_device(struct gcip_thermal *thermal)
 {
 	int ret = 0;
-	bool got_pm;
 
 	if (IS_ERR_OR_NULL(thermal))
 		return 0;
 
 	mutex_lock(&thermal->lock);
 
-	got_pm = !gcip_pm_get_if_powered(thermal->pm, false);
-	if (got_pm)
+	if (!gcip_pm_get_if_powered(thermal->pm, false)) {
 		ret = thermal->set_rate(thermal->data, state_map[thermal->state].rate);
+		gcip_pm_put_async(thermal->pm);
+	}
 
 	/*
 	 * Unlike gcip_thermal_suspend_device(), only sets the device as resumed if the request is
@@ -506,8 +500,6 @@ int gcip_thermal_resume_device(struct gcip_thermal *thermal)
 		thermal->device_suspended = false;
 
 	mutex_unlock(&thermal->lock);
-	if (got_pm)
-		gcip_pm_put_async(thermal->pm);
 
 	return ret;
 }

@@ -1192,7 +1192,7 @@ static int kbase_api_mem_exec_init(struct kbase_context *kctx,
 
 static int kbase_api_mem_sync(struct kbase_context *kctx, struct kbase_ioctl_mem_sync *sync)
 {
-	struct basep_syncset sset = { .gpu_va = sync->gpu_va,
+	struct basep_syncset sset = { .mem_handle.basep.handle = sync->handle,
 				      .user_addr = sync->user_addr,
 				      .size = sync->size,
 				      .type = sync->type };

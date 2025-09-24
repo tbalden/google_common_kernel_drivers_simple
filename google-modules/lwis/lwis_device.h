@@ -32,11 +32,13 @@
 
 #define LWIS_TOP_DEVICE_COMPAT "google,lwis-top-device"
 #define LWIS_I2C_DEVICE_COMPAT "google,lwis-i2c-device"
+#define LWIS_I2C_DEVICE_V2_COMPAT "google,lwis-i2c-device-v2"
 #define LWIS_IOREG_DEVICE_COMPAT "google,lwis-ioreg-device"
 #define LWIS_SLC_DEVICE_COMPAT "google,lwis-slc-device"
 #define LWIS_DPM_DEVICE_COMPAT "google,lwis-dpm-device"
 #define LWIS_TEST_DEVICE_COMPAT "google,lwis-test-device"
 #define LWIS_SPI_DEVICE_COMPAT "google,lwis-spi-device"
+#define LWIS_I3C_PROXY_DEVICE_COMPAT "google,lwis-i3c-proxy-device"
 
 #define EVENT_HASH_BITS 8
 #define BUFFER_HASH_BITS 8
@@ -55,18 +57,15 @@
  */
 enum lwis_client_flush_state { NOT_FLUSHING, FLUSHING };
 
-/* Forward declaration for lwis_device. This is needed for the declaration for
- * lwis_device_subclass_operations data struct.
- */
+/* Forward declarations */
+/* Used by lwis_device_subclass_operations data struct. */
 struct lwis_device;
-
-/* Forward declaration of a platform specific struct used by platform funcs */
+/* Platform specific struct used by platform funcs. */
 struct lwis_platform;
-
-/* Forward declaration of lwis allocator block manager */
 struct lwis_allocator_block_mgr;
 int lwis_allocator_init(struct lwis_device *lwis_dev);
 void lwis_allocator_release(struct lwis_device *lwis_dev);
+struct lwis_bus_manager;
 
 /*
  * struct lwis_dev_pwr_ref_cnt
@@ -104,6 +103,9 @@ struct lwis_device_subclass_operations {
 	/* Called by lwis_device when device register needs to be read/written */
 	int (*register_io)(struct lwis_device *lwis_dev, struct lwis_io_entry *entry,
 			   int access_size);
+	/* Grouped transfer that process batch_size of lwis_io_entries */
+	int (*batch_register_io)(struct lwis_device *lwis_dev, struct lwis_io_entry *entry,
+				 int access_size, int batch_size);
 	/* Called by lwis_device when a read/write memory barrier needs to be inserted */
 	int (*register_io_barrier)(struct lwis_device *lwis_dev, bool use_read_barrier,
 				   bool use_write_barrier);
@@ -111,6 +113,10 @@ struct lwis_device_subclass_operations {
 	int (*device_enable)(struct lwis_device *lwis_dev);
 	/* called by lwis_device when disabling the device */
 	int (*device_disable)(struct lwis_device *lwis_dev);
+	/* Device resume called by lwis_device after resume sequence */
+	int (*device_resume)(struct lwis_device *lwis_dev);
+	/* Device suspend called by lwis_device before suspend sequence */
+	int (*device_suspend)(struct lwis_device *lwis_dev);
 	/* Called by lwis_device any time a particular event_id needs to be
 	 * enabled or disabled by the device
 	 */
@@ -193,18 +199,8 @@ struct lwis_device {
 	struct device *dev;
 	struct device *k_dev;
 	struct platform_device *plat_dev;
-	bool reset_gpios_present;
-	struct gpio_descs *reset_gpios;
-	bool enable_gpios_present;
-	struct gpio_descs *enable_gpios;
-	bool shared_enable_gpios_present;
-	struct gpio_descs *shared_enable_gpios;
-	uint32_t enable_gpios_settle_time;
-	struct lwis_regulator_list *regulators;
+	struct device *controller_dev;
 	struct lwis_clock_list *clocks;
-	struct pinctrl *mclk_ctrl;
-	bool mclk_present;
-	uint32_t shared_pinctrl;
 	struct lwis_interrupt_list *irqs;
 	struct lwis_phy_list *phys;
 	struct list_head dev_list;
@@ -214,7 +210,7 @@ struct lwis_device {
 	/* Mark if the client called device suspend */
 	bool is_suspended;
 	/* Mutex used to synchronize access between clients */
-	struct mutex interclient_lock;
+	struct mutex client_lock;
 	/* Spinlock used to synchronize access to the device struct */
 	spinlock_t lock;
 	/* List of clients opened for this device */
@@ -254,6 +250,10 @@ struct lwis_device {
 	const char *bts_scenario_name;
 	/* BTS scenario index */
 	unsigned int bts_scenario;
+	/* MEM Qos scenario name */
+	const char *mem_qos_scenario_name;
+	/* MEM Qos scenario index */
+	unsigned int mem_qos_scenario;
 
 	/* Power sequence handler */
 	struct device_node *power_seq_handler;
@@ -271,9 +271,8 @@ struct lwis_device {
 	struct lwis_gpios_info irq_gpios_info;
 	/* Is power up to suspend mode */
 	bool power_up_to_suspend;
-
-	/* Power management hibernation state of the device */
-	int pm_hibernation;
+	/* regulators list */
+	struct list_head regulator_list;
 
 	/* Is device read only */
 	bool is_read_only;
@@ -289,6 +288,9 @@ struct lwis_device {
 	struct task_struct *transaction_worker_thread;
 	/* Limit on number of transactions to be processed at a time */
 	int transaction_process_limit;
+
+	/* Stores the pointer to valid associated bus manager otherwise NULL */
+	struct lwis_bus_manager *bus_manager;
 };
 
 /*
@@ -365,20 +367,20 @@ void lwis_base_unprobe(struct lwis_device *unprobe_lwis_dev);
 struct lwis_device *lwis_find_dev_by_id(int dev_id);
 
 /*
- * Check i2c device is still in use:
- * Check if there is any other device using the same I2C bus.
+ * Check i2c/i3c device is still in use:
+ * Check if there is any other device using the same I2C/I3C bus.
  */
-bool lwis_i2c_dev_is_in_use(struct lwis_device *lwis_dev);
+bool lwis_i2c_i3c_dev_is_in_use(struct lwis_device *lwis_dev);
 
 /*
  * Power up a LWIS device, should be called when lwis_dev->enabled is 0
- * lwis_dev->interclient_lock should be held before this function.
+ * lwis_dev->client_lock should be held before this function.
  */
 int lwis_dev_power_up_locked(struct lwis_device *lwis_dev);
 
 /*
  * Power down a LWIS device, should be called when lwis_dev->enabled become 0
- * lwis_dev->interclient_lock should be held before this function.
+ * lwis_dev->client_lock should be held before this function.
  */
 int lwis_dev_power_down_locked(struct lwis_device *lwis_dev);
 

@@ -13,7 +13,6 @@
 
 #include <gcip/gcip-firmware.h>
 #include <gcip/gcip-image-config.h>
-#include <gcip/gcip-memory.h>
 
 #include "gxp-internal.h"
 
@@ -31,7 +30,7 @@ struct gxp_mcu_firmware_ns_buffer {
 struct gxp_mcu_firmware {
 	struct gxp_dev *gxp;
 	/* resource for MCU firmware image */
-	struct gcip_memory image_buf;
+	struct gxp_mapped_resource image_buf;
 
 	struct mutex lock; /* lock to protect fields below */
 	enum gcip_fw_status status;
@@ -73,10 +72,8 @@ int gxp_mcu_firmware_run(struct gxp_mcu_firmware *mcu_fw);
 
 /*
  * Stops the running MCU firmware.
- *
- * Returns 0 on success, -EAGAIN on errors while ensuring MCU in PG state.
  */
-int gxp_mcu_firmware_stop(struct gxp_mcu_firmware *mcu_fw);
+void gxp_mcu_firmware_stop(struct gxp_mcu_firmware *mcu_fw);
 
 /*
  * Send shutdown command to GSA.

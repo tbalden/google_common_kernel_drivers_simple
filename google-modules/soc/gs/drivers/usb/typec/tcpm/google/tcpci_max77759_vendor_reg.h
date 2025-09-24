@@ -7,6 +7,8 @@
 #ifndef __TCPCI_MAX77759_VENDOR_REG_H
 #define __TCPCI_MAX77759_VENDOR_REG_H
 
+#define TCPC_VENDOR_ID_L			0x0
+
 #define CHG_CNFG_00                              0xB9
 #define MODE_MASK                               GENMASK(2, 0)
 #define MODE_BUCK_ON                            0x4
@@ -104,5 +106,16 @@
 #define SBUSW_PATH_1				0x9
 #define SBUSW_XBAR_POL_NORMAL			BIT(7)
 #define SBUSW_XBAR_POL_REVERSE			0xC0
+
+#define TCPC_VENDOR_SW_CTRL			0x95
+
+#define MAX77759_MIN_ADDR			TCPC_VENDOR_ID_L
+#define MAX77759_MAX_ADDR			TCPC_VENDOR_SW_CTRL
+#define MAX77759_REG_COUNT			(MAX77759_MAX_ADDR - MAX77759_MIN_ADDR + 1)
+
+#define MAX77759_BUCK_BOOST_OP 0xb9
+#define MAX77779_BUCK_BOOST_OP 0xbc
+#define MAX777x9_BUCK_BOOST_OFF 0
+#define MAX777x9_BUCK_BOOST_SOURCE 0xa
 
 #endif /* __TCPCI_MAX77759_VENDOR_REG_H */

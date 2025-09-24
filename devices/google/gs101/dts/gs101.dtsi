@@ -444,15 +444,7 @@
 	};
 
 	pixel-reboot {
-		compatible = "google,pixel-reboot";
-		syscon = <&pmu_system_controller>;
-		pshold-control-offset = <0x3E9C>;
-		pshold-control-trigger = <0x100>;
-		swreset-system-offset = <0x3A00>;
-		swreset-system-trigger = <0x2>;
-		reboot-cmd-offset = <0x0810>;
-		dump-gpr-offset = <0x0808>;
-		force-warm-reboot-on-thermal-shutdown;
+		compatible = "google,pixel-reboot-v1";
 	};
 
 	gpio_keys: gpio_keys {
@@ -662,7 +654,6 @@
 			phy-names = "usb2-phy", "usb3-phy";
 			/* support usb offloading, 0: disabled, 1: audio */
 			offload = <1>;
-			direct-usb-access;
 		};
 	};
 

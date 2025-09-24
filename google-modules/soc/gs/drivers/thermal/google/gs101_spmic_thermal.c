@@ -170,7 +170,7 @@ static int gs101_spmic_thermal_read_raw(struct gs101_spmic_thermal_sensor *s, in
 static int gs101_spmic_thermal_get_temp(struct thermal_zone_device *tz,
 					int *temp)
 {
-	struct gs101_spmic_thermal_sensor *s = tz->devdata;
+	struct gs101_spmic_thermal_sensor *s = thermal_zone_device_priv(tz);
 	struct gs101_spmic_thermal_chip *gs101_spmic_thermal = s->chip;
 	int emul_temp;
 	int raw, ret = 0;
@@ -209,7 +209,7 @@ end:
 static int gs101_spmic_thermal_set_trips(struct thermal_zone_device *tz,
 					 int low_temp, int high_temp)
 {
-	struct gs101_spmic_thermal_sensor *s = tz->devdata;
+	struct gs101_spmic_thermal_sensor *s = thermal_zone_device_priv(tz);
 	struct gs101_spmic_thermal_chip *gs101_spmic_thermal = s->chip;
 	struct device *dev = gs101_spmic_thermal->dev;
 	int emul_temp, low_volt, ret = 0;
@@ -266,21 +266,21 @@ static int gs101_spmic_thermal_set_hot_trip(struct gs101_spmic_thermal_sensor *s
  * programmed as shutdown threshold.
  */
 static int gs101_spmic_thermal_set_trip_temp(struct thermal_zone_device *tz,
-					     int trip, int temp)
+					     int trip_id, int temp)
 {
-	struct gs101_spmic_thermal_sensor *s = tz->devdata;
-	const struct thermal_trip *trip_points;
+	struct gs101_spmic_thermal_sensor *s = thermal_zone_device_priv(tz);
+	struct thermal_trip trip;
 	int ret = 0;
 
 	if (!s->chip->sensors_ready)
 		return -EAGAIN;
 
-	trip_points = of_thermal_get_trip_points(s->tzd);
-	if (!trip_points)
+	ret = __thermal_zone_get_trip(s->tzd, trip_id, &trip);
+	if (ret)
 		return -EINVAL;
 
-	if (trip_points[trip].type != THERMAL_TRIP_HOT)
-		return ret;
+	if (trip.type != THERMAL_TRIP_HOT)
+		return 0;
 
 	/* Use THERMAL_TRIP_HOT for HW thermal shutdown */
 	ret = gs101_spmic_thermal_set_hot_trip(s, temp);
@@ -294,7 +294,7 @@ static int gs101_spmic_thermal_set_trip_temp(struct thermal_zone_device *tz,
 static int gs101_spmic_thermal_set_emul_temp(struct thermal_zone_device *tz,
 					     int temp)
 {
-	struct gs101_spmic_thermal_sensor *sensor = tz->devdata;
+	struct gs101_spmic_thermal_sensor *sensor = thermal_zone_device_priv(tz);
 	int ret;
 	u8 value, mask = 0x1;
 
@@ -353,20 +353,17 @@ static struct kobj_attribute channel_temp_attr = __ATTR_RO(channel_temp);
 static int gs101_spmic_thermal_get_hot_temp(struct thermal_zone_device *tzd)
 {
 	int ntrips;
-	const struct thermal_trip *trips;
+	struct thermal_trip trip;
 	int i;
 
-	ntrips = of_thermal_get_ntrips(tzd);
+	ntrips = thermal_zone_get_num_trips(tzd);
 	if (ntrips <= 0)
 		return THERMAL_TEMP_INVALID;
 
-	trips = of_thermal_get_trip_points(tzd);
-	if (!trips)
-		return THERMAL_TEMP_INVALID;
-
 	for (i = 0; i < ntrips; i++) {
-		if (of_thermal_is_trip_valid(tzd, i) && trips[i].type == THERMAL_TRIP_HOT)
-			return trips[i].temperature;
+		if (!thermal_zone_get_trip(tzd, i, &trip)
+		    && trip.type == THERMAL_TRIP_HOT)
+			return trip.temperature;
 	}
 
 	return THERMAL_TEMP_INVALID;

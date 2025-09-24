@@ -1021,7 +1021,6 @@ int direct_dm_create(struct platform_device *pdev)
 
 	_dc = devm_kzalloc(dev, sizeof(struct direct_dm_ctrl), GFP_KERNEL);
 	if (!_dc) {
-		mif_err_limited("devm_kzalloc() error\n");
 		ret = -ENOMEM;
 		goto err;
 	}

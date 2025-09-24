@@ -21,7 +21,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&usb_pd_irq>;
 		interrupt-parent = <&gpa9>;
-		usbpd,usbpd_int = <&gpa9 7 GPIO_ACTIVE_LOW>;
+		usbpd,usbpd_int-gpio = <&gpa9 7 GPIO_ACTIVE_LOW>;
 		usb-psy-name = "usb";
 		/* Enable when BMS is up */
 		chg-psy-name = "gcpm";

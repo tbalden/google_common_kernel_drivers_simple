@@ -13,7 +13,7 @@
 	fragment@battery {
 		target-path = "/";
 		__overlay__ {
-			google_mitigation: google,mitigation {
+			google_mitigation: google-mitigation {
 				compatible = "google,google-bcl";
 				#thermal-sensor-cells = <1>;
 				google,charger = <&max77779_chg>;
@@ -212,19 +212,19 @@
 					};
 				};
 				freq_qos {
-					batoilo {
-						cpucl0 = <1696000>;
-						cpucl1 = <1795000>;
-						cpucl2 = <1999000>;
-						gpu = <723000>;
-						tpu = <845000>;
+					oilo1 {
+						cpucl0 = <1696000 1696000>;
+						cpucl1 = <1795000 1795000>;
+						cpucl2 = <1999000 1999000>;
+						gpu = <723000 723000>;
+						tpu = <845000 845000>;
 					};
 					smpl_warn {
-						cpucl0 = <1696000>;
-						cpucl1 = <2130000>;
-						cpucl2 = <2499000>;
-						gpu = <723000>;
-						tpu = <845000>;
+						cpucl0 = <1696000 1696000>;
+						cpucl1 = <2130000 2130000>;
+						cpucl2 = <2499000 2499000>;
+						gpu = <723000 723000>;
+						tpu = <845000 845000>;
 					};
 				};
 			};

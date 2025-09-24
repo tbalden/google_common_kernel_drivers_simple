@@ -32,26 +32,85 @@
 /** Mark the end of mipi commands transaction */
 #define GS_DSI_MSG_FORCE_FLUSH BIT(12)
 
-/* Panel Rev bits */
-#define PANEL_REV_PROTO1        BIT(0)
-#define PANEL_REV_PROTO1_1      BIT(1)
-#define PANEL_REV_PROTO1_2      BIT(2)
-#define PANEL_REV_PROTO2        BIT(3)
-#define PANEL_REV_EVT1          BIT(4)
-#define PANEL_REV_EVT1_0_2      BIT(5)
-#define PANEL_REV_EVT1_1        BIT(6)
-#define PANEL_REV_EVT1_2        BIT(7)
-#define PANEL_REV_EVT2          BIT(8)
-#define PANEL_REV_DVT1          BIT(9)
-#define PANEL_REV_DVT1_1        BIT(10)
-#define PANEL_REV_PVT           BIT(11)
-#define PANEL_REV_MP            BIT(12)
-#define PANEL_REV_LATEST        BIT(31)
-#define PANEL_REV_ALL           (~0)
-#define PANEL_REV_GE(rev)       (~((rev) - 1))
-#define PANEL_REV_LT(rev)       ((rev) - 1)
-#define PANEL_REV_ALL_BUT(rev)  (PANEL_REV_ALL & ~(rev))
-#define PANEL_REV_RANGE(rev_min, rev_max) (PANEL_REV_GE(rev_min) & PANEL_REV_LT(rev_max))
+/**
+ * struct panel_rev_id_t - Struct encapsulating panel id
+ *
+ * See go/display-panel-id-def for details
+ *
+ * @variant: smallest-resolution designator
+ * @minor: build minor version
+ * @major: build major version
+ * @stage: build stage (ex. Proto, EVT, DVT)
+ * @id: unique per existing revision
+ */
+typedef union {
+	struct {
+		uint8_t variant; // 0 - 7
+		uint8_t minor; // 8 - 15
+		uint8_t major; // 16 - 23
+		uint8_t stage; // 24 - 31
+	} s;
+	uint32_t id;
+} panel_rev_id_t;
+
+enum {
+	STAGE_INVALID = 0,
+	STAGE_PROTO = 1,
+	STAGE_EVT = 2,
+	STAGE_DVT = 3,
+	STAGE_PVT = 4,
+	STAGE_MP = 5,
+	STAGE_LATEST = 0xff,
+};
+
+#define PANEL_REV_ID(st, mj, mn, vr)	(((uint32_t)st << 24) | \
+					((uint32_t)mj << 16) |  \
+					((uint32_t)mn << 8) |   \
+					((uint32_t)vr))
+
+/*
+ * PANEL_REVID_* is used to aid in storing the raw panel revision information
+ */
+#define PANEL_REVID_PROTO1		PANEL_REV_ID(STAGE_PROTO, 1, 0, 0)
+#define PANEL_REVID_PROTO1_1		PANEL_REV_ID(STAGE_PROTO, 1, 1, 0)
+#define PANEL_REVID_PROTO1_2		PANEL_REV_ID(STAGE_PROTO, 1, 2, 0)
+#define PANEL_REVID_PROTO2		PANEL_REV_ID(STAGE_PROTO, 2, 0, 0)
+#define PANEL_REVID_EVT1		PANEL_REV_ID(STAGE_EVT, 1, 0, 0)
+#define PANEL_REVID_EVT1_0_2		PANEL_REV_ID(STAGE_EVT, 1, 0, 2)
+#define PANEL_REVID_EVT1_1		PANEL_REV_ID(STAGE_EVT, 1, 1, 0)
+#define PANEL_REVID_EVT1_1_1		PANEL_REV_ID(STAGE_EVT, 1, 1, 1)
+#define PANEL_REVID_EVT1_2		PANEL_REV_ID(STAGE_EVT, 1, 2, 0)
+#define PANEL_REVID_EVT2		PANEL_REV_ID(STAGE_EVT, 2, 0, 0)
+#define PANEL_REVID_DVT1		PANEL_REV_ID(STAGE_DVT, 1, 0, 0)
+#define PANEL_REVID_DVT1_1		PANEL_REV_ID(STAGE_DVT, 1, 1, 0)
+#define PANEL_REVID_PVT			PANEL_REV_ID(STAGE_PVT, 1, 0, 0)
+#define PANEL_REVID_MP			PANEL_REV_ID(STAGE_MP, 1, 0, 0)
+#define PANEL_REVID_LATEST		PANEL_REV_ID(STAGE_LATEST, 0xff, 0xff, 0xff)
+
+/*
+ * By contrast, PANEL_REV_* is a monotonically-increasing bitmask used
+ * to guide driver behavior as it relates to command-sending logic
+ */
+#define PANEL_REV_PROTO1		BIT(0)
+#define PANEL_REV_PROTO1_1		BIT(1)
+#define PANEL_REV_PROTO1_2		BIT(2)
+#define PANEL_REV_PROTO2		BIT(3)
+#define PANEL_REV_EVT1			BIT(4)
+#define PANEL_REV_EVT1_0_2		BIT(5)
+#define PANEL_REV_EVT1_1		BIT(6)
+#define PANEL_REV_EVT1_1_1		BIT(7)
+#define PANEL_REV_EVT1_2		BIT(8)
+#define PANEL_REV_EVT2			BIT(9)
+#define PANEL_REV_DVT1			BIT(10)
+#define PANEL_REV_DVT1_1		BIT(11)
+#define PANEL_REV_PVT			BIT(12)
+#define PANEL_REV_MP			BIT(13)
+#define PANEL_REV_LATEST		BIT(31)
+#define PANEL_REV_ALL			(~0)
+#define PANEL_REV_GE(rev)		(~((rev) - 1))
+#define PANEL_REV_LT(rev)		((rev) - 1)
+#define PANEL_REV_RANGE(min, max)	(PANEL_REV_GE(min) & PANEL_REV_LT(max))
+#define PANEL_REV_ALL_BUT(rev)		(PANEL_REV_ALL & ~(rev))
 
 /** Command Set data structures **/
 
@@ -60,7 +119,7 @@
  * @cmd_len:  Length of a dsi command.
  * @cmd:      Pointer to a dsi command.
  * @delay_ms: Delay time after executing this dsi command.
- * @panel_rev:Send the command only when the panel revision is matched.
+ * @panel_rev_bitmask: Send the command only when the panel revision is matched.
  * @flags:    Specialized flags to be passed to dsi host that may affect
  *	      transfer. This will often be GS_DSI_MSG_QUEUE or similar, but
  *	      could include other flags as needed.
@@ -71,7 +130,7 @@ struct gs_dsi_cmd {
 	u32 cmd_len;
 	const u8 *cmd;
 	u32 delay_ms;
-	u32 panel_rev;
+	u32 panel_rev_bitmask;
 	u16 flags;
 	u8 type;
 };
@@ -105,7 +164,7 @@ struct gs_dsi_cmdset {
  *         delay value; otherwise, its default value (see below) is 0
  * @delay: The delay to attach to sending the command
  *         Its default value (see below) is 0
- * @rev: The panel revision this applies to, if any (using bitmask)
+ * @rev: The panel revision bitmask this applies to, if any
  *       Its default value (see below) is PANEL_REV_ALL
  * @cmdlist: The binary array of data to be sent to the device
  *
@@ -153,7 +212,7 @@ struct gs_dsi_cmdset {
  *         delay value; otherwise, its default value (see below) is 0
  * @delay: The delay to attach to sending the command
  *         Its default value (see below) is 0
- * @rev: The panel revision this applies to, if any
+ * @rev: The panel revision bitmask this applies to, if any
  *       Its default value (see below) is PANEL_REV_ALL
  * @seq: Sequence of binary data to be sent to the device
  *
@@ -290,10 +349,10 @@ struct gs_binned_lp {
  * gs_dsi_send_cmdset() - Sends a series of dsi commands to the panel
  * @dsi: pointer to mipi_dsi_device by which to write to panel
  * @cmdset: Set of commands to send
- * @panel_rev: revision identifier for panel to be matched against commands
+ * @panel_rev_bitmask: revision identifier for panel to be matched against commands
  */
 void gs_dsi_send_cmdset(struct mipi_dsi_device *dsi, const struct gs_dsi_cmdset *cmdset,
-			u32 panel_rev);
+			u32 panel_rev_bitmask);
 
 /* Raw DCS Writes */
 

@@ -7,15 +7,13 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME "-buffer: " fmt
 
-#include <linux/dma-buf.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
-#include <soc/google/pt.h>
 
 #include "lwis_buffer.h"
-#include "lwis_commands.h"
 #include "lwis_device.h"
 #include "lwis_device_slc.h"
+#include "lwis_platform.h"
 #include "lwis_platform_dma.h"
 #include "lwis_trace.h"
 
@@ -133,7 +131,7 @@ int lwis_buffer_alloc(struct lwis_client *lwis_client, struct lwis_alloc_buffer_
 			return alloc_info->dma_fd;
 		}
 
-		alloc_info->partition_id = PT_PTID_INVALID;
+		alloc_info->partition_id = lwis_platform_get_default_pt_id();
 	}
 
 	buffer->fd = alloc_info->dma_fd;
@@ -141,6 +139,39 @@ int lwis_buffer_alloc(struct lwis_client *lwis_client, struct lwis_alloc_buffer_
 	buffer->dma_buf = dma_buf;
 	hash_add(lwis_client->allocated_buffers, &buffer->node, buffer->fd);
 
+	return 0;
+}
+
+int lwis_buffer_realloc(struct lwis_client *lwis_client, struct lwis_alloc_buffer_info *alloc_info,
+			struct lwis_allocated_buffer *buffer)
+{
+	int ret = 0;
+
+	if (!lwis_client) {
+		pr_err("Realloc: LWIS client is NULL\n");
+		return -ENODEV;
+	}
+	if (!alloc_info || !buffer) {
+		pr_err("Realloc: alloc_info and/or buffer is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!(alloc_info->flags & LWIS_DMA_SYSTEM_CACHE_RESERVATION)) {
+		pr_err("Buffer reallocation not supported for non-cached buffers\n");
+		return -EINVAL;
+	}
+	if (lwis_client->lwis_dev->type != DEVICE_TYPE_SLC) {
+		pr_err("Can't allocate system cache buffer on non-slc device\n");
+		return -EINVAL;
+	}
+	ret = lwis_slc_buffer_realloc(lwis_client->lwis_dev, alloc_info);
+	if (ret)
+		return ret;
+
+	buffer->fd = alloc_info->dma_fd;
+	buffer->size = alloc_info->size;
+	buffer->dma_buf = NULL;
+	hash_add(lwis_client->allocated_buffers, &buffer->node, buffer->fd);
 	return 0;
 }
 
@@ -174,7 +205,6 @@ int lwis_buffer_enroll(struct lwis_client *lwis_client, struct lwis_enrolled_buf
 	struct lwis_buffer_enrollment_list *enrollment_list;
 	struct list_head *it_enrollment;
 	struct lwis_enrolled_buffer *old_buffer;
-	char buffer_name[LWIS_MAX_NAME_STRING_LEN];
 	char trace_name[LWIS_MAX_NAME_STRING_LEN];
 
 	if (!lwis_client) {
@@ -207,8 +237,6 @@ int lwis_buffer_enroll(struct lwis_client *lwis_client, struct lwis_enrolled_buf
 			PTR_ERR(buffer->dma_buf));
 		return PTR_ERR(buffer->dma_buf);
 	}
-	scnprintf(buffer_name, sizeof(buffer_name), "lwis:%s", lwis_client->lwis_dev->name);
-	dma_buf_set_name(buffer->dma_buf, buffer_name);
 
 	buffer->dma_buf_attachment = dma_buf_attach(buffer->dma_buf, lwis_client->lwis_dev->k_dev);
 	if (IS_ERR_OR_NULL(buffer->dma_buf_attachment)) {

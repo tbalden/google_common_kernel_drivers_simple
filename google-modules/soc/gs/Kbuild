@@ -8,10 +8,10 @@ obj-y += drivers/phy/
 
 obj-y += drivers/pinctrl/
 
-ifeq ($(CONFIG_SOC_ZUMA),y)
-obj-y += drivers/pci/controller/dwc/
-else
+ifneq ($(CONFIG_SOC_GS101)$(CONFIG_SOC_GS201),)
 obj-y += drivers/pci/controller/dwc-whi/
+else
+obj-y += drivers/pci/controller/dwc/
 endif
 
 obj-y += drivers/clk/gs/
@@ -62,21 +62,20 @@ obj-y += drivers/cpufreq/
 
 obj-y += drivers/clocksource/
 
-ifeq ($(CONFIG_SOC_ZUMA),y)
-obj-y += drivers/devfreq/google/
-else
+ifneq ($(CONFIG_SOC_GS101)$(CONFIG_SOC_GS201),)
 obj-y += drivers/devfreq-whi/google/
+else
+obj-y += drivers/devfreq/google/
 endif
 
+ifneq ($(CONFIG_SOC_GS101)$(CONFIG_SOC_GS201)$(CONFIG_SOC_ZUMA),)
 obj-y += drivers/performance/gs_perf_mon/
-
 obj-y += drivers/performance/lat_governors/
+endif
 
 obj-y += drivers/iio/
 
 obj-y += drivers/bts/
-
-obj-y += drivers/block/zram/
 
 obj-y += drivers/pwm/
 

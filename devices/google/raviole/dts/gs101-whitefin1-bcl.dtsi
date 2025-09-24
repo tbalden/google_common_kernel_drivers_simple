@@ -12,7 +12,7 @@
 	fragment@battery {
 		target-path = "/";
 		__overlay__ {
-			google_mitigation: google,mitigation {
+			google_mitigation: google-mitigation {
 				compatible = "google,google-bcl";
 				#thermal-sensor-cells = <1>;
 				google,power-supply = <&google_battery>;

@@ -22,6 +22,8 @@
 #include <soc/google/bts.h>
 #endif
 
+#include <net/netdev_rx_queue.h>
+
 static struct cpif_tpmon _tpmon;
 
 /*
@@ -97,7 +99,6 @@ static void tpmon_calc_rx_speed(struct cpif_tpmon *tpmon)
 {
 	struct modem_ctl *mc = tpmon->ld->mc;
 	u32 hysteresis = mc->tp_threshold + mc->tp_hysteresis;
-	int spd;
 	int ret = 0;
 
 	ret = tpmon_calc_rx_speed_internal(tpmon, &tpmon->rx_total, false);
@@ -129,16 +130,12 @@ static void tpmon_calc_rx_speed(struct cpif_tpmon *tpmon)
 		return;
 
 	if (tpmon->rx_total.rx_mbps > hysteresis)
-		spd = pcie_get_max_link_speed(mc->pcie_ch_num);
+		tpmon->new_speed = pcie_get_max_link_speed(mc->pcie_ch_num);
 	else
-		spd = LINK_SPEED_GEN1;
+		tpmon->new_speed = LINK_SPEED_GEN1;
 
-	if (spd != tpmon->current_speed) {
-		mif_info("Change link from GEN%d to GEN%d (rx: %ldMbps)\n",
-			tpmon->current_speed, spd, tpmon->rx_total.rx_mbps);
-		tpmon->current_speed = spd;
-	}
-	pcie_change_link_speed(mc->pcie_ch_num, spd);
+	if (tpmon->new_speed != tpmon->current_speed)
+		queue_work(tpmon->update_speed_wq, &tpmon->update_speed_work);
 }
 
 /* Queue status */
@@ -791,6 +788,7 @@ static int tpmon_cpufreq_nb(struct notifier_block *nb,
 static void tpmon_set_pci_low_power(struct tpmon_data *data)
 {
 	struct modem_ctl *mc = data->tpmon->ld->mc;
+	struct s51xx_pcie *s51xx_pcie = pci_get_drvdata(mc->s51xx_pdev);
 	u32 val;
 
 	if (!data->enable)
@@ -802,8 +800,9 @@ static void tpmon_set_pci_low_power(struct tpmon_data *data)
 
 	val = tpmon_get_curr_level(data);
 	mif_info("%s (enable:%u)\n", data->name, val);
+
 	if (!mc->l1ss_disable)
-		s51xx_pcie_l1ss_ctrl((int)val, mc->pcie_ch_num);
+		s51xx_pcie_l1ss_ctrl((int)val, s51xx_pcie);
 
 out:
 	mutex_unlock(&mc->pcie_check_lock);
@@ -998,6 +997,20 @@ void tpmon_reset_data(char *name)
 }
 EXPORT_SYMBOL(tpmon_reset_data);
 
+static void tpmon_update_speed(struct work_struct *work)
+{
+	struct cpif_tpmon *tpmon = &_tpmon;
+	struct modem_ctl *mc = tpmon->ld->mc;
+	struct s51xx_pcie *s51xx_pcie = pci_get_drvdata(mc->s51xx_pdev);
+
+	mif_info("Change link from GEN%d to GEN%d (rx: %ldMbps)\n",
+		tpmon->current_speed, tpmon->new_speed, tpmon->rx_total.rx_mbps);
+	tpmon->current_speed = tpmon->new_speed;
+	s51xx_pcie_l1ss_ctrl(0, s51xx_pcie);
+	pcie_change_link_speed(mc->pcie_ch_num, tpmon->new_speed);
+	s51xx_pcie_l1ss_ctrl(1, s51xx_pcie);
+}
+
 /* Init */
 static int tpmon_init_params(struct cpif_tpmon *tpmon)
 {
@@ -1018,6 +1031,7 @@ static int tpmon_init_params(struct cpif_tpmon *tpmon)
 	tpmon->q_status_dit_src = 0;
 	tpmon->legacy_packet_count = 0;
 	tpmon->current_speed = LINK_SPEED_GEN1;
+	tpmon->new_speed = LINK_SPEED_GEN1;
 
 	tpmon->prev_monitor_time = 0;
 
@@ -1754,6 +1768,15 @@ int tpmon_create(struct platform_device *pdev, struct link_device *ld)
 		goto create_error;
 	}
 	INIT_DELAYED_WORK(&tpmon->boost_dwork, tpmon_boost_work);
+
+	tpmon->update_speed_wq = alloc_workqueue("cpif_tpmon_update_speed_wq",
+					__WQ_LEGACY | WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
+	if (!tpmon->update_speed_wq) {
+		mif_err("alloc_workqueue() update_speed_wq error!\n");
+		return -EINVAL;
+		goto create_error;
+	}
+	INIT_WORK(&tpmon->update_speed_work, tpmon_update_speed);
 
 	tpmon->start = tpmon_start;
 	tpmon->stop = tpmon_stop;

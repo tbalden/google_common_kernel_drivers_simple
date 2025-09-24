@@ -57,6 +57,7 @@ static int cp_rmem_setup_latecall(struct platform_device *pdev)
 		_cp_rmem[i].name = (char *)rmem->name;
 		_cp_rmem[i].p_base = rmem->base;
 		_cp_rmem[i].size = rmem->size;
+		_rmem_count++;
 
 		mif_info("rmem %d %s 0x%08lx 0x%08x\n",
 				_cp_rmem[i].index, _cp_rmem[i].name,
@@ -434,6 +435,24 @@ u32 cp_shmem_get_size(u32 cp, u32 idx)
 	return _cp_shmem[cp][idx].size;
 }
 EXPORT_SYMBOL(cp_shmem_get_size);
+
+unsigned long cp_rmem_get_base(u32 idx)
+{
+	return _cp_rmem[idx].p_base;
+}
+EXPORT_SYMBOL(cp_rmem_get_base);
+
+u32 cp_rmem_get_size(u32 idx)
+{
+	return _cp_rmem[idx].size;
+}
+EXPORT_SYMBOL(cp_rmem_get_size);
+
+int cp_rmem_get_count(void)
+{
+	return _rmem_count;
+}
+EXPORT_SYMBOL(cp_rmem_get_count);
 
 /*
  * Platform driver

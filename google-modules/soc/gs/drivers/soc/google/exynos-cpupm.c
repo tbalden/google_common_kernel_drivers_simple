@@ -984,12 +984,11 @@ static int exynos_cpu_pm_notify_callback(struct notifier_block *self,
 
 	switch (action) {
 	case CPU_PM_ENTER:
-		/* disable CPU_PM_ENTER event in reboot sequence */
-		if (system_rebooting)
-			return NOTIFY_BAD;
-
-		/* ignore CPU_PM_ENTER event in suspend sequence */
-		if (system_suspended)
+		/*
+		 * Ignore CPU_PM_ENTER event in reboot sequence or
+		 * in suspend sequence.
+		 */
+		if (system_suspended || system_rebooting)
 			return NOTIFY_OK;
 
 #if defined(CONFIG_SOC_GS101) || defined(CONFIG_SOC_GS201)
@@ -1004,6 +1003,9 @@ static int exynos_cpu_pm_notify_callback(struct notifier_block *self,
 		exynos_cpupm_enter(cpu);
 		break;
 	case CPU_PM_EXIT:
+		if (system_rebooting)
+			return NOTIFY_OK;
+
 		cpu_state = readl_relaxed(nscode_base + CPU_STATE_OFFSET(cpu));
 		exynos_cpupm_exit(cpu, cpu_state & CANCEL_FLAG);
 		break;
@@ -1471,7 +1473,7 @@ static int exynos_cpupm_probe(struct platform_device *pdev)
 		pr_warn("Failed to create sysfs for CPUPM\n");
 
 	/* Link CPUPM sysfs to /sys/devices/system/cpu/cpupm */
-	if (sysfs_create_link(&cpu_subsys.dev_root->kobj,
+	if (sysfs_create_link(&bus_get_dev_root(&cpu_subsys)->kobj,
 			      &pdev->dev.kobj, "cpupm"))
 		pr_err("Failed to link CPUPM sysfs to cpu\n");
 

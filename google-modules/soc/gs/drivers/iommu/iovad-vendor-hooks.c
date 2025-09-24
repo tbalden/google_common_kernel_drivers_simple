@@ -7,7 +7,7 @@
 
 #include <linux/iova.h>
 #include <linux/module.h>
-#include <linux/of_platform.h>
+#include <linux/of.h>
 #include <trace/hooks/iommu.h>
 
 union iovad_vendor_hooks {
@@ -29,7 +29,7 @@ static void iommu_limit_align_shift(void *unused, struct iova_domain *iovad, uns
 	union iovad_vendor_hooks iovad_hooks;
 
 	iovad_hooks.val = iovad->android_vendor_data1;
-	// if not set "iommu-max-align-shift", keep *shift untouched and return
+	/* if not set "iommu-max-align-shift", keep *shift untouched and return */
 	if (!iovad_hooks.enable_max_align)
 		return;
 
@@ -139,17 +139,14 @@ static void iommu_alloc_insert_iova(void *unused, struct iova_domain *iovad, uns
 {
 	union iovad_vendor_hooks iovad_hooks;
 
-	if (!iovad || !ret)
-		return;
-
 	iovad_hooks.val = iovad->android_vendor_data1;
 	if (!iovad_hooks.enable_best_fit) {
-		// use default
+		/* use default */
 		*ret = 1;
 		return;
 	}
 
-	*ret = __alloc_and_insert_iova_best_fit(iovad, size, limit_pfn, new_iova, size_aligned);
+	*ret = __alloc_and_insert_iova_best_fit(iovad, size, limit_pfn + 1, new_iova, size_aligned);
 }
 
 static void iommu_iovad_init_alloc_algo(void *unused, struct device *dev, struct iova_domain *iovad)

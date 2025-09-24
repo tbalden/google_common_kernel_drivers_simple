@@ -18,8 +18,6 @@
 
 #include "google_tcpci_shim.h"
 
-#define	PD_RETRY_COUNT_DEFAULT			3
-#define	PD_RETRY_COUNT_3_0_OR_HIGHER		2
 #define	AUTO_DISCHARGE_DEFAULT_THRESHOLD_MV	3500
 #define	VSINKPD_MIN_IR_DROP_MV			750
 #define	VSRC_NEW_MIN_PERCENT			95
@@ -454,6 +452,9 @@ static bool google_tcpci_shim_is_vbus_vsafe0v(struct tcpc_dev *tcpc)
 	unsigned int reg;
 	int ret;
 
+	if (tcpci->data->is_vbus_vsafe0v)
+		return tcpci->data->is_vbus_vsafe0v(tcpci, tcpci->data);
+
 	ret = regmap_read(tcpci->regmap, TCPC_EXTENDED_STATUS, &reg);
 	if (ret < 0)
 		return false;
@@ -513,6 +514,9 @@ static int google_tcpci_shim_pd_transmit(struct tcpc_dev *tcpc, enum tcpm_transm
 	u16 header = msg ? le16_to_cpu(msg->header) : 0;
 	unsigned int reg, cnt;
 	int ret;
+
+	if (tcpci->data->tx)
+		return tcpci->data->tx(tcpci, type, msg, negotiated_rev);
 
 	cnt = msg ? pd_header_cnt(header) * 4 : 0;
 	/**
@@ -804,8 +808,7 @@ void google_tcpci_shim_unregister_port(struct google_shim_tcpci *tcpci)
 }
 EXPORT_SYMBOL_GPL(google_tcpci_shim_unregister_port);
 
-static int google_tcpci_shim_probe(struct i2c_client *client,
-				   const struct i2c_device_id *i2c_id)
+static int google_tcpci_shim_probe(struct i2c_client *client)
 {
 	struct google_shim_tcpci_chip *chip;
 	int err;

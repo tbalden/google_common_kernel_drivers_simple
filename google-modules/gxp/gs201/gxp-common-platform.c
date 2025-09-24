@@ -1872,7 +1872,7 @@ static __init int gxp_fs_init(void)
 {
 	int ret;
 
-	gxp_class = class_create(THIS_MODULE, GXP_NAME);
+	gxp_class = class_create(GXP_NAME);
 	if (IS_ERR(gxp_class)) {
 		pr_err(GXP_NAME " error creating gxp class: %ld\n",
 		       PTR_ERR(gxp_class));

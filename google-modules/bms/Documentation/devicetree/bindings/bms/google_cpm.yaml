@@ -41,7 +41,7 @@ properties:
     description: Wireless DC power supply name
     $ref: /schemas/types.yaml#/definitions/string
 
-  google,dc-en:
+  google,dc-en-gpios:
     description: DC enable gpio
     type: boolean
 
@@ -52,6 +52,16 @@ properties:
 
   google,dc_limit-demand:
     description: Charge current floor to enable DC charging
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  google,wlc_cp-start-power_limit:
+    description: Wireless power floor to start WLC + CP charging.
+    This property overrides google,dc_limit-cc_min_wlc.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  google,wlc_cp-stop-power_limit:
+    description: Wireless power floor to stop WLC + CP charging.
+    This property overrides google,dc_limit-cc_min_wlc.
     $ref: /schemas/types.yaml#/definitions/uint32
 
   google,dc_limit-cc_min:
@@ -144,6 +154,11 @@ properties:
 
   google,pps-awake:
     description: PPS keep wakelock while charging.
+    type: boolean
+
+  google,set-mdis-to-wlc:
+    description: Enable a separate WLC thermal table which will be defined on the WLC side
+    and separately for different charger types.
     type: boolean
 
 patternProperties:

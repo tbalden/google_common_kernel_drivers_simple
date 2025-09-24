@@ -116,8 +116,8 @@ static void ion_physical_heap_buffer_free(struct samsung_dma_buffer *buffer)
 
 static struct dma_buf *ion_physical_heap_allocate(struct dma_heap *heap,
 						  unsigned long len,
-						  unsigned long fd_flags,
-						  unsigned long heap_flags)
+						  u32 fd_flags,
+						  u64 heap_flags)
 {
 	int ret;
 	struct dma_buf *dmabuf;

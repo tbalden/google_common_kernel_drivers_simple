@@ -18,6 +18,6 @@ $ tools/bazel build --config=raviole //private/devices/google/raviole:gs101_ravi
 # Update symbol list aosp/android/abi_gki_aarch64_pixel
 $ tools/bazel run --config=raviole //private/devices/google/raviole:gs101_raviole_abi_update_symbol_list
 
-# Update ABI aosp/android/abi_gki_aarch64.xml
+# Update ABI aosp/android/abi_gki_aarch64.stg
 $ tools/bazel run //aosp:kernel_aarch64_abi_update
 ```

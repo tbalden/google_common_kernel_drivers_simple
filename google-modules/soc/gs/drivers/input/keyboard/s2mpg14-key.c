@@ -11,6 +11,7 @@
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/of_irq.h>
+#include <linux/overflow.h>
 #include <linux/pm.h>
 #include <linux/platform_device.h>
 #include <linux/input.h>
@@ -39,8 +40,8 @@ struct power_keys_drvdata {
 	struct i2c_client *pmm_i2c;
 	int irq_pwronr;
 	int irq_pwronf;
-	struct power_button_data button_data[0];
 	bool suspended;
+	struct power_button_data button_data[];
 };
 
 static int power_keys_wake_lock_timeout(struct device *dev, long timeout)
@@ -325,7 +326,7 @@ power_keys_set_drvdata(struct platform_device *pdev,
 	struct device *dev = &pdev->dev;
 	size_t size;
 
-	size = sizeof(*ddata) + pdata->nbuttons * sizeof(struct power_button_data);
+	size = struct_size(ddata, button_data, pdata->nbuttons);
 	ddata = devm_kzalloc(dev, size, GFP_KERNEL);
 	if (!ddata)
 		return ERR_PTR(-ENOMEM);

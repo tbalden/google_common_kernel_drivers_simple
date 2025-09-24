@@ -26,7 +26,7 @@
 #define GS_DSI_MSG_FLAG_MASK (GS_DSI_MSG_QUEUE | GS_DSI_MSG_IGNORE_VBLANK)
 
 void gs_dsi_send_cmdset(struct mipi_dsi_device *dsi, const struct gs_dsi_cmdset *cmdset,
-			u32 panel_rev)
+			u32 panel_rev_bitmask)
 {
 	const struct gs_dsi_cmd *c;
 	const struct gs_dsi_cmd *last_cmd = NULL;
@@ -35,11 +35,11 @@ void gs_dsi_send_cmdset(struct mipi_dsi_device *dsi, const struct gs_dsi_cmdset 
 		return;
 
 	c = &cmdset->cmds[cmdset->num_cmd - 1];
-	if (!c->panel_rev) {
+	if (!c->panel_rev_bitmask) {
 		last_cmd = c;
 	} else {
 		for (; c >= cmdset->cmds; c--) {
-			if (c->panel_rev & panel_rev) {
+			if (c->panel_rev_bitmask & panel_rev_bitmask) {
 				last_cmd = c;
 				break;
 			}
@@ -58,7 +58,7 @@ void gs_dsi_send_cmdset(struct mipi_dsi_device *dsi, const struct gs_dsi_cmdset 
 		u32 delay_ms = c->delay_ms;
 
 		/* skip if not correct panel rev */
-		if (panel_rev && !(c->panel_rev & panel_rev))
+		if (panel_rev_bitmask && !(c->panel_rev_bitmask & panel_rev_bitmask))
 			continue;
 
 		/* explicitly transfer flags */

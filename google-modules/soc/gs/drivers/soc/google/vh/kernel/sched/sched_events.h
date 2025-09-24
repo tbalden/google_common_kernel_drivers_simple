@@ -200,8 +200,8 @@ TRACE_EVENT(sched_util_est_se,
 		strlcpy(__entry->path, path, PATH_SIZE);
 		strlcpy(__entry->comm, comm, TASK_COMM_LEN);
 		__entry->pid		= pid;
-		__entry->enqueued	= avg->util_est.enqueued & ~UTIL_AVG_UNCHANGED;
-		__entry->ewma		= avg->util_est.ewma;
+		__entry->enqueued	= avg->util_est & ~UTIL_AVG_UNCHANGED;
+		__entry->ewma		= avg->util_est & ~UTIL_AVG_UNCHANGED;
 		__entry->util		= avg->util_avg;
 	),
 
@@ -227,8 +227,8 @@ TRACE_EVENT(sched_util_est_cfs,
 	TP_fast_assign(
 		__entry->cpu		= cpu;
 		strlcpy(__entry->path, path, PATH_SIZE);
-		__entry->enqueued	= avg->util_est.enqueued & ~UTIL_AVG_UNCHANGED;
-		__entry->ewma		= avg->util_est.ewma;
+		__entry->enqueued	= avg->util_est & ~UTIL_AVG_UNCHANGED;
+		__entry->ewma		= avg->util_est & ~UTIL_AVG_UNCHANGED;
 		__entry->util		= avg->util_avg;
 	),
 

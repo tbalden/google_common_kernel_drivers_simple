@@ -25,49 +25,152 @@
 #define PANEL_SLSI_DDIC_ID_LEN 5
 #define PROJECT_CODE_MAX 5
 
+#define panel_rev_return_case(REV_NAME) \
+	{                               \
+	case PANEL_REVID_##REV_NAME:    \
+		return #REV_NAME;       \
+	}
+
+static const char *get_panel_rev_name(u32 panel_rev)
+{
+	switch (panel_rev) {
+		panel_rev_return_case(PROTO1);
+		panel_rev_return_case(PROTO1_1);
+		panel_rev_return_case(PROTO1_2);
+		panel_rev_return_case(PROTO2);
+		panel_rev_return_case(EVT1);
+		panel_rev_return_case(EVT1_0_2);
+		panel_rev_return_case(EVT1_1);
+		panel_rev_return_case(EVT1_1_1);
+		panel_rev_return_case(EVT1_2);
+		panel_rev_return_case(EVT2);
+		panel_rev_return_case(DVT1);
+		panel_rev_return_case(DVT1_1);
+		panel_rev_return_case(PVT);
+		panel_rev_return_case(MP);
+		panel_rev_return_case(LATEST);
+	default:
+		return "Unknown";
+	}
+}
 
 void gs_panel_get_panel_rev(struct gs_panel *ctx, u8 rev)
 {
 	switch (rev) {
 	case 0:
-		ctx->panel_rev = PANEL_REV_PROTO1;
+		ctx->panel_rev_id.id = PANEL_REVID_PROTO1;
 		break;
 	case 1:
-		ctx->panel_rev = PANEL_REV_PROTO1_1;
+		ctx->panel_rev_id.id = PANEL_REVID_PROTO1_1;
 		break;
 	case 2:
-		ctx->panel_rev = PANEL_REV_PROTO1_2;
+		ctx->panel_rev_id.id = PANEL_REVID_PROTO1_2;
 		break;
 	case 8:
-		ctx->panel_rev = PANEL_REV_EVT1;
+		ctx->panel_rev_id.id = PANEL_REVID_EVT1;
 		break;
 	case 9:
-		ctx->panel_rev = PANEL_REV_EVT1_1;
+		ctx->panel_rev_id.id = PANEL_REVID_EVT1_1;
 		break;
 	case 0xA:
-		ctx->panel_rev = PANEL_REV_EVT1_2;
+		ctx->panel_rev_id.id = PANEL_REVID_EVT1_2;
 		break;
 	case 0xC:
-		ctx->panel_rev = PANEL_REV_DVT1;
+		ctx->panel_rev_id.id = PANEL_REVID_DVT1;
 		break;
 	case 0xD:
-		ctx->panel_rev = PANEL_REV_DVT1_1;
+		ctx->panel_rev_id.id = PANEL_REVID_DVT1_1;
 		break;
 	case 0x10:
-		ctx->panel_rev = PANEL_REV_PVT;
+		ctx->panel_rev_id.id = PANEL_REVID_PVT;
 		break;
 	case 0x14:
-		ctx->panel_rev = PANEL_REV_MP;
+		ctx->panel_rev_id.id = PANEL_REVID_MP;
 		break;
 	default:
 		dev_warn(ctx->dev, "unknown rev from panel (0x%x), default to latest\n", rev);
-		ctx->panel_rev = PANEL_REV_LATEST;
+		ctx->panel_rev_id.id = PANEL_REVID_LATEST;
 		return;
 	}
 
-	dev_info(ctx->dev, "panel_rev: 0x%x\n", ctx->panel_rev);
+	dev_info(ctx->dev, "panel_rev: %s\n", get_panel_rev_name(ctx->panel_rev_id.id));
 }
 EXPORT_SYMBOL_GPL(gs_panel_get_panel_rev);
+
+void gs_panel_get_panel_rev_full(struct gs_panel *ctx, u32 id)
+{
+	panel_rev_id_t rev_id = { .id = 0x0 };
+	/* extract command 0xDB */
+	u8 build_code = (id & 0xFF00) >> 8;
+	u8 main = (build_code & 0xF0) >> 4;
+	u8 sub = (build_code & 0x0C) >> 2;
+	u8 var = build_code & 0x03;
+
+	/* stage */
+	switch (main) {
+	case 0x0:
+		rev_id.s.stage = STAGE_PROTO;
+		break;
+	case 0x4:
+		rev_id.s.stage = STAGE_EVT;
+		break;
+	case 0x6:
+		rev_id.s.stage = STAGE_DVT;
+		break;
+	case 0x8:
+		rev_id.s.stage = STAGE_PVT;
+		break;
+	case 0xA:
+		rev_id.s.stage = STAGE_MP;
+		break;
+	default:
+		rev_id.id = PANEL_REVID_LATEST;
+		break;
+	}
+
+	/* major/minor (if stage correct) */
+	if (rev_id.id != PANEL_REVID_LATEST) {
+		switch (sub) {
+		case 0x0:
+			rev_id.s.major = 1;
+			break;
+		case 0x1:
+			rev_id.s.major = 1;
+			rev_id.s.minor = 1;
+			break;
+		case 0x2:
+			rev_id.s.major = 1;
+			rev_id.s.minor = 2;
+			break;
+		case 0x3:
+			rev_id.s.major = 2;
+			rev_id.s.minor = 0;
+			break;
+		default:
+			dev_warn(ctx->dev, "Unknown sub-build %#04x, defaulting to 2.0\n", sub);
+			rev_id.s.major = 2;
+			rev_id.s.minor = 0;
+			break;
+		}
+		rev_id.s.variant = var;
+	}
+
+	ctx->panel_rev_id = rev_id;
+
+	if (ctx->panel_rev_id.id == PANEL_REVID_LATEST)
+		dev_warn(ctx->dev, "Unknown revision from panel (%#010x), default to latest\n", id);
+	else
+		dev_info(ctx->dev, "panel_rev: %s\n", get_panel_rev_name(ctx->panel_rev_id.id));
+}
+EXPORT_SYMBOL_GPL(gs_panel_get_panel_rev_full);
+
+void gs_panel_get_panel_rev_no_variant(struct gs_panel *ctx, u32 id)
+{
+	static const u32 variant_mask = ~0x00000300;
+
+	return gs_panel_get_panel_rev_full(ctx, id & variant_mask);
+}
+EXPORT_SYMBOL_GPL(gs_panel_get_panel_rev_no_variant);
 
 int gs_panel_read_slsi_ddic_id(struct gs_panel *ctx)
 {
@@ -84,12 +187,12 @@ int gs_panel_read_slsi_ddic_id(struct gs_panel *ctx)
 		return ret;
 	}
 
-	bin2hex(ctx->panel_id, buf, PANEL_SLSI_DDIC_ID_LEN);
+	bin2hex(ctx->panel_serial_number, buf, PANEL_SLSI_DDIC_ID_LEN);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(gs_panel_read_slsi_ddic_id);
 
-int gs_panel_read_id(struct gs_panel *ctx)
+int gs_panel_read_serial(struct gs_panel *ctx)
 {
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
 	char buf[PANEL_ID_READ_SIZE];
@@ -102,18 +205,18 @@ int gs_panel_read_id(struct gs_panel *ctx)
 		return ret;
 	}
 
-	bin2hex(ctx->panel_id, buf + PANEL_ID_OFFSET, PANEL_ID_LEN);
+	bin2hex(ctx->panel_serial_number, buf + PANEL_ID_OFFSET, PANEL_ID_LEN);
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(gs_panel_read_id);
+EXPORT_SYMBOL_GPL(gs_panel_read_serial);
 
 void gs_panel_model_init(struct gs_panel *ctx, const char *project, u8 extra_info)
 {
 	u8 vendor_info;
 	u8 panel_rev;
 
-	if (ctx->panel_extinfo[0] == '\0' || ctx->panel_rev == 0 || !project)
+	if (ctx->panel_extinfo[0] == '\0' || ctx->panel_rev_id.id == 0 || !project)
 		return;
 
 	if (strlen(project) > PROJECT_CODE_MAX) {
@@ -123,7 +226,7 @@ void gs_panel_model_init(struct gs_panel *ctx, const char *project, u8 extra_inf
 	}
 
 	vendor_info = hex_to_bin(ctx->panel_extinfo[1]) & 0x0f;
-	panel_rev = __builtin_ctz(ctx->panel_rev);
+	panel_rev = __builtin_ctz(ctx->panel_rev_bitmask);
 
 	/*
 	 * Panel Model Format:
@@ -250,3 +353,29 @@ void gs_panel_set_lp_mode_helper(struct gs_panel *ctx, const struct gs_panel_mod
 	}
 }
 EXPORT_SYMBOL_GPL(gs_panel_set_lp_mode_helper);
+
+int gs_panel_set_vddd_regulator_helper(struct gs_panel *ctx, bool is_lp)
+{
+	int ret;
+	u32 uv = is_lp ? ctx->regulator.vddd_lp_uV : ctx->regulator.vddd_normal_uV;
+
+	if (!ctx->regulator.vddd)
+		return -EINVAL;
+
+	if (!uv)
+		return 0;
+
+	ret = regulator_set_voltage(ctx->regulator.vddd, uv, uv);
+	if (ret)
+		dev_err(ctx->dev, "failed to set vddd at %u uV (%d)\n", uv, ret);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(gs_panel_set_vddd_regulator_helper);
+
+int gs_panel_set_vddd_optional_gpio_helper(struct gs_panel *ctx, bool is_lp)
+{
+	if (IS_ERR_OR_NULL(ctx->gpio.gpiod[DISP_VDDD_GPIO]))
+		return gs_panel_set_vddd_regulator_helper(ctx, is_lp);
+	return gs_panel_gpio_set(ctx, DISP_VDDD_GPIO, !is_lp);
+}
+EXPORT_SYMBOL_GPL(gs_panel_set_vddd_optional_gpio_helper);

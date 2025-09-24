@@ -11502,8 +11502,7 @@ static const struct mfd_cell cs40l2x_devs[] = {
 	},
 };
 
-static int cs40l2x_i2c_probe(struct i2c_client *i2c_client,
-				const struct i2c_device_id *id)
+static int cs40l2x_i2c_probe(struct i2c_client *i2c_client)
 {
 	int ret, i;
 	struct cs40l2x_private *cs40l2x;
@@ -11513,8 +11512,6 @@ static int cs40l2x_i2c_probe(struct i2c_client *i2c_client,
 	cs40l2x = devm_kzalloc(dev, sizeof(struct cs40l2x_private), GFP_KERNEL);
 	if (!cs40l2x)
 		return -ENOMEM;
-
-	cs40l2x->has_probe_failed = true;
 
 	cs40l2x->dev = dev;
 	cs40l2x->dev->init_name = "i2c-c240l2x";
@@ -11729,18 +11726,8 @@ static int cs40l2x_i2c_probe(struct i2c_client *i2c_client,
 		goto err;
 	}
 
-	cs40l2x->has_probe_failed = false;
-
 	return 0;
 err:
-
-	/* Register codec when probe failure occurs to unblock audio */
-	ret = devm_mfd_add_devices(dev, PLATFORM_DEVID_AUTO, cs40l2x_devs,
-		ARRAY_SIZE(cs40l2x_devs), NULL, 0, NULL);
-	if (ret) {
-		dev_err(dev, "Cannot register codec component after haptic driver probe failure\n");
-	}
-
 	gpiod_set_value_cansleep(cs40l2x->reset_gpio, 0);
 
 	regulator_bulk_disable(cs40l2x->num_supplies, cs40l2x->supplies);

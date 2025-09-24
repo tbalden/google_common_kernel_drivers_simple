@@ -146,11 +146,13 @@ char *gxp_firmware_loader_get_core_fw_name(struct gxp_dev *gxp)
 static void gxp_firmware_loader_get_core_image_config(struct gxp_dev *gxp)
 {
 	struct gxp_firmware_loader_manager *mgr = gxp->fw_loader_mgr;
-	const struct gcip_image_config *cfg;
+	struct gcip_common_image_header *hdr =
+		(struct gcip_common_image_header *)mgr->core_firmware[0]->data;
+	struct gcip_image_config *cfg;
 
 	if (unlikely(mgr->core_firmware[0]->size < GCIP_FW_HEADER_SIZE))
 		return;
-	cfg = gcip_common_image_get_config_from_hdr(mgr->core_firmware[0]->data, GXP_FW_MAGIC);
+	cfg = get_image_config_from_hdr(hdr);
 	if (cfg)
 		mgr->core_img_cfg = *cfg;
 	else

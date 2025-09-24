@@ -71,7 +71,7 @@ static int parse_cma_idx(struct cma *cma, void *data)
 
 void vh_cma_alloc_finish(void *data, const char *name, unsigned long pfn,
 			 const struct page *page, unsigned long count,
-			 unsigned int align)
+			 unsigned int align, int errorno)
 {
 	struct cma_pixel_stat *cma_stat;
 	struct cma_index index = {

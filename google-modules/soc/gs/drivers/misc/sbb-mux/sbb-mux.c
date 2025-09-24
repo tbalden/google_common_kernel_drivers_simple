@@ -9,6 +9,7 @@
 #include <linux/kobject.h>
 #include <linux/module.h>
 #include <linux/mod_devicetable.h>
+#include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/platform_device.h>
@@ -467,7 +468,8 @@ static int sbb_mux_initialize_gpio_tracker(struct sbb_gpio_tracker *tracker,
 		return -EINVAL;
 	}
 
-	gpio_system_id = of_get_gpio(platform_dev->dev.of_node, gpio_id);
+	gpio_system_id = of_get_named_gpio(platform_dev->dev.of_node, "gpios",
+					   gpio_id);
 	if (gpio_system_id < 0) {
 		pr_err("sbb-mux: of_get_gpio failed for %d!\n", gpio_id);
 		return gpio_system_id;
@@ -581,7 +583,8 @@ static int sbb_mux_drv_probe(struct platform_device *dev)
 
 	pr_info("sbb-mux: Calling %s!\n", __func__);
 
-	num_gpios = of_gpio_count(dev->dev.of_node);
+	num_gpios = of_count_phandle_with_args(dev->dev.of_node, "gpios",
+					       "#gpio-cells");
 	pr_info("sbb-mux: Num GPIOs: %d.\n", num_gpios);
 
 	if (num_gpios <= 0) {

@@ -115,10 +115,8 @@ static int dit_hal_set_event(enum offload_event_num event_num)
 		return -EEXIST;
 
 	event_item = devm_kzalloc(dc->dev, sizeof(struct offload_event_item), GFP_ATOMIC);
-	if (!event_item) {
-		mif_err("event=%d generation failed\n", event_num);
+	if (!event_item)
 		return -ENOMEM;
-	}
 
 	event_item->event_num = event_num;
 	spin_lock_irqsave(&dhc->event_lock, flags);
@@ -722,7 +720,6 @@ int dit_hal_create(struct dit_ctrl_t *dc_ptr)
 
 	dhc = devm_kzalloc(dc->dev, sizeof(struct dit_hal_ctrl_t), GFP_KERNEL);
 	if (!dhc) {
-		mif_err("dit hal ctrl alloc failed\n");
 		ret = -ENOMEM;
 		goto error;
 	}

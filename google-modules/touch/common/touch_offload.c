@@ -690,7 +690,7 @@ int touch_offload_init(struct touch_offload_context *context)
 		goto err_cdev_add;
 	}
 
-	context->cls = class_create(THIS_MODULE, context->device_name);
+	context->cls = class_create(context->device_name);
 	if (IS_ERR(context->cls)) {
 		pr_err("%s: class_create failed with error = %ld.\n",
 		       __func__, PTR_ERR(context->cls));

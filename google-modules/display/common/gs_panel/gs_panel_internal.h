@@ -35,6 +35,15 @@ int gs_panel_initialize_gs_connector(struct gs_panel *ctx, struct drm_device *dr
  */
 int gs_panel_set_op_hz(struct gs_panel *ctx, unsigned int hz);
 
+/**
+ * gs_panel_set_pwm_mode() - Wrapper for panel-specific set_pwm_mode function
+ * @ctx: handle for gs_panel
+ * @mode: PWM mode
+ *
+ * Return: 0 on success, negative value on error
+ */
+int gs_panel_set_pwm_mode(struct gs_panel *ctx, enum gs_pwm_mode mode);
+
 /* drm_bridge_funcs.c */
 const struct drm_bridge_funcs *get_panel_drm_bridge_funcs(void);
 /**
@@ -47,6 +56,16 @@ const struct drm_bridge_funcs *get_panel_drm_bridge_funcs(void);
  * bookkeeping regarding drm properties.
  */
 void gs_panel_set_backlight_state(struct gs_panel *ctx, enum gs_panel_state panel_state);
+/**
+ * gs_panel_update_dsi_with_mode() - Updates dsi device during a mode set
+ * @dsi: Handle for dsi device being updated
+ * @pmode: Panel mode with information being pulled
+ *
+ * Primarily used as a helper during mode_set, this function is also useful in
+ * corner cases where a mode is being set or changed without the usual drm
+ * process (such as during handoff)
+ */
+void gs_panel_update_dsi_with_mode(struct mipi_dsi_device *dsi, const struct gs_panel_mode *pmode);
 /**
  * gs_panel_wait_for_cmd_tx_window() - wait for correct rr transmit window
  * @current_mode: current panel mode
@@ -62,6 +81,18 @@ void gs_panel_wait_for_cmd_tx_window(struct drm_crtc *crtc,
 				     const struct gs_panel_mode *target_mode, struct gs_panel *ctx);
 
 /* gs_panel_sysfs.c */
+/**
+ * gs_panel_get_sysfs_name() - Gets the name this panel should have in sysfs
+ * @ctx: Pointer to panel
+ *
+ * Based on the name of the dsi device associated with the panel,
+ * determines whether it's the `primary-panel` or `secondary-panel` in the
+ * system. An example path might read:
+ * /sys/devices/platform/exynos-drm/primary-panel
+ *
+ * Return: name to be used as sysfs link name
+ */
+const char *gs_panel_get_sysfs_name(struct gs_panel *ctx);
 /**
  * gs_panel_sysfs_create_files() - Creates sysfs files for panel
  * @dev: pointer to panel's device node
@@ -89,6 +120,13 @@ int gs_panel_sysfs_create_bl_files(struct device *bl_dev, struct gs_panel *ctx);
  * @gs_connector: Pointer to gs_connector
  */
 void gs_panel_node_attach(struct gs_drm_connector *gs_connector);
+
+/**
+ * gs_panel_set_panel_state - Sets the panel state and logs the change
+ * @ctx: pointer to gs_panel
+ * @panel_state: state to change to
+ */
+void gs_panel_set_panel_state(struct gs_panel *ctx, enum gs_panel_state panel_state);
 
 /* gs_panel_debugfs.c */
 /**

@@ -115,6 +115,37 @@ static void save_transaction_to_history(struct lwis_client *client,
 		client->debug_info.cur_transaction_hist_idx = 0;
 }
 
+/* return true if vops.register_io will be called for the Entry Type */
+static inline bool is_entry_type_batch_compatible(struct lwis_io_entry *entry)
+{
+	return entry->type == LWIS_IO_ENTRY_WRITE || entry->type == LWIS_IO_ENTRY_WRITE_V2 ||
+	       entry->type == LWIS_IO_ENTRY_WRITE_BATCH ||
+	       entry->type == LWIS_IO_ENTRY_WRITE_BATCH_V2 || entry->type == LWIS_IO_ENTRY_READ ||
+	       entry->type == LWIS_IO_ENTRY_READ_V2 || entry->type == LWIS_IO_ENTRY_READ_BATCH ||
+	       entry->type == LWIS_IO_ENTRY_READ_BATCH_V2;
+}
+
+static inline int process_entry(struct lwis_device *lwis_dev, struct lwis_io_entry *entry)
+{
+	if (is_entry_type_batch_compatible(entry) || entry->type == LWIS_IO_ENTRY_MODIFY)
+		return lwis_dev->vops.register_io(lwis_dev, entry, lwis_dev->native_value_bitwidth);
+	else if (entry->type == LWIS_IO_ENTRY_POLL)
+		return lwis_io_entry_poll(lwis_dev, entry, /*is_short=*/false);
+	else if (entry->type == LWIS_IO_ENTRY_POLL_SHORT)
+		return lwis_io_entry_poll(lwis_dev, entry, /*is_short=*/true);
+	else if (entry->type == LWIS_IO_ENTRY_WAIT)
+		return lwis_io_entry_wait(lwis_dev, entry);
+	else if (entry->type == LWIS_IO_ENTRY_READ_ASSERT)
+		return lwis_io_entry_read_assert(lwis_dev, entry);
+	else if (entry->type == LWIS_IO_ENTRY_WRITE_TO_BUFFER)
+		return lwis_io_buffer_write(lwis_dev, entry);
+	else if (entry->type == LWIS_IO_ENTRY_IGNORE)
+		return 0;
+
+	dev_err(lwis_dev->dev, "Unrecognized io_entry command\n");
+	return -EINVAL;
+}
+
 void lwis_transaction_free(struct lwis_device *lwis_dev, struct lwis_transaction **lwis_tx)
 {
 	int i;
@@ -164,6 +195,26 @@ void lwis_transaction_free(struct lwis_device *lwis_dev, struct lwis_transaction
 	kfree(transaction);
 }
 
+static void enable_debug_trace(struct lwis_client *client,
+	struct lwis_transaction *transaction, bool trace_begin)
+{
+	if (!lwis_transaction_debug)
+		return;
+
+	if (strlen(transaction->info.transaction_name) > 0) {
+
+		char trace_name[LWIS_MAX_NAME_STRING_LEN];
+
+		scnprintf(trace_name, LWIS_MAX_NAME_STRING_LEN,
+			"processing:%s",
+			transaction->info.transaction_name);
+		if (trace_begin)
+			LWIS_ATRACE_BEGIN(client->lwis_dev, trace_name);
+		else
+			LWIS_ATRACE_END(client->lwis_dev, trace_name);
+	}
+}
+
 static int process_transaction(struct lwis_client *client, struct lwis_transaction **lwis_tx,
 			       struct list_head *pending_events, struct list_head *pending_fences,
 			       bool skip_err, bool check_transaction_limit, bool run_in_irq_context)
@@ -177,6 +228,7 @@ static int process_transaction(struct lwis_client *client, struct lwis_transacti
 	struct lwis_transaction_response_header *resp = transaction->resp;
 	size_t resp_size;
 	uint8_t *read_buf;
+	uint8_t *read_buf_iter;
 	struct lwis_io_result *io_result;
 	const int reg_value_bytewidth = lwis_dev->native_value_bitwidth / 8;
 	int64_t process_duration_ns = -1;
@@ -192,6 +244,9 @@ static int process_transaction(struct lwis_client *client, struct lwis_transacti
 	int current_run_entries;
 	int start_idx;
 	int end_idx;
+	bool use_batch_register_io = false;
+
+	enable_debug_trace(client, transaction, true);
 
 	/*
 	 * Process all the transactions at once if:
@@ -267,137 +322,54 @@ static int process_transaction(struct lwis_client *client, struct lwis_transacti
 	if (!run_in_irq_context)
 		lwis_bus_manager_lock_bus(lwis_dev);
 
+	read_buf_iter = read_buf;
+	/* Prepare the io_results */
 	for (i = start_idx; i < end_idx; i++) {
 		entry = &info->io_entries[i];
-		if (entry->type == LWIS_IO_ENTRY_WRITE || entry->type == LWIS_IO_ENTRY_WRITE_V2 ||
-		    entry->type == LWIS_IO_ENTRY_WRITE_BATCH ||
-		    entry->type == LWIS_IO_ENTRY_WRITE_BATCH_V2 ||
-		    entry->type == LWIS_IO_ENTRY_MODIFY) {
-			ret = lwis_dev->vops.register_io(lwis_dev, entry,
-							 lwis_dev->native_value_bitwidth);
-			if (ret) {
-				resp->error_code = ret;
-				if (skip_err) {
-					dev_warn(
-						lwis_dev->dev,
-						"transaction type %d processing failed, skip this error and run the next command\n",
-						entry->type);
-					continue;
-				}
-				break;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_READ ||
-			   entry->type == LWIS_IO_ENTRY_READ_V2) {
-			io_result = (struct lwis_io_result *)read_buf;
+		if (entry->type == LWIS_IO_ENTRY_READ || entry->type == LWIS_IO_ENTRY_READ_V2) {
+			io_result = (struct lwis_io_result *)read_buf_iter;
 			io_result->bid = entry->rw.bid;
 			io_result->offset = entry->rw.offset;
 			io_result->num_value_bytes = reg_value_bytewidth;
-			ret = lwis_dev->vops.register_io(lwis_dev, entry,
-							 lwis_dev->native_value_bitwidth);
-			if (ret) {
-				resp->error_code = ret;
-				if (skip_err) {
-					dev_warn(
-						lwis_dev->dev,
-						"transaction type %d processing failed, skip this error and run the next command\n",
-						entry->type);
-					continue;
-				}
-				break;
-			}
-			memcpy(io_result->values, &entry->rw.val, reg_value_bytewidth);
-			read_buf += sizeof(struct lwis_io_result) + io_result->num_value_bytes;
+			read_buf_iter += sizeof(struct lwis_io_result) + io_result->num_value_bytes;
 		} else if (entry->type == LWIS_IO_ENTRY_READ_BATCH ||
 			   entry->type == LWIS_IO_ENTRY_READ_BATCH_V2) {
-			io_result = (struct lwis_io_result *)read_buf;
+			io_result = (struct lwis_io_result *)read_buf_iter;
 			io_result->bid = entry->rw_batch.bid;
 			io_result->offset = entry->rw_batch.offset;
 			io_result->num_value_bytes = entry->rw_batch.size_in_bytes;
 			entry->rw_batch.buf = io_result->values;
-			ret = lwis_dev->vops.register_io(lwis_dev, entry,
-							 lwis_dev->native_value_bitwidth);
-			if (ret) {
-				resp->error_code = ret;
-				if (skip_err) {
-					dev_warn(
-						lwis_dev->dev,
-						"transaction type %d processing failed, skip this error and run the next command\n",
-						entry->type);
-					continue;
-				}
+			read_buf_iter += sizeof(struct lwis_io_result) + io_result->num_value_bytes;
+		}
+	}
+	if (lwis_dev->vops.batch_register_io) {
+		use_batch_register_io = true;
+		for (i = start_idx; i < end_idx; ++i) {
+			if (!is_entry_type_batch_compatible(&info->io_entries[i])) {
+				use_batch_register_io = false;
 				break;
 			}
-			read_buf += sizeof(struct lwis_io_result) + io_result->num_value_bytes;
-		} else if (entry->type == LWIS_IO_ENTRY_POLL) {
-			ret = lwis_io_entry_poll(lwis_dev, entry, /*is_short=*/false);
-			if (ret) {
-				resp->error_code = ret;
-				if (skip_err) {
-					dev_warn(
-						lwis_dev->dev,
-						"transaction type %d processing failed, skip this error and run the next command\n",
-						entry->type);
-					continue;
-				}
-				break;
+		}
+		if (use_batch_register_io) {
+			ret = lwis_dev->vops.batch_register_io(lwis_dev,
+							       &info->io_entries[start_idx],
+							       lwis_dev->native_value_bitwidth,
+							       end_idx - start_idx);
+			/* batch register io cannot skip error */
+			if (skip_err) {
+				dev_warn(lwis_dev->dev,
+					 "batch register io cannot support skip error\n");
+				skip_err = false;
 			}
-		} else if (entry->type == LWIS_IO_ENTRY_POLL_SHORT) {
-			ret = lwis_io_entry_poll(lwis_dev, entry, /*is_short=*/true);
-			if (ret) {
-				resp->error_code = ret;
-				if (skip_err) {
-					dev_warn(
-						lwis_dev->dev,
-						"transaction type %d processing failed, skip this error and run the next command\n",
-						entry->type);
-					continue;
-				}
-				break;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_WAIT) {
-			ret = lwis_io_entry_wait(lwis_dev, entry);
-			if (ret) {
-				resp->error_code = ret;
-				if (skip_err) {
-					dev_warn(
-						lwis_dev->dev,
-						"transaction type %d processing failed, skip this error and run the next command\n",
-						entry->type);
-					continue;
-				}
-				break;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_READ_ASSERT) {
-			ret = lwis_io_entry_read_assert(lwis_dev, entry);
-			if (ret) {
-				resp->error_code = ret;
-				if (skip_err) {
-					dev_warn(
-						lwis_dev->dev,
-						"transaction type %d processing failed, skip this error and run the next command\n",
-						entry->type);
-					continue;
-				}
-				break;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_WRITE_TO_BUFFER) {
-			ret = lwis_io_buffer_write(lwis_dev, entry);
-			if (ret) {
-				resp->error_code = ret;
-				if (skip_err) {
-					dev_warn(
-						lwis_dev->dev,
-						"transaction type %d processing failed, skip this error and run the next command\n",
-						entry->type);
-					continue;
-				}
-				break;
-			}
-		} else if (entry->type == LWIS_IO_ENTRY_IGNORE) {
-			ret = 0;
-		} else {
-			dev_err(lwis_dev->dev, "Unrecognized io_entry command\n");
-			resp->error_code = -EINVAL;
+		}
+	}
+	for (i = start_idx; i < end_idx; i++) {
+		entry = &info->io_entries[i];
+		if (!use_batch_register_io)
+			ret = process_entry(lwis_dev, entry);
+
+		if (ret) {
+			resp->error_code = ret;
 			if (skip_err) {
 				dev_warn(
 					lwis_dev->dev,
@@ -406,6 +378,15 @@ static int process_transaction(struct lwis_client *client, struct lwis_transacti
 				continue;
 			}
 			break;
+		}
+		if (entry->type == LWIS_IO_ENTRY_READ || entry->type == LWIS_IO_ENTRY_READ_V2) {
+			io_result = (struct lwis_io_result *)read_buf;
+			memcpy(io_result->values, &entry->rw.val, reg_value_bytewidth);
+			read_buf += sizeof(struct lwis_io_result) + io_result->num_value_bytes;
+		} else if (entry->type == LWIS_IO_ENTRY_READ_BATCH ||
+			   entry->type == LWIS_IO_ENTRY_READ_BATCH_V2) {
+			io_result = (struct lwis_io_result *)read_buf;
+			read_buf += sizeof(struct lwis_io_result) + io_result->num_value_bytes;
 		}
 		resp->completion_index = i;
 	}
@@ -437,6 +418,7 @@ static int process_transaction(struct lwis_client *client, struct lwis_transacti
 		transaction->starting_read_buf = read_buf;
 		transaction->remaining_entries_to_process = remaining_entries;
 		spin_unlock_irqrestore(&client->transaction_lock, flags);
+		enable_debug_trace(client, transaction, false);
 		return ret;
 	}
 
@@ -496,6 +478,7 @@ static int process_transaction(struct lwis_client *client, struct lwis_transacti
 	}
 	spin_unlock_irqrestore(&client->transaction_lock, flags);
 
+	enable_debug_trace(client, transaction, false);
 	return ret;
 }
 
@@ -779,12 +762,17 @@ int lwis_transaction_client_cleanup(struct lwis_client *client)
 	struct lwis_transaction *transaction;
 	struct lwis_transaction_event_list *it_evt_list;
 
+	if (lwis_transaction_debug)
+		dev_info(client->lwis_dev->dev, "transaction client cleanup begin\n");
+
 	spin_lock_irqsave(&client->transaction_lock, flags);
 	it_evt_list = event_list_find(client, LWIS_EVENT_ID_CLIENT_CLEANUP |
 						      (int64_t)client->lwis_dev->id
 							      << LWIS_EVENT_ID_EVENT_CODE_LEN);
 	if (it_evt_list == NULL) {
 		spin_unlock_irqrestore(&client->transaction_lock, flags);
+		if (lwis_transaction_debug)
+			dev_info(client->lwis_dev->dev, "No cleanup event\n");
 		return 0;
 	}
 
@@ -798,8 +786,16 @@ int lwis_transaction_client_cleanup(struct lwis_client *client)
 		}
 		list_del(&transaction->event_list_node);
 		if (transaction->resp->error_code || client->lwis_dev->enabled == 0) {
+			if (lwis_transaction_debug) {
+				dev_info(client->lwis_dev->dev,
+					 "err = %d, enabled = %d cancel_transaction\n",
+					 transaction->resp->error_code, client->lwis_dev->enabled);
+			}
 			cancel_transaction(client, &transaction, -ECANCELED, NULL, NULL, false);
 		} else {
+			if (lwis_transaction_debug)
+				dev_info(client->lwis_dev->dev, "process_transaction\n");
+
 			spin_unlock_irqrestore(&client->transaction_lock, flags);
 			process_transaction(client, &transaction,
 					    /*pending_events=*/NULL,
@@ -831,8 +827,7 @@ int lwis_trigger_event_add_weak_transaction(struct lwis_client *client, int64_t 
 	weak_transaction->id = transaction_id;
 	weak_transaction->precondition_fence = NULL;
 	if (precondition_fence_fd >= 0) {
-		struct dma_fence *fence = lwis_dma_fence_get(precondition_fence_fd);
-
+		struct dma_fence *fence = sync_file_get_fence(precondition_fence_fd);
 		if (IS_ERR_OR_NULL(fence)) {
 			dev_err(client->lwis_dev->dev, "Unable to get fence with fd=%d",
 				precondition_fence_fd);
@@ -1085,7 +1080,7 @@ new_repeating_transaction_iteration(struct lwis_client *client,
 	struct lwis_transaction *new_instance;
 	uint8_t *resp_buf;
 
-	new_instance = kmalloc(sizeof(struct lwis_transaction), GFP_ATOMIC);
+	new_instance = kzalloc(sizeof(struct lwis_transaction), GFP_ATOMIC);
 	if (!new_instance)
 		return NULL;
 
@@ -1122,10 +1117,30 @@ static void defer_transaction_locked(struct lwis_client *client,
 	if (del_event_list_node)
 		list_del(&transaction->event_list_node);
 
-	/* I2C read/write cannot be executed in IRQ context */
-	if (in_hardirq() && client->lwis_dev->type == DEVICE_TYPE_I2C) {
-		add_transaction_to_queue_locked(client, transaction);
-		return;
+	if (in_hardirq()) {
+		int i;
+		struct lwis_transaction_info *info = &transaction->info;
+
+		/* I2C read/write cannot be executed in IRQ context */
+		if (client->lwis_dev->type == DEVICE_TYPE_I2C ||
+		    client->lwis_dev->type == DEVICE_TYPE_I3C) {
+			add_transaction_to_queue_locked(client, transaction);
+			return;
+		}
+		/* The trigger delay cannot be executed in IRQ context */
+		if (info->minimum_trigger_delay_ns > 0) {
+			add_transaction_to_queue_locked(client, transaction);
+			return;
+		}
+		/* IO entry poll/wait cannot be executed in IRQ context */
+		for (i = 0; i < info->num_io_entries; ++i) {
+			if (info->io_entries[i].type == LWIS_IO_ENTRY_POLL ||
+			    info->io_entries[i].type == LWIS_IO_ENTRY_POLL_SHORT ||
+			    info->io_entries[i].type == LWIS_IO_ENTRY_WAIT) {
+				add_transaction_to_queue_locked(client, transaction);
+				return;
+			}
+		}
 	}
 
 	if (transaction->info.run_in_event_context) {

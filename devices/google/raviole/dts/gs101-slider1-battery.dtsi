@@ -20,7 +20,7 @@
 				pinctrl-names = "default";
 				pinctrl-0 = <&charge_pump_en>;
 
-				google,dc-en = <&gpp23 7 0>;
+				google,dc-en-gpios = <&gpp23 7 0>;
 				google,dc-en-value;
 
 				google,tcpm-power-supply = <&max77759tcpc>;
@@ -70,7 +70,6 @@
 
 		pca9468,input-current-limit = <2000000>; /* 2.0A */
 		pca9468,charging-current = <4000000>; /* 4A */
-		pca9468,float-voltage = <4300000>; /* 4.3V */
 
 		pca9468,input-itopoff = <500000>; /* 500mA */
 		pca9468,switching-frequency = <3>; /* 980KHz */

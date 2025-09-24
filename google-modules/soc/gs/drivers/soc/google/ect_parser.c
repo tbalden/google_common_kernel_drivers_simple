@@ -2255,7 +2255,7 @@ static int ect_dump_init(void)
 			return -ENOMEM;
 	}
 
-	ect_class = class_create(THIS_MODULE, "ect");
+	ect_class = class_create("ect");
 	if (IS_ERR(ect_class)) {
 		pr_err("%s: couldn't create class\n", __FILE__);
 		return PTR_ERR(ect_class);

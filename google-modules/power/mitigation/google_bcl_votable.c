@@ -9,27 +9,12 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/types.h>
-#include <misc/gvotable.h>
+#include <gvotable.h>
 #include "bcl.h"
-#include "soc/google/debug-snapshot.h"
-
-#if IS_ENABLED(CONFIG_REGULATOR_S2MPG14)
-#include <dt-bindings/interrupt-controller/zuma.h>
-#include <linux/mfd/samsung/rtc-s2mpg14.h>
-#include <linux/mfd/samsung/s2mpg14-register.h>
-#include <linux/mfd/samsung/s2mpg15-register.h>
-#include <max77779_regs.h>
-#elif IS_ENABLED(CONFIG_REGULATOR_S2MPG12)
-#include <dt-bindings/interrupt-controller/gs201.h>
-#include <linux/mfd/samsung/rtc-s2mpg12.h>
-#include <linux/mfd/samsung/s2mpg12-register.h>
-#include <linux/mfd/samsung/s2mpg13-register.h>
-#elif IS_ENABLED(CONFIG_REGULATOR_S2MPG10)
-#include <dt-bindings/interrupt-controller/gs101.h>
-#include <linux/mfd/samsung/rtc-s2mpg10.h>
-#include <linux/mfd/samsung/s2mpg10-register.h>
-#include <linux/mfd/samsung/s2mpg11-register.h>
-#endif
+#include "core_pmic/core_pmic_defs.h"
+#include "ifpmic/max77759/max77759_irq.h"
+#include "ifpmic/max77779/max77779_irq.h"
+#include "soc/soc_defs.h"
 
 #define BCL_WLC "BCL_WLC"
 #define BCL_USB "BCL_USB"
@@ -52,21 +37,19 @@ static int google_bcl_wlc_votable_callback(struct gvotable_election *el,
 	int ret;
 	u8 wlc_tx_enable = (long)value ? WLC_ENABLED_TX : WLC_DISABLED_TX;
 
+	/* Ensure BCL driver is initialized before receiving callback. */
 	if (!smp_load_acquire(&bcl_dev->initialized))
 		return -EINVAL;
-#if IS_ENABLED(CONFIG_SOC_ZUMAPRO)
-	ret = max77779_adjust_batoilo_lvl(bcl_dev, wlc_tx_enable,
-   					  bcl_dev->batt_irq_conf1.batoilo_wlc_trig_lvl,
-   					  bcl_dev->batt_irq_conf2.batoilo_wlc_trig_lvl);
-#else
-	ret = max77759_adjust_batoilo_lvl(bcl_dev, wlc_tx_enable,
-   					  bcl_dev->batt_irq_conf1.batoilo_wlc_trig_lvl);
-#endif
-	if (ret < 0) {
-		dev_err(bcl_dev->device, "BATOILO cannot be adjusted\n");
-		return ret;
-	}
 
+	if (bcl_dev->ifpmic == MAX77779) {
+		ret = max77779_adjust_batoilo_lvl(bcl_dev, wlc_tx_enable,
+	                                  	  bcl_dev->batt_irq_conf1.batoilo_wlc_trig_lvl,
+	                                  	  bcl_dev->batt_irq_conf2.batoilo_wlc_trig_lvl);
+		if (ret < 0) {
+			dev_err(bcl_dev->device, "BATOILO cannot be adjusted\n");
+			return ret;
+		}
+	}
 	/* b/335695535 outlines max77759 configuration */
 
 	return 0;
@@ -80,6 +63,7 @@ static int google_bcl_usb_votable_callback(struct gvotable_election *el,
 	u8 usb_enable = (long)value ? USB_PLUGGED: USB_UNPLUGGED;
 	union power_supply_propval prop = { };
 
+	/* Ensure BCL driver is initialized before receiving callback. */
 	if (!smp_load_acquire(&bcl_dev->initialized))
 		return -EINVAL;
 	if (bcl_dev->usb_otg_conf && bcl_dev->otg_psy)
@@ -88,45 +72,17 @@ static int google_bcl_usb_votable_callback(struct gvotable_election *el,
 	else
 		err = power_supply_get_property(bcl_dev->batt_psy,
 						POWER_SUPPLY_PROP_STATUS, &prop);
+	if ((err == 0) && (prop.intval == POWER_SUPPLY_STATUS_DISCHARGING))
+		core_pmic_set_scratch_pad(bcl_dev, usb_enable);
 
-	if (prop.intval != POWER_SUPPLY_STATUS_DISCHARGING) {
-#if IS_ENABLED(CONFIG_SOC_ZUMAPRO)
-		ret = max77779_adjust_batoilo_lvl(bcl_dev, usb_enable,
-						  bcl_dev->batt_irq_conf1.batoilo_usb_trig_lvl,
-						  bcl_dev->batt_irq_conf2.batoilo_usb_trig_lvl);
-#else
-		ret = max77759_adjust_batoilo_lvl(bcl_dev, usb_enable,
-						  bcl_dev->batt_irq_conf1.batoilo_usb_trig_lvl);
-#endif
-		if (ret < 0)
-			dev_err(bcl_dev->device, "USB: BATOILO cannot be adjusted\n");
-		return ret;
-	}
+	if (bcl_dev->ifpmic != MAX77779)
+		return 0;
 
-#if IS_ENABLED(CONFIG_REGULATOR_S2MPG14)
-	pmic_write(CORE_PMIC_MAIN_RTC, bcl_dev, S2MPG14_RTC_SCRATCH1, usb_enable);
-#elif IS_ENABLED(CONFIG_REGULATOR_S2MPG12)
-	pmic_write(CORE_PMIC_MAIN_RTC, bcl_dev, S2MPG12_RTC_SCRATCH1, usb_enable);
-#endif
-
-	if (bcl_dev->usb_otg_conf) {
-#if IS_ENABLED(CONFIG_SOC_ZUMAPRO)
-		ret = max77779_adjust_batoilo_lvl(bcl_dev, usb_enable,
-						  bcl_dev->batt_irq_conf1.batoilo_otg_trig_lvl,
-						  bcl_dev->batt_irq_conf2.batoilo_otg_trig_lvl);
-#else
-		ret = max77759_adjust_batoilo_lvl(bcl_dev, usb_enable,
-						  bcl_dev->batt_irq_conf1.batoilo_otg_trig_lvl);
-#endif
-		if (ret < 0)
-			dev_err(bcl_dev->device, "USB: BATOILO cannot be adjusted\n");
-
-#if IS_ENABLED(CONFIG_SOC_ZUMAPRO)
-		ret = max77779_adjust_bat_open_to(bcl_dev, usb_enable);
-		if (ret < 0)
-			dev_err(bcl_dev->device, "USB: BAT OPEN cannot be adjusted\n");
-#endif
-	}
+	ret = max77779_adjust_batoilo_lvl(bcl_dev, usb_enable,
+					  bcl_dev->batt_irq_conf1.batoilo_usb_trig_lvl,
+					  bcl_dev->batt_irq_conf2.batoilo_usb_trig_lvl);
+	if (ret < 0)
+		dev_err(bcl_dev->device, "USB: BATOILO cannot be adjusted\n");
 
 	return ret;
 }

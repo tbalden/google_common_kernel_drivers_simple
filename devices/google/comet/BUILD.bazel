@@ -1,9 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch")
 load("//private/devices/google/common/kleaf:device_build.bzl", "device_build")
 load("//private/devices/google/zuma:constants.bzl", "ZUMA_DTBS")
 load("//private/devices/google/zumapro:constants.bzl", "ZUMAPRO_DTBS", "ZUMAPRO_MODULE_OUTS")
 load(":constants.bzl", "COMET_DTBOS")
+
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
+)
 
 device_build(
     name = "comet",
@@ -38,7 +44,7 @@ device_build(
         "//private/google-modules/touch/sec",
         "//private/google-modules/touch/synaptics/syna_gtd:syna_touch",
         "//private/google-modules/uwb/qorvo/qm35/qm35s:uwb.qm35",
-        "//private/google-modules/wlan/bcm4390:bcmdhd4390",
+        "//private/google-modules/wlan/bcmdhd/bcm4390:bcmdhd4390",
         "//private/google-modules/wlan/wlan_ptracker",
     ],
     insmod_cfgs = glob(["insmod_cfg/*.cfg"]),

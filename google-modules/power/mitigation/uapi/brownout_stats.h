@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-
 #ifndef __BROWNOUT_STATS_H
 #define __BROWNOUT_STATS_H
 
-#if IS_ENABLED(CONFIG_REGULATOR_S2MPG14) || IS_ENABLED(CONFIG_REGULATOR_S2MPG12)
+#if IS_ENABLED(CONFIG_GOOGLE_MFD_DA9188)
+#define METER_CHANNEL_MAX	16
+#elif IS_ENABLED(CONFIG_REGULATOR_S2MPG14) || IS_ENABLED(CONFIG_REGULATOR_S2MPG12)
 #define METER_CHANNEL_MAX	12
 #else
 #define METER_CHANNEL_MAX	8
@@ -15,27 +16,8 @@
 static_assert(METER_CHANNEL_MAX <= COMPATIBLE_METER_CHANNEL_MAX);
 
 /* Brownout triggered source need to be sync with the dt-bindings.
- * google-modules/soc/gs/include/dt-bindings/soc/google/zumapro-bcl.h
  */
-#define SMPL_WARN	0
-#define OCP_WARN_CPUCL1	1
-#define OCP_WARN_CPUCL2	2
-#define SOFT_OCP_WARN_CPUCL1	3
-#define SOFT_OCP_WARN_CPUCL2	4
-#define OCP_WARN_TPU	5
-#define SOFT_OCP_WARN_TPU	6
-#define OCP_WARN_GPU	7
-#define SOFT_OCP_WARN_GPU	8
-#define PMIC_SOC	9
-#define UVLO1	10
-#define UVLO2	11
-#define BATOILO1	12
-#define BATOILO2	13
-#define PMIC_120C	14
-#define PMIC_140C	15
-#define PMIC_OVERHEAT	16
-#define BATOILO	BATOILO1
-#define TRIGGERED_SOURCE_MAX	17
+
 #define VIMON_BUF_SIZE		256
 #define VIMON_BYTES_PER_ENTRY	2
 #define MAX77779_VIMON_DATA_SIZE	(VIMON_BUF_SIZE / VIMON_BYTES_PER_ENTRY)
@@ -63,7 +45,15 @@ static_assert(METER_CHANNEL_MAX <= COMPATIBLE_METER_CHANNEL_MAX);
 #define GNSS_MITIGATION_ID		16
 #define AOC_MITIGATION_ID		17
 #define UFS_MITIGATION_ID		18
-#define MAX_MITIGATION_MODULE		19
+#define AMB_MITIGATION_ID		19
+#define AUR_MITIGATION_ID		20
+#define BATT_MITIGATION_ID		21
+#define MM_MITIGATION_ID		22
+#define GMC_MITIGATION_ID		23
+#define INFRA_MITIGATION_ID		24
+#define MIX_MITIGATION_ID		25
+#define MAX_MITIGATION_MODULE		26
+
 
 struct odpm_lpf {
 	struct timespec64 time;

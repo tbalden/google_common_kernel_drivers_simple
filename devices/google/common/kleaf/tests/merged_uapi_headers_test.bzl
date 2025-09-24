@@ -20,21 +20,21 @@ def merged_uapi_headers_test(name):
         name = "{}/uapi_headers_1".format(name),
         srcs = native.glob(["data/uapi_headers_1/**/*.h"]),
         out = "uapi_headers_1.tar.gz",
-        kernel_build = "//aosp:kernel_aarch64",
+        kernel_build = "//common:kernel_aarch64",
     )
 
     ddk_uapi_headers(
         name = "{}/uapi_headers_2".format(name),
         srcs = native.glob(["data/uapi_headers_2/**/*.h"]),
         out = "uapi_headers_2.tar.gz",
-        kernel_build = "//aosp:kernel_aarch64",
+        kernel_build = "//common:kernel_aarch64",
     )
 
     ddk_uapi_headers(
         name = "{}/uapi_headers_expected".format(name),
         srcs = native.glob(["data/uapi_headers_expected/**/*.h"]),
         out = "uapi_headers_expected.tar.gz",
-        kernel_build = "//aosp:kernel_aarch64",
+        kernel_build = "//common:kernel_aarch64",
     )
 
     merged_uapi_headers(

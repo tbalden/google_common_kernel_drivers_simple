@@ -36,7 +36,9 @@
 #include <soc/google/exynos-modem-ctrl.h>
 #include <soc/google/modem_notifier.h>
 
+#if IS_ENABLED(CONFIG_S5910)
 #include <linux/s5910.h>
+#endif
 
 #if IS_ENABLED(CONFIG_LINK_DEVICE_SHMEM)
 #include <linux/shm_ipc.h>
@@ -82,7 +84,6 @@ static struct modem_shared *create_modem_shared_data(
 	msd->storage.addr = devm_kcalloc(dev, MAX_MIF_BUFF_SIZE +
 		(MAX_MIF_SEPA_SIZE * 2), sizeof(*msd->storage.addr), GFP_KERNEL);
 	if (!msd->storage.addr) {
-		mif_err("IPC logger buff alloc failed!!\n");
 		devm_kfree(dev, msd);
 		return NULL;
 	}
@@ -107,11 +108,8 @@ static struct modem_ctl *create_modemctl_device(struct platform_device *pdev,
 
 	/* create modem control device */
 	modemctl = devm_kzalloc(dev, sizeof(struct modem_ctl), GFP_KERNEL);
-	if (!modemctl) {
-		mif_err("%s: modemctl devm_kzalloc fail\n", pdata->name);
-		mif_err("%s: xxx\n", pdata->name);
+	if (!modemctl)
 		return NULL;
-	}
 
 	modemctl->dev = dev;
 	modemctl->name = pdata->name;
@@ -155,10 +153,8 @@ static struct io_device *create_io_device(struct platform_device *pdev,
 	struct io_device *iod;
 
 	iod = devm_kzalloc(dev, sizeof(struct io_device), GFP_KERNEL);
-	if (!iod) {
-		mif_err("iod == NULL\n");
+	if (!iod)
 		return NULL;
-	}
 
 	INIT_LIST_HEAD(&iod->list);
 	RB_CLEAR_NODE(&iod->node_fmt);
@@ -342,10 +338,8 @@ static int parse_dt_mbox_pdata(struct device *dev, struct device_node *np,
 	}
 
 	mbox = (struct modem_mbox *)devm_kzalloc(dev, sizeof(struct modem_mbox), GFP_KERNEL);
-	if (!mbox) {
-		mif_err("mbox: failed to alloc memory\n");
+	if (!mbox)
 		return -ENOMEM;
-	}
 	pdata->mbx = mbox;
 
 	mif_dt_read_u32(np, "mif,int_ap2cp_msg", mbox->int_ap2cp_msg);
@@ -505,10 +499,8 @@ static int parse_dt_iodevs_pdata(struct device *dev, struct device_node *np,
 
 		do {
 			iod = devm_kzalloc(dev, sizeof(struct modem_io_t), GFP_KERNEL);
-			if (!iod) {
-				mif_err("failed to alloc iodev\n");
+			if (!iod)
 				return -ENOMEM;
-			}
 
 			if (!p_iod) {
 				mif_dt_read_string(child, "iod,name", name);
@@ -566,10 +558,8 @@ static struct modem_data *modem_if_parse_dt_pdata(struct device *dev)
 	struct device_node *iodevs_node = NULL;
 
 	pdata = devm_kzalloc(dev, sizeof(struct modem_data), GFP_KERNEL);
-	if (!pdata) {
-		mif_err("modem_data: alloc fail\n");
+	if (!pdata)
 		return ERR_PTR(-ENOMEM);
-	}
 
 	if (parse_dt_common_pdata(dev->of_node, pdata)) {
 		mif_err("DT error: failed to parse common\n");
@@ -629,6 +619,7 @@ enum mif_sim_mode {
 	MIF_SIM_TRIPLE,
 };
 
+#if IS_ENABLED(CONFIG_GPIO_DS_DETECT)
 static int simslot_count(struct seq_file *m, void *v)
 {
 	enum mif_sim_mode mode = (enum mif_sim_mode)(uintptr_t)(m->private);
@@ -649,7 +640,6 @@ static const struct file_operations __maybe_unused simslot_count_fops = {
 	.release = single_release,
 };
 
-#if IS_ENABLED(CONFIG_GPIO_DS_DETECT)
 static enum mif_sim_mode get_sim_mode(struct device_node *of_node)
 {
 	enum mif_sim_mode mode = MIF_SIM_SINGLE;
@@ -729,7 +719,7 @@ static int cpif_cdev_alloc_region(struct modem_data *pdata, struct modem_shared 
 		return ret;
 	}
 
-	msd->cdev_class = class_create(THIS_MODULE, "cpif");
+	msd->cdev_class = class_create("cpif");
 	if (IS_ERR(msd->cdev_class)) {
 		mif_err("class_create() failed:%ld\n", PTR_ERR(msd->cdev_class));
 		ret = -ENOMEM;
@@ -791,12 +781,15 @@ static int cpif_probe(struct platform_device *pdev)
 		goto fail;
 	}
 
+#if IS_ENABLED(CONFIG_GOOGLE_LOGBUFFER)
 	modemctl->log = logbuffer_register("cpif");
 	if (IS_ERR_OR_NULL(modemctl->log)) {
 		mif_err("Failed to register logbuffer!\n");
 		modemctl->log = NULL;
 	}
+#endif
 
+#if IS_ENABLED(CONFIG_S5910)
 	/* get the s5910 node pointer */
 	modemctl->s5910_dev = NULL;
 	if (dev->of_node) {
@@ -831,6 +824,7 @@ static int cpif_probe(struct platform_device *pdev)
 		}
 #endif
 	}
+#endif
 
 	if (toe_dev_create(pdev)) {
 		mif_err("%s: toe dev not created\n", pdata->name);
@@ -860,10 +854,8 @@ static int cpif_probe(struct platform_device *pdev)
 
 	/* create io deivces and connect to modemctl device */
 	iod = kcalloc(pdata->num_iodevs, sizeof(*iod), GFP_KERNEL);
-	if (!iod) {
-		mif_err("kcalloc() err\n");
+	if (!iod)
 		goto free_chrdev;
-	}
 
 	for (i = 0; i < pdata->num_iodevs; i++) {
 		if (sim_mode < MIF_SIM_DUAL &&
@@ -987,7 +979,43 @@ static int modem_resume(struct device *pdev)
 	return 0;
 }
 
+static int suspend_prepare(struct device *pdev)
+{
+	struct modem_ctl *mc;
+	struct link_device *ld;
+	struct mem_link_device *mld;
+
+	mc = dev_get_drvdata(pdev);
+	ld = get_current_link(mc->iod);
+	mld = to_mem_link_device(ld);
+
+	mc->device_suspended = true;
+	if (hrtimer_active(&mld->pktproc_tx_timer))
+		hrtimer_cancel(&mld->pktproc_tx_timer);
+
+	return 0;
+}
+
+static int resume_done(struct device *pdev)
+{
+	ktime_t ktime;
+	struct modem_ctl *mc;
+	struct link_device *ld;
+	struct mem_link_device *mld;
+
+	mc = dev_get_drvdata(pdev);
+	ld = get_current_link(mc->iod);
+	mld = to_mem_link_device(ld);
+
+	mc->device_suspended = false;
+	ktime = ktime_set(0, mld->tx_period_ns);
+	hrtimer_start(&mld->pktproc_tx_timer, ktime, HRTIMER_MODE_REL);
+
+	return 0;
+}
+
 static const struct dev_pm_ops cpif_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(suspend_prepare, resume_done)
 	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(modem_suspend, modem_resume)
 };
 

@@ -64,6 +64,7 @@ static int gpu_dvfs_governor_basic(struct kbase_device *kbdev,
 	return level;
 }
 
+#if MALI_USE_CSF
 /**
  * level_for_capacity() - Find the lowest level satisfying a given needed capacity.
  *
@@ -276,6 +277,7 @@ gpu_dvfs_governor_capacity_use_mcu_util(struct kbase_device *kbdev,
 
 	return level_for_capacity(capacity_target, tbl, kbdev->dev, level_min, level_max);
 }
+#endif
 
 /**
  * gpu_dvfs_governor_quickstep() - The evaluation function for &GPU_DVFS_GOVERNOR_QUICKSTEP.
@@ -361,6 +363,7 @@ static struct gpu_dvfs_governor_info governors[GPU_DVFS_GOVERNOR_COUNT] = {
 		"quickstep",
 		gpu_dvfs_governor_quickstep,
 	},
+#if MALI_USE_CSF
 	{
 		"quickstep_use_mcu",
 		gpu_dvfs_governor_quickstep_use_mcu_util,
@@ -369,6 +372,7 @@ static struct gpu_dvfs_governor_info governors[GPU_DVFS_GOVERNOR_COUNT] = {
 		"capacity_use_mcu",
 		gpu_dvfs_governor_capacity_use_mcu_util,
 	},
+#endif
 };
 
 /**

@@ -30,7 +30,7 @@ static const struct of_device_id cs40l26_of_match[CS40L26_NUM_DEVS + 1] = {
 };
 MODULE_DEVICE_TABLE(of, cs40l26_of_match);
 
-static int cs40l26_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int cs40l26_i2c_probe(struct i2c_client *client)
 {
 	struct cs40l26_private *cs40l26;
 	int error;

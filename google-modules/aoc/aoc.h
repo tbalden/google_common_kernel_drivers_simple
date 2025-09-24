@@ -9,6 +9,9 @@
  * published by the Free Software Foundation.
  */
 
+#ifndef AOC_H_
+#define AOC_H_
+
 #include <linux/cdev.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -25,6 +28,7 @@
 #include "aoc_ipc_core_internal.h"
 
 #include "uapi/aoc.h"
+
 
 #ifdef __KERNEL__
 
@@ -83,6 +87,8 @@ struct aoc_service_dev {
 
 	bool dead;
 	bool wake_capable;
+
+	int irq;
 };
 
 typedef int (*aoc_map_handler)(u32 handle, phys_addr_t p, size_t size,
@@ -109,6 +115,7 @@ struct aoc_prvdata {
 
 	void *sram_virt;
 	void *dram_virt;
+	void *lcpm_virt;
 	void *aoc_req_virt;
 	size_t sram_size;
 	size_t dram_size;
@@ -173,25 +180,26 @@ struct aoc_prvdata {
 	u64 last_reset_time_ns;
 	int reset_wait_time_index;
 
-	u32 aoc_pcu_base;
-	u32 aoc_gpio_base;
-	u32 aoc_pcu_db_set_offset;
-	u32 aoc_pcu_db_clr_offset;
-	u32 aoc_cp_aperture_start_offset;
-	u32 aoc_cp_aperture_end_offset;
 	u32 aoc_clock_divider;
 	u32 aoc_mbox_channels;
+	u32 aoc_coredump_mbox;
 
 	u16 iommu_size;
 	struct iommu_entry *iommu;
-	bool iommu_configured;
-	bool iommu_config_persistent;
+
+	bool aoc_log_mbox_tx_done;
+
+	struct wakeup_source *wakelock;
 };
 
 struct aoc_module_parameters {
 	bool *aoc_autoload_firmware;
 	bool *aoc_disable_restart;
 	bool *aoc_panic_on_req_timeout;
+	bool *aoc_enable_gsa_boot;
+	bool *aoc_panic_on_coredump_timeout;
+	int *aoc_monitor_online_timeout;
+	bool *aoc_panic_on_monitor_timeout;
 };
 
 #define AOC_DEVICE(_d) container_of((_d), struct aoc_service_dev, dev)
@@ -240,9 +248,9 @@ void aoc_set_map_handler(struct aoc_service_dev *dev, aoc_map_handler handler,
 void aoc_remove_map_handler(struct aoc_service_dev *dev);
 void aoc_trigger_watchdog(const char *reason);
 
-extern u32 gs_chipid_get_revision(void);
-extern u32 gs_chipid_get_type(void);
-extern u32 gs_chipid_get_product_id(void);
+u32 aoc_chip_get_revision(void);
+u32 aoc_chip_get_type(void);
+u32 aoc_chip_get_product_id(void);
 
 bool aoc_release_from_reset(struct aoc_prvdata *prvdata);
 
@@ -256,11 +264,11 @@ int aoc_watchdog_restart(struct aoc_prvdata *prvdata,
 
 int platform_specific_probe(struct platform_device *pdev, struct aoc_prvdata *prvdata);
 
+void platform_specific_remove(struct platform_device *pdev, struct aoc_prvdata *prvdata);
+
 int start_firmware_load(struct device *dev);
 
-void reset_sensor_power(struct aoc_prvdata *prvdata, bool is_init);
-
-void aoc_configure_hardware(struct aoc_prvdata *prvdata);
+void configure_sensor_power(struct aoc_prvdata *prvdata, bool enable);
 
 void trigger_aoc_ramdump(struct aoc_prvdata *prvdata);
 
@@ -300,6 +308,14 @@ void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable);
 void notify_timeout_aoc_status(void);
 
 void trigger_aoc_ssr(bool ap_triggered_reset, char* reset_reason);
+
+int platform_specific_aoc_online(void);
+
+int platform_specific_aoc_offline(void);
+
+void platform_specific_aoc_core_suspend(void);
+
+void platform_specific_aoc_core_resume(void);
 
 #define AOC_SERVICE_NAME_LENGTH 32
 
@@ -356,7 +372,10 @@ enum AOC_FIRMWARE_INFORMATION {
 	kAOCWifiChip = 0x1017,
 };
 
+extern enum AOC_FW_STATE aoc_state;
+
 #define module_aoc_driver(__aoc_driver)                                        \
 	module_driver(__aoc_driver, aoc_driver_register, aoc_driver_unregister)
 
 #endif /* __KERNEL__ */
+#endif /* AOC_H_ */

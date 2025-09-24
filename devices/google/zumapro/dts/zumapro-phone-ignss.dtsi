@@ -36,8 +36,6 @@
 	#size-cells = <0>;
 	status = "okay";
 	swap-mode = <1>;
-	dma-mode;
-	dmas = <&pdma1 20 &pdma1 21>;
 
 	gnss@0 {
 		compatible = "samsung,gnss-spi";

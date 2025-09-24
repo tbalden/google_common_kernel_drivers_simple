@@ -3,8 +3,8 @@
 build:pixel_debug_common --notrim
 build:pixel_debug_common --nokmi_symbol_list_strict_mode
 build:pixel_debug_common --nokmi_symbol_list_violations_check
-build:pixel_debug_common --use_prebuilt_gki=false
-build:pixel_debug_common --download_prebuilt_gki_fips140=false
+build:pixel_debug_common --nouse_prebuilt_kernel
+build:pixel_debug_common --nouse_prebuilt_fips140
 
 # Only one of the debug configs can be used at a time, because only the last --defconfig_fragment takes effect.
 build:blktest                   --config=pixel_debug_common
@@ -27,3 +27,5 @@ build:kasan                     --config=pixel_debug_common
 build:kasan                     --defconfig_fragment=//private/devices/google/common/debug:kasan_defconfig
 build:khwasan                   --config=pixel_debug_common
 build:khwasan                   --defconfig_fragment=//private/devices/google/common/debug:khwasan_defconfig
+build:devmem                    --config=pixel_debug_common
+build:devmem                    --defconfig_fragment=//private/devices/google/common/debug:devmem_defconfig

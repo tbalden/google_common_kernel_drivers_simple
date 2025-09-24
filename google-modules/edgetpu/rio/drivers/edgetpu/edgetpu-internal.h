@@ -26,7 +26,6 @@
 
 #include <gcip/gcip-dma-fence.h>
 #include <gcip/gcip-firmware.h>
-#include <gcip/gcip-memory.h>
 #include <gcip/gcip-thermal.h>
 #include <iif/iif-manager.h>
 
@@ -56,6 +55,15 @@
 
 typedef u64 tpu_addr_t;
 
+/* "Coherent memory" allocated in iremap region. */
+struct edgetpu_coherent_mem {
+	void *vaddr;		/* kernel VA, no allocation if NULL */
+	dma_addr_t dma_addr;	/* TPU DMA address (default domain) */
+	u64 host_addr;		/* address mapped on host for debugging */
+	u64 phys_addr;		/* physical address, if available */
+	size_t size;
+};
+
 struct edgetpu_device_group;
 struct edgetpu_dev_iface;
 struct edgetpu_soc_data;
@@ -76,6 +84,11 @@ struct edgetpu_client {
 	 * client doesn't belong to any group.
 	 */
 	struct edgetpu_device_group *group;
+	/*
+	 * This client is the idx-th member of @group.
+	 * It's meaningless if this client doesn't belong to a group.
+	 */
+	uint idx;
 	/* the device opened by this client */
 	struct edgetpu_dev *etdev;
 	/* the interface from which this client was opened */
@@ -111,6 +124,7 @@ struct edgetpu_mailbox_manager;
 struct edgetpu_kci;
 struct edgetpu_ikv;
 struct edgetpu_pm;
+struct edgetpu_telemetry_ctx;
 struct edgetpu_mempool;
 struct gcip_kci_response_element;
 
@@ -176,8 +190,6 @@ struct edgetpu_dev {
 	/* SoC-specific data */
 	struct edgetpu_soc_data *soc_data;
 	struct dentry *d_entry;    /* debugfs dir for this device */
-	/* Built-in client for debugfs wakelock */
-	struct edgetpu_client *debugfs_wakelock_client;
 	struct mutex state_lock;   /* protects state of this device */
 	enum edgetpu_dev_state state;
 	struct mutex groups_lock;
@@ -196,10 +208,9 @@ struct edgetpu_dev {
 	struct edgetpu_mailbox_manager *mailbox_manager;
 	struct edgetpu_kci *etkci;
 	struct edgetpu_ikv *etikv;
-	struct edgetpu_iif *etiif;
 	struct edgetpu_firmware *firmware; /* firmware management */
 	struct gcip_fw_tracing *fw_tracing; /* firmware tracing */
-	struct gcip_telemetry_ctx *telemetry;
+	struct edgetpu_telemetry_ctx *telemetry;
 	struct gcip_thermal *thermal;
 	struct gcip_devfreq *devfreq;
 	struct edgetpu_usage_stats *usage_stats; /* usage stats private data */
@@ -225,17 +236,12 @@ struct edgetpu_dev {
 	uint firmware_crash_count;
 	uint watchdog_timeout_count;
 
+	/* Inter-IP fence manager. */
+	struct iif_manager *iif_mgr;
+	struct device *iif_dev;
+
 	/* Firmware debug service */
 	struct edgetpu_fw_debug_mem fw_debug_mem;
-
-	/*
-	 * Whether the firmware CPU is running (reset-signal released) or is being held in reset.
-	 *
-	 * This field must only be accessed while holding a PM reference (edgetpu_pm_get()) or
-	 * inside of the gcip_pm power_up/power_down handlers, which are called when the PM
-	 * ref-count goes changes from or to 0 respectively.
-	 */
-	bool firmware_cpu_on;
 };
 
 struct edgetpu_dev_iface {
@@ -309,9 +315,6 @@ void edgetpu_handle_job_lockup(struct edgetpu_dev *etdev, u16 vcid);
 
 /* Handle an individual client entering an unrecoverable state in firmware */
 void edgetpu_handle_client_fatal_error_notify(struct edgetpu_dev *etdev, u32 client_id);
-
-/* Handle a client inactivity timeout notification from firmware */
-void edgetpu_handle_client_inactivity_timeout(struct edgetpu_dev *etdev, u32 client_id);
 
 /* Bus (Platform/PCI) <-> Core API */
 

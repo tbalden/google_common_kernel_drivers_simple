@@ -755,10 +755,10 @@ int sipc5_init_io_device(struct io_device *iod, struct mem_link_device *mld)
 		break;
 
 	case IODEV_NET:
+#if IS_ENABLED(CONFIG_CP_PKTPROC)
 #if IS_ENABLED(CONFIG_MODEM_IF_QOS)
 		txqs = mld->pktproc_ul.num_queue;
 #endif
-#if IS_ENABLED(CONFIG_CP_PKTPROC)
 		rxqs = mld->pktproc.num_queue;
 #endif
 		skb_queue_head_init(&iod->sk_rx_q);

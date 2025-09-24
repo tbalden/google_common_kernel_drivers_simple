@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
-load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
+load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "kernel_module")
 load("//private/devices/google/common/kleaf:device_build.bzl", "device_build")
 load(":constants.bzl", "ZUMAPRO_DPM_DTBOS", "ZUMAPRO_DTBS", "ZUMAPRO_MODULE_OUTS")
 
@@ -10,17 +10,20 @@ package(
     ],
 )
 
+checkpatch(
+    name = "checkpatch",
+    checkpatch_pl = "//common:scripts/checkpatch.pl",
+)
+
 kernel_module(
     name = "zumapro_soc",
     srcs = [
+        "//private/google-modules/perf:headers",
         "//private/google-modules/soc/gs:gs_soc_sources",
         "//private/google-modules/trusty:headers",
     ],
     outs = [
         # keep sorted
-        "drivers/block/zram/zcomp_cpu.ko",
-        "drivers/block/zram/zcomp_eh.ko",
-        "drivers/block/zram/zram_gs.ko",
         "drivers/bts/bts.ko",
         "drivers/clk/gs/clk_exynos_gs.ko",
         "drivers/clocksource/exynos_mct_v3.ko",
@@ -49,7 +52,6 @@ kernel_module(
         "drivers/mfd/s2mpg1415-gpio.ko",
         "drivers/mfd/s2mpg15-mfd.ko",
         "drivers/mfd/slg51002-core.ko",
-        "drivers/misc/s5910/s5910.ko",
         "drivers/misc/sbb-mux/sbb-mux.ko",
         "drivers/misc/sscoredump/sscoredump.ko",
         "drivers/pci/controller/dwc/pcie-exynos-gs.ko",
@@ -97,7 +99,6 @@ kernel_module(
         "drivers/soc/google/debug/pixel-suspend-diag.ko",
         "drivers/soc/google/debug/sjtag-driver.ko",
         "drivers/soc/google/ect_parser.ko",
-        "drivers/soc/google/eh/eh.ko",
         "drivers/soc/google/exynos-bcm_dbg-dump.ko",
         "drivers/soc/google/exynos-cpuhp.ko",
         "drivers/soc/google/exynos-cpupm.ko",
@@ -114,8 +115,6 @@ kernel_module(
         "drivers/soc/google/gnssif_spi/gnss_spi.ko",
         "drivers/soc/google/gnssif_spi/gnssif.ko",
         "drivers/soc/google/gs-chipid.ko",
-        "drivers/soc/google/gsa/gsa.ko",
-        "drivers/soc/google/gsa/gsa_gsc.ko",
         "drivers/soc/google/hardlockup-debug.ko",
         "drivers/soc/google/hardlockup-watchdog.ko",
         "drivers/soc/google/kernel-top.ko",
@@ -150,6 +149,7 @@ kernel_module(
         "drivers/ufs/ufs-exynos-gs.ko",
         "drivers/ufs/ufs-pixel-fips140.ko",
         "drivers/usb/dwc3/dwc3-exynos-usb.ko",
+        "drivers/usb/dwc3/google-role-sw.ko",
         "drivers/usb/gadget/function/usb_f_dm.ko",
         "drivers/usb/gadget/function/usb_f_dm1.ko",
         "drivers/usb/gadget/function/usb_f_etr_miu.ko",
@@ -162,6 +162,7 @@ kernel_module(
         "drivers/usb/typec/tcpm/google/max77779_contaminant.ko",
         "drivers/usb/typec/tcpm/google/max777x9_contaminant.ko",
         "drivers/usb/typec/tcpm/google/tcpci_max77759.ko",
+        "drivers/usb/typec/tcpm/google/tcpci_max777x9_i2c.ko",
         "drivers/usb/typec/tcpm/google/usb_psy.ko",
         "drivers/usb/typec/tcpm/google/usbc_cooling_dev.ko",
         "drivers/video/backlight/rt4539_bl.ko",
@@ -176,6 +177,7 @@ kernel_module(
     ],
     deps = [
         "//private/google-modules/bms/misc:bms-misc",
+        "//private/google-modules/soc/gs/drivers/soc/google/gsa",
         "//private/google-modules/trusty",
     ],
 )
@@ -205,22 +207,32 @@ device_build(
         "//private/google-modules/display/common/gs_drm",
         "//private/google-modules/display/common/gs_panel",
         "//private/google-modules/display/samsung:display.samsung",
+        "//private/google-modules/display/samsung:exynos-drm-audio",
         "//private/google-modules/edgetpu/rio/drivers/edgetpu:edgetpu.rio",
         "//private/google-modules/fingerprint/goodix/fps_touch_handler",
         "//private/google-modules/gpu/mali_kbase",
         "//private/google-modules/gpu/mali_pixel",
         "//private/google-modules/gxp/zuma:gxp",
         "//private/google-modules/hdcp/samsung:hdcp.samsung",
-        "//private/google-modules/lwis",
+        "//private/google-modules/lwis:lwis.casablanca",
         "//private/google-modules/misc/sscoredump",
         "//private/google-modules/power/mitigation:bcl",
         "//private/google-modules/power/reset",
+        "//private/google-modules/soc/gs/drivers/block/zram:zcomp_cpu",
+        "//private/google-modules/soc/gs/drivers/block/zram:zcomp_eh",
+        "//private/google-modules/soc/gs/drivers/block/zram:zram_gs",
+        "//private/google-modules/soc/gs/drivers/misc/s5910",
+        "//private/google-modules/soc/gs/drivers/soc/google/eh",
+        "//private/google-modules/soc/gs/drivers/soc/google/gsa",
         "//private/google-modules/trusty",
         "//private/google-modules/video/gchips:video.gchips",
     ],
     kconfig_exts = ["Kconfig.ext.zumapro"],
     kconfigs = [
         # keep sorted
+        "//private/google-modules/aoc:aoc.kconfig",
+        "//private/google-modules/aoc/alsa:alsa.kconfig",
+        "//private/google-modules/aoc/usb:aoc.usb.kconfig",
         "//private/google-modules/bms/misc:bms-misc.kconfig",
         "//private/google-modules/display/common:common.kconfig",
         "//private/google-modules/display/samsung:display.samsung.kconfig",
@@ -228,6 +240,8 @@ device_build(
         "//private/google-modules/power/mitigation:bcl.kconfig",
         "//private/google-modules/power/reset:reset.kconfig",
         "//private/google-modules/soc/gs:gs_soc.kconfig",
+        "//private/google-modules/soc/gs/drivers/misc/s5910:s5910.kconfig",
+        "//private/google-modules/soc/gs/drivers/soc/google/gsa:gsa.kconfig",
         "//private/google-modules/trusty:trusty.kconfig",
     ],
     vendor_dlkm_modules_blocklists = ["vendor_dlkm.blocklist.zumapro"],

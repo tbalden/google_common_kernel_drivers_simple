@@ -63,11 +63,13 @@ static const char *const audio_service_names[] = {
 	"audio_ultrasonic",
 	"audio_immersive",
 	"audio_capture_inject",
-#if IS_ENABLED(CONFIG_SOC_GS201) || IS_ENABLED(CONFIG_SOC_ZUMA)
+#if !IS_ENABLED(CONFIG_SOC_GS101)
 	"audio_hotword_tap",
 #endif
-#if IS_ENABLED(CONFIG_SOC_ZUMA)
+#if IS_ENABLED(CONFIG_AOC_ALSA_DP_AUDIO)
 	"audio_displayport",
+#endif
+#if IS_ENABLED(CONFIG_AOC_ALSA_INCALL_CAP_3)
 	"audio_incall_cap_3",
 #endif
 	NULL,
@@ -394,7 +396,7 @@ static int aoc_alsa_probe(struct aoc_service_dev *adev)
 	service_lists[i].prvdata = NULL;
 	service_lists[i].waiting = false;
 	dev_notice(dev, "services %d: %s vs. %s\n", n_services,
-		  service_lists[i].name, dev_name(dev));
+		   service_lists[i].name, dev_name(dev));
 
 
 	n_services++;

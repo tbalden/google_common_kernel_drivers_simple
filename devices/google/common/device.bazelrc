@@ -3,19 +3,19 @@
 # Copyright (C) 2023 Google LLC
 
 build --flag_alias=kernel_package=//common:kernel_package
-build --flag_alias=download_prebuilt_gki_fips140=//private/devices/google/common:download_prebuilt_gki_fips140
-
-# Prebuilt GKI build number, used when --use_prebuilt_gki=true.
-# gki_prebuilts is for 4KB page kernel build, gki_prebuilts_aarch64_16k is for 16KB page kernel build
-# Notice! always set gki_prebuilts and gki_prebuilts_aarch64_16k to the same GKI build number
-build --action_env=KLEAF_DOWNLOAD_BUILD_NUMBER_MAP="gki_prebuilts=13748739,gki_prebuilts_aarch64_16k=13748739"
+build --flag_alias=use_prebuilt_kernel=//common:use_prebuilt_kernel
+build --flag_alias=nouse_prebuilt_kernel=no//common:use_prebuilt_kernel
+build --flag_alias=use_prebuilt_fips140=//private/devices/google/common:use_prebuilt_fips140
+build --flag_alias=nouse_prebuilt_fips140=no//private/devices/google/common:use_prebuilt_fips140
 
 # Use prebuilt GKI
-build --use_prebuilt_gki=true
-build --use_signed_prebuilts=true
+build --kernel_package=@//aosp-with-prebuilts
 
 # Use prebuilt fips140.ko
-build --download_prebuilt_gki_fips140=true
+build --use_prebuilt_fips140
+
+# include unsafe header list
+build --allow_ddk_unsafe_headers
 
 # Debug configs
 import %workspace%/private/devices/google/common/debug/debug.bazelrc
@@ -24,38 +24,20 @@ import %workspace%/private/devices/google/common/debug/debug.bazelrc
 build:factory --config=pixel_debug_common
 build:factory --//private/devices/google/common:factory
 
-# Testing build, enable gcov and kunit
+# Testing build, enable gcov
 build:testing --notrim
 build:testing --gcov
-build:testing --//private/devices/google/common:kunit
-build:testing --use_prebuilt_gki=false
-build:testing --use_signed_prebuilts=false
-
-# Build kunit modules
-build:kunit --notrim
-build:kunit --//private/devices/google/common:kunit
+build:testing --nouse_prebuilt_kernel
 
 # Build 16k page size kernel
 build:16k --page_size=16k
-build:16k --download_prebuilt_gki_fips140=false
-build:16k --use_signed_prebuilts=false
+build:16k --nouse_prebuilt_fips140
 
 # For compatibility only. Do no introduce new usage of these configs.
 # Use --kernel_package directly.
 build:aosp_staging --kernel_package=@//aosp-staging
-build:aosp_staging --use_prebuilt_gki=false
-build:aosp_staging --use_signed_prebuilts=false
 build:use_source_tree_aosp --kernel_package=@//aosp
-build:use_source_tree_aosp --use_prebuilt_gki=false
-build:use_source_tree_aosp --use_signed_prebuilts=false
 build:use_source_tree_aosp_staging --kernel_package=@//aosp-staging
-build:use_source_tree_aosp_staging --use_prebuilt_gki=false
-build:use_source_tree_aosp_staging --use_signed_prebuilts=false
-# Use --config=testing or --config=kunit.
-build:pixel_kunit --config=kunit
-# Use --download_prebuilt_gki_fips140 directly.
-build:download_gki_fips140 --download_prebuilt_gki_fips140=true
-build:no_download_gki_fips140 --download_prebuilt_gki_fips140=false
 
 # Placeholders for soc specific bazelrc files. Add as many as you need.
 try-import %workspace%/.c1.bazelrc

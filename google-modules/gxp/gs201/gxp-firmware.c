@@ -100,11 +100,13 @@ err:
 static bool check_firmware_config_version(struct gxp_dev *gxp,
 					  const struct firmware *core_firmware[GXP_NUM_CORES])
 {
-	const struct gcip_image_config *cfg;
+	struct gcip_common_image_header *hdr =
+		(struct gcip_common_image_header *)core_firmware[0]->data;
+	struct gcip_image_config *cfg;
 
 	if (unlikely(core_firmware[0]->size < GCIP_FW_HEADER_SIZE))
 		return false;
-	cfg = gcip_common_image_get_config_from_hdr(core_firmware[0]->data, GXP_FW_MAGIC);
+	cfg = get_image_config_from_hdr(hdr);
 	if (!cfg) {
 		dev_err(gxp->dev, "Core firmware doesn't have a valid image config");
 		return false;

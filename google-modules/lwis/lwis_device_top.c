@@ -23,10 +23,6 @@
 #include "lwis_event.h"
 #include "lwis_util.h"
 
-#include "lwis_device.h"
-#include "lwis_event.h"
-#include "lwis_util.h"
-
 #ifdef CONFIG_OF
 #include "lwis_dt.h"
 #endif
@@ -44,9 +40,12 @@ static int lwis_top_register_io(struct lwis_device *lwis_dev, struct lwis_io_ent
 static int lwis_top_close(struct lwis_device *lwis_dev);
 static struct lwis_device_subclass_operations top_vops = {
 	.register_io = lwis_top_register_io,
+	.batch_register_io = NULL,
 	.register_io_barrier = NULL,
 	.device_enable = NULL,
 	.device_disable = NULL,
+	.device_resume = NULL,
+	.device_suspend = NULL,
 	.event_enable = NULL,
 	.event_flags_updated = NULL,
 	.close = lwis_top_close,
@@ -57,7 +56,8 @@ static int lwis_top_event_subscribe(struct lwis_device *lwis_dev, int64_t trigge
 static int lwis_top_event_unsubscribe(struct lwis_device *lwis_dev, int64_t trigger_event_id,
 				      int subscriber_device_id);
 static void lwis_top_event_notify(struct lwis_device *lwis_dev, int64_t trigger_event_id,
-				  int64_t trigger_event_count, int64_t trigger_event_timestamp);
+				  int64_t trigger_event_count, int64_t trigger_event_timestamp,
+				  void *payload, size_t payload_size);
 static void lwis_top_event_subscribe_release(struct lwis_device *lwis_dev);
 static struct lwis_event_subscribe_operations top_subscribe_ops = {
 	.subscribe_event = lwis_top_event_subscribe,
@@ -92,6 +92,9 @@ struct lwis_trigger_event_info {
 	int64_t trigger_event_count;
 	/* Store emitted event timestamp from trigger device */
 	int64_t trigger_event_timestamp;
+	/* Store the event payload */
+	void *payload;
+	size_t payload_size;
 	/* node of list head */
 	struct list_head node;
 };
@@ -155,6 +158,7 @@ static void subscribe_work_func(struct kthread_work *work)
 			dev_err(lwis_top_dev->base_dev.dev,
 				"Failed to find event subscriber list for %llx\n",
 				trigger_event->trigger_event_id);
+			kfree(trigger_event->payload);
 			kfree(trigger_event);
 			continue;
 		}
@@ -166,15 +170,19 @@ static void subscribe_work_func(struct kthread_work *work)
 			lwis_device_external_event_emit(subscribe_info->subscriber_dev,
 							trigger_event->trigger_event_id,
 							trigger_event->trigger_event_count,
-							trigger_event->trigger_event_timestamp);
+							trigger_event->trigger_event_timestamp,
+							trigger_event->payload,
+							trigger_event->payload_size);
 		}
+		kfree(trigger_event->payload);
 		kfree(trigger_event);
 	}
 	spin_unlock_irqrestore(&lwis_top_dev->base_dev.lock, flags);
 }
 
 static void lwis_top_event_notify(struct lwis_device *lwis_dev, int64_t trigger_event_id,
-				  int64_t trigger_event_count, int64_t trigger_event_timestamp)
+				  int64_t trigger_event_count, int64_t trigger_event_timestamp,
+				  void *payload, size_t payload_size)
 {
 	struct lwis_top_device *lwis_top_dev =
 		container_of(lwis_dev, struct lwis_top_device, base_dev);
@@ -189,6 +197,12 @@ static void lwis_top_event_notify(struct lwis_device *lwis_dev, int64_t trigger_
 	trigger_event->trigger_event_id = trigger_event_id;
 	trigger_event->trigger_event_count = trigger_event_count;
 	trigger_event->trigger_event_timestamp = trigger_event_timestamp;
+	trigger_event->payload_size = payload_size;
+	trigger_event->payload = NULL;
+	if (trigger_event->payload_size > 0) {
+		trigger_event->payload = kmalloc(payload_size, GFP_ATOMIC);
+		memcpy(trigger_event->payload, payload, payload_size);
+	}
 	spin_lock_irqsave(&lwis_top_dev->base_dev.lock, flags);
 	list_add_tail(&trigger_event->node, &lwis_top_dev->emitted_event_list_work);
 	spin_unlock_irqrestore(&lwis_top_dev->base_dev.lock, flags);
@@ -306,6 +320,7 @@ static int lwis_top_event_unsubscribe(struct lwis_device *lwis_dev, int64_t trig
 							 node) {
 					if (pending_event->trigger_event_id == trigger_event_id) {
 						list_del(&pending_event->node);
+						kfree(pending_event->payload);
 						kfree(pending_event);
 					}
 				}
@@ -361,6 +376,7 @@ static void top_event_subscribe_clear(struct lwis_top_device *lwis_top_dev)
 	/* Clean up emitted event list */
 	list_for_each_entry_safe(pending_event, n, &lwis_top_dev->emitted_event_list_work, node) {
 		list_del(&pending_event->node);
+		kfree(pending_event->payload);
 		kfree(pending_event);
 	}
 	spin_unlock_irqrestore(&lwis_top_dev->base_dev.lock, flags);

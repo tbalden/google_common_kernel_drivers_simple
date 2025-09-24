@@ -37,6 +37,7 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
+#include <linux/pinctrl/consumer.h>
 #if defined(CONFIG_FB)
 #include <linux/notifier.h>
 #include <linux/fb.h>
@@ -1782,7 +1783,7 @@ static void fts_populate_mutual_channel(struct fts_ts_data *ts_data,
         TOUCH_OFFLOAD_FRAME_SIZE_2D(mutual_strength->rx_size,
             mutual_strength->tx_size);
 
-    memcpy(mutual_strength->data, ts_data->heatmap_buff,
+    memcpy(mutual_strength->data_flex, ts_data->heatmap_buff,
         mutual_strength->tx_size * mutual_strength->rx_size * sizeof(u16));
 }
 
@@ -1817,11 +1818,11 @@ static void fts_populate_self_channel(struct fts_ts_data *ts_data,
 
     if (ss_type == SS_WATER) {
         /* Copy Water-SS. */
-        memcpy(self_strength->data, ts_data->heatmap_buff + idx_ss_water,
+        memcpy(self_strength->data_flex, ts_data->heatmap_buff + idx_ss_water,
             ss_size);
     } else {
         /* Copy Normal-SS. */
-        memcpy(self_strength->data, ts_data->heatmap_buff + idx_ss_normal,
+        memcpy(self_strength->data_flex, ts_data->heatmap_buff + idx_ss_normal,
             ss_size);
     }
 }
@@ -1948,13 +1949,12 @@ static int fts_irq_registration(struct fts_ts_data *ts_data)
 {
     int ret = 0;
     struct fts_ts_platform_data *pdata = ts_data->pdata;
+    int irq_flags = IRQF_TRIGGER_FALLING | IRQF_ONESHOT;
 
     ts_data->irq = gpio_to_irq(pdata->irq_gpio);
-    pdata->irq_gpio_flags = IRQF_TRIGGER_FALLING | IRQF_ONESHOT;
-    FTS_INFO("irq:%d, flag:%x", ts_data->irq, pdata->irq_gpio_flags);
+    FTS_INFO("irq:%d, flag:%x", ts_data->irq, irq_flags);
     ret = request_threaded_irq(ts_data->irq, fts_irq_ts, fts_irq_handler,
-                               pdata->irq_gpio_flags,
-                               FTS_DRIVER_NAME, ts_data);
+                               irq_flags, FTS_DRIVER_NAME, ts_data);
 
     return ret;
 }
@@ -2022,8 +2022,6 @@ static int fts_input_init(struct fts_ts_data *ts_data)
     else
         input_dev->id.bustype = BUS_SPI;
     input_dev->dev.parent = ts_data->dev;
-
-    input_dev->uniq = "google_touchscreen";
 
     input_set_drvdata(input_dev, ts_data);
 
@@ -2513,8 +2511,7 @@ static int fts_parse_dt(struct device *dev, struct fts_ts_platform_data *pdata)
     }
 
     /* reset, irq gpio info */
-    pdata->reset_gpio = of_get_named_gpio_flags(np, "focaltech,reset-gpio",
-                        0, &pdata->reset_gpio_flags);
+    pdata->reset_gpio = of_get_named_gpio(np, "focaltech,reset-gpio", 0);
     if (pdata->reset_gpio < 0)
         FTS_ERROR("Unable to get reset_gpio");
 
@@ -2557,8 +2554,7 @@ static int fts_parse_dt(struct device *dev, struct fts_ts_platform_data *pdata)
         FTS_DEBUG("mm2px = %d", pdata->mm2px);
     }
 
-    pdata->irq_gpio = of_get_named_gpio_flags(np, "focaltech,irq-gpio",
-                      0, &pdata->irq_gpio_flags);
+    pdata->irq_gpio = of_get_named_gpio(np, "focaltech,irq-gpio", 0);
     if (pdata->irq_gpio < 0)
         FTS_ERROR("Unable to get irq_gpio");
 

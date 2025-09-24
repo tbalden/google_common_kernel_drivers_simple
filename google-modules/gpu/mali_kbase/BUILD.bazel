@@ -45,7 +45,7 @@ kernel_module(
     ],
     deps = [
         "//private/google-modules/gpu/mali_pixel",
-        "//private/google-modules/power/mitigation:bcl",
+        "//private/google-modules/power/mitigation:google_bcl",
         "//private/google-modules/soc/gs:gs_soc_module",
     ],
 )
