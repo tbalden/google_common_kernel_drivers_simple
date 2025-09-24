@@ -586,7 +586,7 @@ static int ioctl_device_enable(struct lwis_client *lwis_client)
 		return 0;
 	}
 
-	mutex_lock(&lwis_dev->interclient_lock);
+	mutex_lock(&lwis_dev->client_lock);
 	if (lwis_dev->enabled > 0 && lwis_dev->enabled < INT_MAX) {
 		lwis_dev->enabled++;
 		lwis_client->is_enabled = true;
@@ -619,7 +619,7 @@ static int ioctl_device_enable(struct lwis_client *lwis_client)
     }
 #endif
 exit_locked:
-	mutex_unlock(&lwis_dev->interclient_lock);
+	mutex_unlock(&lwis_dev->client_lock);
 	return ret;
 }
 
@@ -632,10 +632,10 @@ static int ioctl_device_disable(struct lwis_client *lwis_client)
 		return ret;
 	}
 
-	mutex_lock(&lwis_dev->interclient_lock);
+	mutex_lock(&lwis_dev->client_lock);
 	/* Clear event states for this client */
 	lwis_client_event_states_clear(lwis_client);
-	mutex_unlock(&lwis_dev->interclient_lock);
+	mutex_unlock(&lwis_dev->client_lock);
 
 	/* Flush all periodic io to complete */
 	ret = lwis_periodic_io_client_flush(lwis_client);
@@ -652,7 +652,7 @@ static int ioctl_device_disable(struct lwis_client *lwis_client)
 	/* Run cleanup transactions. */
 	lwis_transaction_client_cleanup(lwis_client);
 
-	mutex_lock(&lwis_dev->interclient_lock);
+	mutex_lock(&lwis_dev->client_lock);
 	if (lwis_dev->enabled > 1) {
 		lwis_dev->enabled--;
 		lwis_client->is_enabled = false;
@@ -681,7 +681,7 @@ static int ioctl_device_disable(struct lwis_client *lwis_client)
     }
 #endif
 exit_locked:
-	mutex_unlock(&lwis_dev->interclient_lock);
+	mutex_unlock(&lwis_dev->client_lock);
 	return ret;
 }
 
