@@ -2080,12 +2080,36 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 #endif
 
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
+#ifdef CONFIG_UCI
+        {
+                int x2, y2;
+                bool frozen_coords = s2s_freeze_coords(&x2,&y2,x,y);
+#endif
 			goog_input_mt_slot(tcm->gti, input_dev, idx);
 			goog_input_mt_report_slot_state(tcm->gti, input_dev, MT_TOOL_FINGER, 1);
 			goog_input_report_key(tcm->gti, input_dev, BTN_TOUCH, 1);
 			goog_input_report_key(tcm->gti, input_dev, BTN_TOOL_FINGER, 1);
+#ifdef CONFIG_UCI
+                                {
+                                        //pr_info("%s uci UCI goog input s2s...\n",__func__);
+                                        s2s_direct_input(input_dev->grab, 1, BTN_TOUCH, 1, idx);
+                                        s2s_direct_input(input_dev->grab, 3, ABS_MT_POSITION_X, (frozen_coords?x2:x), idx);
+                                        s2s_direct_input(input_dev->grab, 3, ABS_MT_POSITION_Y, (frozen_coords?y2:y), idx);
+                                        if (frozen_coords) {
+                                                // with direct input, we can return original X and Y as well, as freeze state and s2s states are already calculated...
+                                                // based on s2s_direct_input calls. Also this is a must with Google common touch driver...
+                                                // as it will start to ommit events if coords are off max/min limits of input dev resolution!
+                                                goog_input_report_abs(tcm->gti, input_dev, ABS_MT_POSITION_X, x);
+                                                goog_input_report_abs(tcm->gti, input_dev, ABS_MT_POSITION_Y, y);
+                                        } else {
+#endif
 			goog_input_report_abs(tcm->gti, input_dev, ABS_MT_POSITION_X, x);
 			goog_input_report_abs(tcm->gti, input_dev, ABS_MT_POSITION_Y, y);
+#ifdef CONFIG_UCI
+                                        }
+                                }
+        }
+#endif
 			goog_input_report_abs(tcm->gti, input_dev, ABS_MT_PRESSURE, z);
 #ifdef ENABLE_CUSTOM_TOUCH_ENTITY
 			goog_input_report_abs(tcm->gti, input_dev, ABS_MT_TOUCH_MAJOR, major);
@@ -2154,7 +2178,14 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
 	if (touch_count == 0) {
+#ifdef CONFIG_UCI
+{
+		s2s_direct_input(input_dev->grab, 1, BTN_TOUCH, 0, 0);
+#endif
 		goog_input_report_key(tcm->gti, input_dev, BTN_TOUCH, 0);
+#ifdef CONFIG_UCI
+}
+#endif
 		goog_input_report_key(tcm->gti, input_dev, BTN_TOOL_FINGER, 0);
 	}
 
