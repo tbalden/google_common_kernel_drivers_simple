@@ -237,12 +237,23 @@ void gs_panel_model_init(struct gs_panel *ctx, const char *project, u8 extra_inf
 }
 EXPORT_SYMBOL_GPL(gs_panel_model_init);
 
-bool gs_panel_is_mode_seamless_helper(const struct gs_panel *ctx, const struct gs_panel_mode *pmode)
+bool gs_panel_is_mode_seamless_atomic_helper(const struct gs_panel *ctx,
+					     const struct gs_panel_mode *old_pmode,
+					     const struct gs_panel_mode *new_pmode)
 {
-	const struct drm_display_mode *current_mode = &ctx->current_mode->mode;
-	const struct drm_display_mode *new_mode = &pmode->mode;
+	const struct drm_display_mode *old_mode = &old_pmode->mode;
+	const struct drm_display_mode *new_mode = &new_pmode->mode;
 
-	return drm_mode_equal_no_clocks(current_mode, new_mode);
+	/* seamless mode switch is possible if the resolution is the same */
+	return (old_mode->vdisplay == new_mode->vdisplay) &&
+	       (old_mode->hdisplay == new_mode->hdisplay);
+}
+EXPORT_SYMBOL_GPL(gs_panel_is_mode_seamless_atomic_helper);
+
+bool gs_panel_is_mode_seamless_helper(const struct gs_panel *ctx,
+				      const struct gs_panel_mode *new_pmode)
+{
+	return gs_panel_is_mode_seamless_atomic_helper(ctx, ctx->current_mode, new_pmode);
 }
 EXPORT_SYMBOL_GPL(gs_panel_is_mode_seamless_helper);
 

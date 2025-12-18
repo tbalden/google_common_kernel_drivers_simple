@@ -210,12 +210,6 @@
 			compatible = "verisilicon,dpu_wb";
 		};
 
-		osc_cdphy: oscillator_cdphy {
-			#clock-cells = <0>;
-			compatible = "fixed-clock";
-			clock-frequency = <38400000>;
-		};
-
 		dw_mipi_g301_cdphy0: dw_mipi_cdphy@3c0000 {
 			compatible = "synopsys,dw-mipi-cdphy-v1";
 			reg = <0x3c0000 0x18000>, <0x3d8800 0x800>;
@@ -223,7 +217,7 @@
 			#phy-cells = <1>;
 			/* 0: dphy, 1: cdphy */
 			is_cphy = <0>;
-			clocks = <&osc_cdphy>;
+			clocks = <&hsios_mphy_ref_clk>;
 			clock-names = "pllref";
 			power-domains = <&dpu_dsi0_pd>;
 		};
@@ -307,7 +301,7 @@
 			#phy-cells = <1>;
 			/* 0: dphy, 1: cdphy */
 			is_cphy = <0>;
-			clocks = <&osc_cdphy>;
+			clocks = <&hsios_mphy_ref_clk>;
 			clock-names = "pllref";
 			power-domains = <&dpu_dsi1_pd>;
 		};

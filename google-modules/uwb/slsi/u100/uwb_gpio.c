@@ -18,38 +18,65 @@ static unsigned long pow_swt_gpio_delay_ms = 50;
 module_param(pow_swt_gpio_delay_ms, ulong, 0664);
 MODULE_PARM_DESC(pow_swt_gpio_delay_ms, "The delay time between VBAT switch GPIO operations");
 
-void uwb_init_irq(struct uwb_irq *irq, unsigned int num, const char *name,
-				unsigned long flags)
+static void uwb_free_irq(struct u100_ctx *u100_ctx)
 {
-	spin_lock_init(&irq->lock);
-	irq->num = num;
-	strscpy(irq->name, name, sizeof(irq->name) - 1);
-	irq->flags = flags;
-	UWB_DEBUG("name:%s num:%d flags:%#08lX\n", name, num, flags);
+	struct uwb_irq *irq = &u100_ctx->gpio_u100_irq;
+
+	if (irq->registered) {
+		irq->registered = false;
+		devm_free_irq(u100_ctx->uci_dev.parent, irq->num, u100_ctx);
+	}
 }
 
-int uwb_request_irq(struct uwb_irq *irq, irq_handler_t isr, struct u100_ctx *u100_ctx)
+static int uwb_request_irq(struct u100_ctx *u100_ctx, unsigned long irq_flag)
 {
 	int ret;
 	struct miscdevice *uci_misc = &u100_ctx->uci_dev;
+	struct uwb_irq *irq = &u100_ctx->gpio_u100_irq;
 
+	irq_flag |= IRQF_ONESHOT;
+	if (irq->registered && irq->flags == irq_flag)
+		return FW_OK;
+
+	uwb_free_irq(u100_ctx);
+
+	irq->flags = irq_flag;
 	ret = devm_request_threaded_irq(uci_misc->parent,
 			irq->num,
-			isr,
+			uwb2ap_irq_handler,
 			rx_tsk_work,
-			irq->flags | IRQF_ONESHOT,
+			irq->flags,
 			"u100",
 			u100_ctx);
 
-	if (ret)
-		return ret;
+	if (ret) {
+		UWB_ERR("Request IRQ:%d flags:%#08lX failed:%d\n", irq->num, irq->flags, ret);
+		return FW_ERROR_IO;
+	}
 
-	irq->active = true;
 	irq->registered = true;
-	UWB_DEBUG("%s(#%d) handler registered (flags:%#08lX)\n",
-			 irq->name, irq->num, irq->flags);
+	UWB_DEBUG("(#%d) handler registered (flags:%#08lX)\n",
+			 irq->num, irq->flags);
 
 	return ret;
+}
+
+int uwb_init_irq(struct u100_ctx *u100_ctx, unsigned int num)
+{
+	struct uwb_irq *irq = &u100_ctx->gpio_u100_irq;
+
+	irq->num = num;
+	irq->flags = 0;
+	UWB_DEBUG("num:%d\n", num);
+
+	irq->registered = false;
+	irq->u100_irq = irq_to_desc(num);
+	if (IS_ERR_OR_NULL(irq->u100_irq))
+		UWB_WARN("Init irq(%d) desc failed, ret %d\n", num,
+				PTR_ERR_OR_ZERO(irq->u100_irq));
+
+	/* Set edge-triggered IRQ at the beginning. */
+	return uwb_request_irq(u100_ctx, IRQF_TRIGGER_RISING);
 }
 
 void set_gpio_value(void *desc, int value)
@@ -89,12 +116,13 @@ static void pin_en_low(struct u100_ctx *u100_ctx)
 
 static void pin_power_high(struct u100_ctx *u100_ctx)
 {
-	set_gpio_value(&u100_ctx->gpio_u100_power, 1);
+	/* b/441968643 to set open-drain in DT */
+	gpiod_direction_input(u100_ctx->gpio_u100_power);
 }
 
 static void pin_power_low(struct u100_ctx *u100_ctx)
 {
-	set_gpio_value(&u100_ctx->gpio_u100_power, 0);
+	gpiod_direction_output(u100_ctx->gpio_u100_power, 0);
 }
 
 static void pin_sync_high(struct u100_ctx *u100_ctx)
@@ -119,12 +147,13 @@ void uwbs_init(struct u100_ctx *u100_ctx)
 void uwbs_power_on(struct u100_ctx *u100_ctx)
 {
 	UWB_DEBUG("U100 power on begin");
+	pin_power_high(u100_ctx);
+	mdelay(pow_swt_gpio_delay_ms);
 	pin_sync_low(u100_ctx);
 	mdelay(gpio_delay_ms);
 	pin_rst_low(u100_ctx);
 	mdelay(gpio_delay_ms);
 	skb_queue_purge(&u100_ctx->sk_rx_q);
-	skb_queue_purge(&u100_ctx->sk_tx_q);
 	pin_en_high(u100_ctx);
 	mdelay(gpio_delay_ms);
 	pin_rst_high(u100_ctx);
@@ -142,6 +171,8 @@ void uwbs_power_off(struct u100_ctx *u100_ctx)
 	pin_rst_low(u100_ctx);
 	mdelay(gpio_delay_ms);
 	pin_rst_high(u100_ctx);
+	mdelay(gpio_delay_ms);
+	pin_power_low(u100_ctx);
 	atomic_set(&u100_ctx->u100_powered_on, 0);
 	UWB_DEBUG("U100 power off end");
 }
@@ -174,28 +205,52 @@ int uwbs_sync_reset(struct u100_ctx *u100_ctx)
 	u100_ctx->u100_state = U100_UNKNOWN_STATE;
 	u100_ctx->wait_atr_err = FW_ERROR_TIME;
 	atomic_set(&u100_ctx->waiting_atr, 1);
-	uwbs_power_off(u100_ctx);
-	mdelay(10);
-	uwbs_power_on(u100_ctx);
+	uwbs_reset(u100_ctx);
 	ret = wait_for_completion_timeout(&u100_ctx->atr_done_cmpl, PROBE_ATTR_TIMEOUT);
+
+	/* Free IRQ.
+	 * Request a level-triggered IRQ when ATR comes and U100 is in a normal state.
+	 */
+	uwb_free_irq(u100_ctx);
+
 	if (!ret) {
 		atomic_set(&u100_ctx->waiting_atr, 0);
 		ret = u100_ctx->wait_atr_err;
-		UWB_ERR("U100 sync reset timeout.");
+		uwbs_power_off(u100_ctx);
+		UWB_ERR("U100 sync reset timeout.\n");
+	} else if (u100_ctx->u100_state != U100_FW_STATE) {
+		uwbs_power_off(u100_ctx);
+		UWB_ERR("U100 sync reset with invalid U100 state 0x%x.\n", u100_ctx->u100_state);
+		ret = FW_ERROR_PARAMETER;
 	} else {
-		UWB_DEBUG("U100 sync reset end");
-		ret = FW_OK;
+		UWB_DEBUG("U100 sync reset end\n");
+		/* Request a level-triggered IRQ for UCI transmission */
+		ret = uwb_request_irq(u100_ctx, IRQF_TRIGGER_HIGH);
 	}
 	return ret;
 }
 
-void uwbs_start_download(struct u100_ctx *u100_ctx)
+int uwbs_start_download(struct u100_ctx *u100_ctx)
 {
+	int ret;
+
 	UWB_DEBUG("U100 enter download mode begin");
+	/* Request an edge-triggered IRQ for FW download. */
+	ret = uwb_request_irq(u100_ctx, IRQF_TRIGGER_RISING);
+	if (ret)
+		return ret;
+
 	atomic_set(&u100_ctx->u100_enter_download, 1);
 	mdelay(gpio_delay_ms);
 	uwbs_power_off(u100_ctx);
 	mdelay(gpio_delay_ms);
+	/*
+	 * Chip is now in powered off state. Instead of using uwbs_power_on() to
+	 * turn it back on, power up with a custom sequence that tells the chip to
+	 * turn on in download mode.
+	 */
+	pin_power_high(u100_ctx);
+	mdelay(pow_swt_gpio_delay_ms);
 	pin_sync_high(u100_ctx);
 	mdelay(gpio_delay_ms);
 	pin_rst_low(u100_ctx);
@@ -206,6 +261,7 @@ void uwbs_start_download(struct u100_ctx *u100_ctx)
 	mdelay(gpio_delay_ms);
 	atomic_set(&u100_ctx->u100_enter_download, 0);
 	UWB_DEBUG("U100 enter download mode end");
+	return FW_OK;
 }
 
 /*Add synchronized enter BL0 download mode */
@@ -220,7 +276,13 @@ bool uwbs_sync_start_download(struct u100_ctx *u100_ctx)
 	u100_ctx->u100_state = U100_UNKNOWN_STATE;
 	u100_ctx->wait_atr_err = FW_ERROR_TIME;
 	atomic_set(&u100_ctx->waiting_atr, 1);
-	uwbs_start_download(u100_ctx);
+
+	ret = uwbs_start_download(u100_ctx);
+	if (ret) {
+		atomic_set(&u100_ctx->waiting_atr, 0);
+		return false;
+	}
+
 	ret = wait_for_completion_timeout(&u100_ctx->atr_done_cmpl, PROBE_ATTR_TIMEOUT);
 	if (!ret) {
 		atomic_set(&u100_ctx->waiting_atr, 0);

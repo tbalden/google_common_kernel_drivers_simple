@@ -204,6 +204,11 @@ struct max77779_fg_chip {
 	int aafv_cur_idx;
 	bool aafv_modified_fus;
 	struct aafv_fg_config aafv_cfgs[GBMS_AAFV_DATA_MAX];
+
+	/* information for PROP_NEED_CHARGE_TO_FULL */
+	struct maxfg_bypss_charglimt bypass_chargelimit;
+
+	bool present;
 };
 
 /** ------------------------------------------------------------------------ */
@@ -372,8 +377,6 @@ ssize_t max77779_gmsr_state_cstr(char *buf, int max);
 void *max77779_get_model_data(struct device *dev);
 
 int max77779_fg_init(struct max77779_fg_chip *chip);
-bool max77779_fg_dbg_is_reg(struct device *dev, unsigned int reg);
-bool max77779_fg_is_reg(struct device *dev, unsigned int reg);
 void max77779_fg_remove(struct max77779_fg_chip *chip);
 
 #if IS_ENABLED(CONFIG_PM)

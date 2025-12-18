@@ -8,6 +8,8 @@
 #include <drm/g2d_drm.h>
 #include <drm/drm_print.h>
 
+#include "g2d_pvric_hw.h"
+
 // Todo(b/390265640): Move to dts
 #define NUM_PIPELINES (2)
 
@@ -83,9 +85,11 @@ enum sc_hw_wb_format {
 	WB_FORMAT_XRGB8888,
 	WB_FORMAT_A2RGB101010,
 	WB_FORMAT_X2RGB101010,
+	/* b/332946613 Note that RGB888 is unsupported by HW */
 	WB_FORMAT_RGB888,
 	WB_FORMAT_NV12 = 14,
 	WB_FORMAT_P010 = 16,
+	NUM_WB_FORMATS,
 };
 
 enum sc_hw_pipe_id {
@@ -99,6 +103,7 @@ enum sc_hw_color_format {
 	FORMAT_X8R8G8B8,
 	FORMAT_A2R10G10B10,
 	FORMAT_X2R10G10B10,
+	/* b/332946613 Note that R8G8B8 is unsupported by HW */
 	FORMAT_R8G8B8,
 	FORMAT_R5G6B5,
 	FORMAT_A1R5G5B5,
@@ -114,6 +119,7 @@ enum sc_hw_color_format {
 	FORMAT_P010,
 	FORMAT_P210,
 	FORMAT_YUV420_PACKED,
+	NUM_LAYER_FORMATS,
 };
 
 enum sc_hw_tile_mode {
@@ -235,10 +241,12 @@ struct sc_hw_plane {
 	struct sc_hw_scale scale;
 	struct sc_hw_roi roi;
 	struct sc_hw_y2r y2r;
+	struct pvric_hw_config pvric;
 };
 
 struct sc_hw_wb {
 	struct sc_hw_fb fb;
+	struct pvric_hw_config pvric;
 };
 
 struct sc_hw;
@@ -273,6 +281,7 @@ struct sc_hw {
 };
 
 void sc_hw_commit(struct sc_hw *hw, u8 display_id);
+void sc_hw_wb_commit(struct sc_hw *hw, u8 display_id);
 void sc_hw_enable_shadow_register(struct sc_hw *hw, u8 display_id, bool enable);
 void sc_hw_start_trigger(struct sc_hw *hw, u8 display_id);
 void sc_hw_update_wb_fb(struct sc_hw *hw, u8 id, struct sc_hw_fb *fb);

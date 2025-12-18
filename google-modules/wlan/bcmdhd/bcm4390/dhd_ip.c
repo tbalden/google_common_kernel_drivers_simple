@@ -726,7 +726,6 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 	bool set_dotxinrx = TRUE;
 	unsigned long flags;
 
-
 	if (dhdp->tcpack_sup_mode == TCPACK_SUP_OFF)
 		goto exit;
 

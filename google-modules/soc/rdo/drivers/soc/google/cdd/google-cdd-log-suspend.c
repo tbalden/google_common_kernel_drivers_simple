@@ -1,17 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0
 /*
  * google-cdd-log-suspend.c - use to diagnose suspend/resume perforance
  *
- * Copyright 2024-2025 Google LLC
+ * Copyright 2024 Google LLC
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/hrtimer.h>
 #include <linux/sched/clock.h>
 #include <linux/platform_device.h>
 #include <linux/sysfs.h>
-#include <soc/google/google-smc.h>
 #include <trace/events/power.h>
 
 #include "google-cdd-local.h"
@@ -93,7 +91,6 @@ struct google_cdd_suspend_diag_info {
 } __packed;
 
 static struct google_cdd_suspend_diag_info google_cdd_suspend_diag_inst;
-static struct hrtimer google_cdd_suspend_watchdog_timer;
 
 void *google_cdd_suspend_diag_get_info(void)
 {
@@ -231,23 +228,6 @@ static void google_cdd_suspend_resume(void *ignore, const char *action, int even
 		google_cdd_suspend(action, NULL, event, start ? CDD_FLAG_IN : CDD_FLAG_OUT);
 
 	google_cdd_suspend_diag_suspend_resume(cdd_log, action, start, curr_index);
-	if (!start) {
-		if (!strcmp(action, "syscore_resume"))
-			hrtimer_start(&google_cdd_suspend_watchdog_timer,
-				ms_to_ktime(1000), HRTIMER_MODE_REL_PINNED);
-		else if (!strcmp(action, "dpm_resume_noirq"))
-			hrtimer_cancel(&google_cdd_suspend_watchdog_timer);
-	}
-}
-
-static enum hrtimer_restart cdd_suspend_watchdog_fn(struct hrtimer *hrtimer)
-{
-	u32 cpu = raw_smp_processor_id();
-
-	pr_err("%s: cpu%u handles suspend watchdog\n", __func__, cpu);
-	google_smc(SIP_SVD_GS_DEBUG_CMD, CMD_NS_STACK, 0, 0);
-
-	return HRTIMER_NORESTART;
 }
 
 static void google_cdd_dev_pm_cb_start(void *ignore, struct device *dev, const char *info,
@@ -405,9 +385,6 @@ int google_cdd_suspend_init(void)
 		kobject_put(google_cdd_suspend_diag_kobj);
 		return -EINVAL;
 	}
-
-	hrtimer_init(&google_cdd_suspend_watchdog_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	google_cdd_suspend_watchdog_timer.function = cdd_suspend_watchdog_fn;
 
 	return 0;
 }

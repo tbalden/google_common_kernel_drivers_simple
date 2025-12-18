@@ -15,7 +15,6 @@
 #define CMD_ASSERT			0x0
 #define CMD_PANIC			0x1
 #define CMD_ECC				0xecc
-#define CMD_NS_STACK			0x64756d70
 
 static inline unsigned long google_smc(unsigned long cmd, unsigned long arg0,
 				       unsigned long arg1, unsigned long arg2)

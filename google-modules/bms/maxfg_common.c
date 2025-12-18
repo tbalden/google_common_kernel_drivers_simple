@@ -1213,7 +1213,7 @@ int maxfg_aafv_scan_inputs(const char *inputs, const int input_sz,
 		if (idx >= cfg_max)
 			return -ERANGE;
 
-		if (sscanf(&inputs[pos], "%u,%u,%u,%u%n", &cfg[idx].cycles, &cfg[idx].voffset,
+		if (sscanf(&inputs[pos], "%u,%u,%u%n", &cfg[idx].voffset,
 			   &cfg[idx].fullsoc, &cfg[idx].fus, &rb) != 4)
 			return -EINVAL;
 		pos += rb;
@@ -1445,8 +1445,8 @@ ssize_t maxfg_aafv_config_show(struct aafv_fg_config *cfgs, const int config_lim
 
 	for (i = 0; i < config_limits ; i++) {
 		cfg = &cfgs[i];
-		count += sysfs_emit_at(buf, count, ",<%u>:<%u>:<%u>:<%u>",
-				       cfg->cycles, cfg->voffset, cfg->fullsoc, cfg->fus);
+		count += sysfs_emit_at(buf, count, ",<%u>:<%u>:<%u>",
+				       cfg->voffset, cfg->fullsoc, cfg->fus);
 	}
 
 	count += sysfs_emit_at(buf, count, "\n");
@@ -1454,3 +1454,121 @@ ssize_t maxfg_aafv_config_show(struct aafv_fg_config *cfgs, const int config_lim
 	return count;
 }
 EXPORT_SYMBOL_GPL(maxfg_aafv_config_show);
+
+static int maxfg_update_fcn_fcr_delta(struct maxfg_regmap *regmap,
+				      struct maxfg_bypss_charglimt *limit)
+{
+	int ret, fullcapnom, fullcaprep;
+
+	ret = maxfg_reg_read(regmap, MAXFG_TAG_fcnom, (u16 *)&fullcapnom);
+	if (ret < 0) {
+		pr_err("failed to read MAXFG_TAG_fcnom (%d)\n", ret);
+		return ret;
+	}
+
+	ret = maxfg_reg_read(regmap, MAXFG_TAG_fcrep, (u16 *)&fullcaprep);
+	if (ret < 0) {
+		pr_err("failed to read MAXFG_TAG_fcrep (%d)\n", ret);
+		return ret;
+	}
+
+	/* Return the 10x scaled percentage */
+	limit->fcn_fcr_delta  = (abs(fullcapnom - fullcaprep) * 1000) / fullcapnom;
+
+	return 0;
+}
+
+int maxfg_init_bypass_charge_limit(struct maxfg_regmap *regmap, struct device_node *node,
+				   struct maxfg_bypss_charglimt *limit)
+{
+	int ret;
+
+	ret = gbms_storage_read(GBMS_TAG_FCRU, &limit->last_fullcharge, GBMS_FCRU_LEN);
+	if (ret < 0) {
+		pr_err("failed to read GBMS_TAG_FCRU (%d)\n", ret);
+		limit->last_fullcharge = 0;
+	}
+
+	/* if bypass_chargelimit_cycles has default value of eeprom */
+	if (limit->last_fullcharge == 0xFFFF)
+		limit->last_fullcharge = 0;
+
+	maxfg_update_fcn_fcr_delta(regmap, limit);
+	if (ret < 0)
+		limit->fcn_fcr_delta = 0;
+
+	/* configure force full charge mode */
+	ret = of_property_read_s32(node, "maxim,cycle-delta-threshold",
+				   &limit->threshold_cycle_delta);
+	if (ret != 0)
+		limit->threshold_cycle_delta = DEFAULT_FORCE_FCR_UPDATE_CYCLE;
+
+	ret = of_property_read_s32(node, "maxim,fcn-fcr-delta-threshold",
+				   &limit->threshold_fcn_delta);
+	if (ret < 0)
+		limit->threshold_fcn_delta = DEFAULT_FCN_FCR_DELTA_THESHOLD;
+
+	limit->mode = MAXFG_BYPASS_MODE_CYCLE_DELTA;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(maxfg_init_bypass_charge_limit);
+
+int maxfg_update_bypass_charge_limit(struct logbuffer *lb, struct device *dev,
+				     struct maxfg_regmap *regmap,
+				     struct maxfg_bypss_charglimt *limit, int cycle)
+{
+	int ret;
+
+	ret = maxfg_update_fcn_fcr_delta(regmap, limit);
+	if (ret < 0)
+		limit->fcn_fcr_delta = 0;
+
+	ret = gbms_storage_write(GBMS_TAG_FCRU, &cycle, GBMS_FCRU_LEN);
+	if (ret < 0)
+		pr_err("failed to store FCRU (%d)\n", ret);
+
+	if (cycle == 0xFFFF)
+		limit->last_fullcharge = 0;
+	else
+		limit->last_fullcharge = cycle;
+
+	gbms_logbuffer_devlog(lb, dev, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+			      "store %d to FCRU (%d)", cycle, ret == GBMS_FCRU_LEN ? 0 : ret);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(maxfg_update_bypass_charge_limit);
+
+bool maxfg_need_force_fullcharge(struct logbuffer *lb, struct device *dev,
+				 struct maxfg_regmap *regmap, struct maxfg_bypss_charglimt *limit,
+				 int cycle)
+{
+	bool force;
+
+	switch (limit->mode) {
+	case MAXFG_BYPASS_MODE_CYCLE_DELTA:
+		/* if no last full charge record, use current cycle count as base */
+		if (limit->last_fullcharge == 0)
+			maxfg_update_bypass_charge_limit(lb, dev, regmap, limit, cycle);
+		force = cycle - limit->last_fullcharge >= limit->threshold_cycle_delta;
+		if (force)
+			gbms_logbuffer_devlog(lb, dev, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+					      "force full charge, cycle=%d, last_full=%d, thr=%d",
+					      cycle, limit->last_fullcharge,
+					      limit->threshold_cycle_delta);
+		return force;
+	case MAXFG_BYPASS_MODE_FCN_DELTA:
+		maxfg_update_fcn_fcr_delta(regmap, limit);
+		force = limit->fcn_fcr_delta > limit->threshold_fcn_delta;
+		if (force)
+			gbms_logbuffer_devlog(lb, dev, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+					      "force full charge, fcn_fcr_delta=%d, thr=%d",
+					      limit->fcn_fcr_delta,
+					      limit->threshold_cycle_delta);
+		return force;
+	default:
+		return true;
+	}
+}
+EXPORT_SYMBOL_GPL(maxfg_need_force_fullcharge);

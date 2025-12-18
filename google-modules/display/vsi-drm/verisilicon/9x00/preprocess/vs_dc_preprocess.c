@@ -444,7 +444,9 @@ bool vs_dc_register_preprocess_states(struct vs_dc_property_state_group *states,
 		__ERR_CHECK(vs_dc_property_register_state(states, &line_padding_proto), on_error);
 	if (info->sid != HW_PLANE_NOT_SUPPORTED_SID)
 		__ERR_CHECK(vs_dc_property_register_state(states, &secure_buffer_proto), on_error);
-	__ERR_CHECK(vs_dc_property_register_state(states, &data_extend_proto), on_error);
+	if (info->data_extend)
+		__ERR_CHECK(vs_dc_property_register_state(states, &data_extend_proto), on_error);
+
 	return true;
 on_error:
 	return false;

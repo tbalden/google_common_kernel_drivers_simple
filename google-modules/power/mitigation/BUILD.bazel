@@ -69,6 +69,7 @@ ddk_module(
     name = "google_bcl",
     srcs = [
         "google_bcl_core.c",
+        "google_bcl_core_helper.c",
         "google_bcl_data_logging.c",
         "google_bcl_debugfs.c",
         "google_bcl_irq_mon.c",
@@ -78,6 +79,7 @@ ddk_module(
         "ifpmic/max77759/max77759_vdroop.c",
         "ifpmic/max77779/max77779_vdroop.c",
         "ifpmic/max777x9.c",
+        "soc/userspace/userspace_bcl_qos.c",
     ],
     out = "google_bcl.ko",
     conditional_srcs = {
@@ -169,6 +171,28 @@ ddk_module(
         ":soc_gs": [],
         "//conditions:default": [],
     }),
+)
+
+ddk_module(
+    name = "google_da918x_bcl_test",
+    srcs = [
+        "core_pmic/core_pmic_defs.h",
+        "core_pmic/da918x/da9188_limits.h",
+        "test/da918x_bcl_tests.c",
+    ],
+    out = "google_da918x_bcl_test.ko",
+    defconfig = "test/kunit_defconfig",
+    kconfig = "test/Kconfig",
+    kernel_build = "//private/devices/google/common:kernel",
+    visibility = [
+        "//private/devices/google:__subpackages__",
+    ],
+    deps = [
+        ":google_bcl",
+        ":headers",
+        "//common:all_headers_aarch64",
+        "//private/google-modules/soc/rdo:rdo_soc_headers",
+    ],
 )
 
 kernel_module_group(

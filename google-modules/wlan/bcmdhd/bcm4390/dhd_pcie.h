@@ -21,7 +21,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 #ifndef dhd_pcie_h
 #define dhd_pcie_h
 
@@ -151,7 +150,6 @@ typedef struct ring_sh_info {
 /* Minimum of 250us should be elapsed to add new entry */
 #define MIN_MMIO_TRACE_TIME 250
 #define DHD_RING_IDX 0x00FF0000
-
 
 typedef struct _dhd_mmio_trace_t {
 	uint64  timestamp;
@@ -335,7 +333,6 @@ typedef enum aggr_state {
 
 #define PTM_CLKINVALID_RX_TRAP_TH	0u
 #define PTM_CLKINVALID_TX_TRAP_TH	0u
-
 
 /** Instantiated once for each hardware (dongle) instance that this DHD manages */
 typedef struct dhd_bus {

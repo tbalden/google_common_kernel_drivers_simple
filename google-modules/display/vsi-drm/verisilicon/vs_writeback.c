@@ -409,7 +409,7 @@ struct vs_writeback_connector *vs_writeback_create(const struct dc_hw_wb *hw_wb,
 	int ret;
 
 	if (!info)
-		return NULL;
+		return ERR_PTR(-EINVAL);
 
 	vs_writeback = kzalloc(sizeof(struct vs_writeback_connector), GFP_KERNEL);
 	if (!vs_writeback)

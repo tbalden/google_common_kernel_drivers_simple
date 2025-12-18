@@ -11,6 +11,7 @@
 #include <linux/nmi.h>
 #include <linux/notifier.h>
 #include <linux/panic_notifier.h>
+#include <linux/platform_device.h>
 #include <linux/reboot.h>
 #include <linux/sched/debug.h>
 #include <soc/google/google-cdd.h>
@@ -214,12 +215,24 @@ static unsigned int google_cdd_get_reason(void)
 	return cdd_ctx.reset_reason;
 }
 
-static void google_cdd_set_apc_wdt_sub_reason(unsigned int val)
+static void google_cdd_set_apc_wdt_sub_reason(struct device *dev, unsigned int val)
 {
-	void __iomem *header = google_cdd_get_header_vaddr();
+	void __iomem *header, *apc_wdt_sub_reason;
+	struct platform_device *pdev = to_platform_device(dev);
+	int ret;
 
+	header = google_cdd_get_header_vaddr();
 	if (header)
 		__raw_writel(val, header + CDD_OFFSET_APC_WDT_SUB_REASON);
+
+	apc_wdt_sub_reason = devm_platform_ioremap_resource_byname(pdev, "apc_wdt_sub_reason");
+	ret = IS_ERR(apc_wdt_sub_reason);
+	if (ret) {
+		dev_err(dev, "unable to remap apc_wdt_sub_reason(%d)\n", ret);
+		return;
+	}
+
+	__raw_writel(val, apc_wdt_sub_reason);
 }
 
 static void google_cdd_set_reboot_mode(enum reboot_mode mode)
@@ -730,7 +743,7 @@ void google_cdd_init_utils(struct device *dev)
 	}
 
 	/* Sign it from CDD_SIGN_WATCHDOG_APC_EARLY to CDD_SIGN_WATCHDOG_APC */
-	google_cdd_set_apc_wdt_sub_reason(CDD_SIGN_WATCHDOG_APC);
+	google_cdd_set_apc_wdt_sub_reason(dev, CDD_SIGN_WATCHDOG_APC);
 
 	cdd_wdd = google_wdt_wdd_get(dev);
 	if (IS_ERR(cdd_wdd)) {

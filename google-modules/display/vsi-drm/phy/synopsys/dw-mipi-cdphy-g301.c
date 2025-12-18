@@ -42,6 +42,25 @@ struct regmap_field {
 	unsigned int id_offset;
 };
 
+#define regmap_range_sized(addr, size) regmap_reg_range((addr), (addr) + (size) - 1)
+static const struct regmap_range cdphy_dump_reg_allowed[] = {
+	regmap_range_sized(0x3000, 0x6820), /*cdphy_mem_map: PPI_STARTUP_RW_COMMON_DPHY_0*/
+	regmap_range_sized(0xC000, 0x2470), /*cdphy_mem_map: CORE_DIG_DLANE_0_RW_CFG_0*/
+	regmap_range_sized(0x10000, 0x1020), /*cdphy_mem_map: PPI_RW_CPHY_TRIO0_LBERT_0*/
+	regmap_range_sized(0x14000, 0x1470), /*cdphy_mem_map: CORE_DIG_CLANE_0_RW_CFG_0*/
+};
+static const struct regmap_access_table cdphy_dump_reg_access_table = {
+	.yes_ranges = cdphy_dump_reg_allowed,
+	.n_yes_ranges = ARRAY_SIZE(cdphy_dump_reg_allowed),
+};
+static const struct regmap_range apb_dump_reg_allowed[] = {
+	regmap_range_sized(0x0, 0x50), /*apb_regbank: PLL_CFG0*/
+};
+static const struct regmap_access_table apb_dump_reg_access_table = {
+	.yes_ranges = apb_dump_reg_allowed,
+	.n_yes_ranges = ARRAY_SIZE(apb_dump_reg_allowed),
+};
+
 #define REGISTER(a) \
 	{ .name = #a, .reg = cdphy_g301->field_##a }
 static inline __maybe_unused void dw_cdphy_write_base(u32 val, void __iomem *mem, u32 reg)
@@ -1887,7 +1906,7 @@ static int dw_cdphy_set_pll(struct phy *phy, int enable)
 		//dw_cdphy_write_field(cdphy_g301->field_phy_startup_cfg3_reg, 0x0);
 
 		ret = readl_poll_timeout(cdphy_g301->u0_apb_regbank + PHY_STS, val, val & PLL_LOCK,
-					 1000, PHY_STATUS_TIMEOUT_US);
+					 50, PHY_STATUS_TIMEOUT_US);
 		if (ret) {
 			/* TODO: dump corresponding CSR */
 			dev_err(&cdphy->phy->dev, "%s: Failed to wait PHY Lock\n", __func__);
@@ -1936,14 +1955,24 @@ static int dw_dphy_configure_g301(struct phy *phy, union phy_configure_opts *opt
 
 	dev_info(&cdphy->phy->dev, "Configuring CD-PHY G301\n");
 	pr_info("datarate = %d\n", cdphy->datarate);
+
 	if (cdphy->datarate != cdphy_g301->hs_config.datarate) {
 		struct pll_config pll_config;
 		struct dphy_hs_regs dphy_regs;
 		struct cphy_hs_regs cphy_regs;
-		u32 pll_ref_clk_khz;
 
-		pll_ref_clk_khz = clk_get_rate(cdphy->pllref_clk) / 1000;
-		ret = pll_calc(cdphy->datarate, pll_ref_clk_khz, cdphy->pll_ssc, &pll_config);
+		cdphy->pll_ref_clk_khz = clk_get_rate(cdphy->pllref_clk) / 1000;
+		if (!cdphy->pll_ref_clk_khz) {
+			dev_warn(&cdphy->phy->dev, "%s: invalid pll reference clock rate %u Khz\n",
+				__func__, cdphy->pll_ref_clk_khz);
+			return -EINVAL;
+		}
+
+		dev_dbg(&cdphy->phy->dev, "%s: pll_ref_clk_khz %u Khz\n", __func__,
+			cdphy->pll_ref_clk_khz);
+
+		ret = pll_calc(cdphy->datarate, cdphy->pll_ref_clk_khz, cdphy->pll_ssc,
+			       &pll_config);
 		if (ret == 0) {
 			if (cdphy->is_cphy)
 				ret = cphy_regs_calc(cdphy->datarate, &cphy_regs);
@@ -2044,7 +2073,7 @@ static int dw_dphy_configure_g301(struct phy *phy, union phy_configure_opts *opt
 
 	/* Step 10 */
 	ret = readl_poll_timeout(cdphy_g301->u0_apb_regbank + PHY_STS, val,
-				 val & PHY_READY, 1000, PHY_STATUS_TIMEOUT_US);
+				 val & PHY_READY, 50, PHY_STATUS_TIMEOUT_US);
 	if (ret) {
 		dev_err(&cdphy->phy->dev, "Failed to wait PHY Lock, step 10.b\n");
 		return ret;
@@ -2516,11 +2545,13 @@ static int reg_dump_show(struct seq_file *s, void *data)
 		return ret;
 	}
 
-	ret_dump = gs_reg_dump("CDPHY-TX", cdphy_g301->base, 0, cdphy_g301->tx_reg_size, &p);
+	ret_dump = gs_reg_dump_with_skips("CDPHY-TX", cdphy_g301->base, 0, cdphy_g301->tx_reg_size,
+					  &p, &cdphy_dump_reg_access_table);
 	if (ret_dump)
 		goto out;
-	ret_dump = gs_reg_dump("U0-APB", cdphy_g301->u0_apb_regbank, 0, cdphy_g301->u0_apb_reg_size,
-			       &p);
+	ret_dump = gs_reg_dump_with_skips("U0-APB", cdphy_g301->u0_apb_regbank, 0,
+					  cdphy_g301->u0_apb_reg_size, &p,
+					  &apb_dump_reg_access_table);
 
 out:
 	ret = pm_runtime_put_sync(dev);

@@ -30,9 +30,8 @@ struct g2d_writeback_connector {
 };
 
 struct g2d_writeback_funcs {
-	void (*config)(struct g2d_writeback_connector *wb_connector, struct drm_framebuffer *fb);
-	int (*check)(struct g2d_writeback_connector *wb_connector, struct drm_framebuffer *fb,
-		     struct drm_display_mode *mode, struct drm_connector_state *state);
+	void (*commit)(struct g2d_writeback_connector *wb_connector, struct drm_framebuffer *fb);
+	int (*check)(struct drm_device *drm_dev, const struct drm_framebuffer *fb);
 };
 
 struct g2d_device;

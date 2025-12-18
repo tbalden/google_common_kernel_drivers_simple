@@ -21,7 +21,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 /* include files */
 #include <typedefs.h>
 #include <bcmutils.h>
@@ -149,7 +148,6 @@ typedef struct dhdpcie_info {
 	void *smmu_cxt;
 #endif /* USE_SMMU_ARCH_MSM */
 } dhdpcie_info_t;
-
 
 struct pcos_info {
 	dhdpcie_info_t *pc;
@@ -467,7 +465,6 @@ dhd_chip_support_ptm(dhd_bus_t *bus)
 	}
 	return FALSE;
 }
-
 
 #ifdef BT_OVER_PCIE
 int dhd_bus_pwr_off(dhd_pub_t *dhdp, int reason)
@@ -1613,7 +1610,6 @@ uint32 dhd_debug_get_rc_linkcap(dhd_bus_t *bus)
 	return linkcap;
 }
 
-
 static void dhdpcie_config_save_restore_coherent(dhd_bus_t *bus, bool state)
 {
 	if (bus->coreid == ARMCA7_CORE_ID) {
@@ -1628,7 +1624,6 @@ static void dhdpcie_config_save_restore_coherent(dhd_bus_t *bus, bool state)
 		}
 	}
 }
-
 
 int dhdpcie_pci_suspend_resume(dhd_bus_t *bus, bool state)
 {
@@ -1733,7 +1728,6 @@ dhdpcie_bus_register(void)
 
 	return error;
 }
-
 
 void
 dhdpcie_bus_unregister(void)
@@ -2033,7 +2027,6 @@ Parametrs:
 
 1: struct pci_dev *pdev   -- pci device structure
 2: pci_res                       -- structure containing pci configuration space values
-
 
 Return value:
 
@@ -2624,7 +2617,6 @@ Description:
 Interrupt Service routine checks for the status register,
 disable interrupt and queue DPC if mail box interrupts are raised.
 */
-
 
 irqreturn_t
 dhdpcie_isr(int irq, void *arg)

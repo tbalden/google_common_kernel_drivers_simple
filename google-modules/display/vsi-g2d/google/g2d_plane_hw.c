@@ -8,6 +8,7 @@
 #include "vs_g2d_reg_sc.h"
 #include "g2d_sc_hw.h"
 #include "g2d_plane_hw.h"
+#include "g2d_pvric_hw.h"
 
 /* The default horizontal scale coefficient data with the filter tap of 9. */
 static const u32 default_scaling_coeff_horizontal[] = {
@@ -112,6 +113,7 @@ static void plane_set_fb(struct sc_hw *hw, u8 hw_id, struct sc_hw_fb *fb)
 	/* Force Dither to disabled since it's not yet supported */
 	config = VS_SET_FIELD(config, SCREG_LAYER0_CONFIG, DITHER,
 			      SCREG_LAYER0_CONFIG_DITHER_DISABLED);
+
 	sc_write(hw, SCREG_LAYER0_CONFIG_Address + offset, config);
 
 	dev_dbg(hw->dev, "%s: finished fb config reg writes on hw_id %d", __func__, hw_id);
@@ -279,5 +281,6 @@ void plane_commit(struct sc_hw *hw, u8 layer_id)
 			plane_set_roi(hw, i, &plane->roi);
 		plane_set_y2r(hw, i, &plane->y2r);
 		plane_set_scale(hw, i, &plane->scale);
+		pvric_hw_plane_commit(hw, layer_id);
 	}
 }

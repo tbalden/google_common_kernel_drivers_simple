@@ -20,7 +20,8 @@
 #include "of.h"
 #include "gpu_uevent.h"
 
-#define FW_ABI_VERSION 6
+#define FW_ABI_VERSION 18
+#define PIXEL_PA_RANGE_16K_PAGE_ABI_VERSION 15
 
 struct pixel_gpu_secure;
 

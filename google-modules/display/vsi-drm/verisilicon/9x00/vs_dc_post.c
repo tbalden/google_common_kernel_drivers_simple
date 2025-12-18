@@ -753,6 +753,11 @@ static void dc_fabrt_boost_kwork(struct kthread_work *work)
 {
 	struct vs_crtc *vs_crtc = container_of(work, struct vs_crtc, fboost_work);
 	int ret;
+	struct device *dev = vs_crtc->dev;
+	struct vs_dc *dc = dev_get_drvdata(dev);
+
+	if (!dc->fabrt_devfreq)
+		return;
 
 	DPU_ATRACE_BEGIN("DPU Boost_FABRT");
 	vs_qos_set_fabrt_boost(&vs_crtc->base);
@@ -1415,6 +1420,26 @@ static int vs_dc_check_wb_r2y(struct device *dev, struct vs_crtc *vs_crtc,
 	return 0;
 }
 
+static int vs_dc_check_wb_secure(struct device *dev, struct vs_crtc *vs_crtc,
+				 struct vs_writeback_connector_state *vs_wb_state,
+				 struct drm_framebuffer *fb)
+{
+	struct vs_dc *dc = dev_get_drvdata(dev);
+	struct dc_hw *hw = &dc->hw;
+
+	/*
+	 * Checking the hardware mask is superior to checking for secure planes, since secure
+	 * enable/disable is done asynchronously to commits and there may be overlaps.
+	 */
+	if (!bitmap_empty(hw->secured_layers_mask, HW_PLANE_NUM)) {
+		dev_err(dev, "Rejecting writeback because secure is still enabled. mask: 0x%*pbl\n",
+			HW_PLANE_NUM, hw->secured_layers_mask);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int vs_dc_check_display(struct device *dev, struct drm_crtc *crtc,
 			       struct drm_crtc_state *crtc_state)
 {
@@ -1885,6 +1910,10 @@ static int vs_dc_check_writeback(struct vs_writeback_connector *wb_connector,
 	if (ret)
 		return ret;
 
+	ret = vs_dc_check_wb_secure(dev, vs_crtc, vs_wb_state, fb);
+	if (ret)
+		return ret;
+
 	if (!vs_dc_check_drm_property(dc, wb_info->id, vs_wb_state->drm_states,
 				      wb_connector->properties.num, vs_wb_state))
 		return -EINVAL;
@@ -2216,7 +2245,7 @@ static int wb_bind(struct device *dev, struct device *master, void *data)
 
 		writeback = vs_writeback_create(hw_wb, drm_dev, wb_info, valid_crtcs);
 
-		if (!writeback) {
+		if (IS_ERR(writeback)) {
 			dev_err(dev, "Failed to create writeback connector.\n");
 			ret = -ENOMEM;
 			goto err_cleanup_planes;

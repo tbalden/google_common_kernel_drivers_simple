@@ -1366,6 +1366,8 @@
 
 		reg = <0 0x3C568000 0 0x2000>;
 
+		power-domains = <&hsio_s_ufs_pd>;
+
 		hsios_stby_ufs_refclk: hsios_stby_ufs_refclk {
 			pins = "XHSIOS_UFS_REFCLK";
 			function = "hsios_stby_ufs";

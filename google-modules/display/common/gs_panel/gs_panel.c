@@ -2221,8 +2221,11 @@ int gs_dsi_panel_common_init(struct mipi_dsi_device *dsi, struct gs_panel *ctx)
 	gs_panel_init_te2(ctx);
 
 	/* LHBM */
-	if (gs_panel_has_func(ctx, set_local_hbm_mode))
-		gs_panel_init_lhbm(ctx);
+	if (gs_panel_has_func(ctx, set_local_hbm_mode)) {
+		ret = gs_panel_init_lhbm(ctx);
+		if (ret)
+			return ret;
+	}
 
 	if (gs_panel_has_func(ctx, refresh_ctrl))
 		gs_panel_init_refresh_ctrl_work_data(ctx);

@@ -57,6 +57,13 @@ enum phy_patch_mode {
 	PHY_BOOTLD_BYPASS_MODE = 2,
 };
 
+struct reg_info {
+	u32 offset;
+	const char *name;
+};
+
+#define REG_INFO(name) { name, #name }
+
 /**
  * Platform-specific operations.
  */
@@ -91,6 +98,9 @@ struct ufs_google_host {
 	void __iomem *ufs_top_mmio;
 	void __iomem *ufs_phy_sram_mmio;
 	void __iomem *ufs_ss_mmio;
+	void __iomem *hsios_psm_status_mmio;
+	void __iomem *ufs_hc_psm_status_mmio;
+	void __iomem *ufs_phy_psm_status_mmio;
 	struct ufs_vreg *vdd0p75;
 	struct ufs_vreg *vdd1p2;
 	struct reset_control *a_rst;
@@ -109,6 +119,7 @@ struct ufs_google_host {
 	struct pinctrl_state *refclk_off_state;
 	struct clk *hsios_aux_clk;
 	struct mphy_reg *phy_cal_data;
+	struct delayed_work ufs_sleep_work;
 	int phy_cal_size;
 	bool pm_request_active;
 	bool pm_set;
@@ -128,6 +139,8 @@ enum google_host_cap {
 	GCAP_HC_AH8_PG = BIT(1),
 	GCAP_HC_SWH8_PG = BIT(2),
 	GCAP_PHY_CAL = BIT(3), /* calibration */
+	GCAP_LOCAL_RPM = BIT(4),
+	GCAP_LOCAL_SWH8 = BIT(5),
 
 	/* Resources CAPs - starts from bit 32 */
 	GCAP_RSC_IP_IDLE = BIT(32),

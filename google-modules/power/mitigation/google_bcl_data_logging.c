@@ -36,8 +36,11 @@ static void log_ifpmic_power(struct bcl_device *bcl_dev)
 static void data_logging_main_odpm_lpf_task(struct bcl_device *bcl_dev)
 {
 	core_pmic_main_meter_read_lpf_data(bcl_dev, bcl_dev->br_stats);
-	compute_mitigation_modules(bcl_dev, bcl_dev->main_mitigation_conf,
-				   bcl_dev->br_stats->main_odpm_lpf.value);
+	compute_odpm_lpf(bcl_dev,
+				   bcl_dev->br_stats->main_odpm_lpf.time,
+				   bcl_dev->main_mitigation_conf,
+				   &bcl_dev->br_stats->main_odpm_lpf,
+				   bcl_dev->max_odpm_stats->main_max_odpm_lpf);
 }
 
 static void data_logging_sub_odpm_lpf_task(struct bcl_device *bcl_dev)
@@ -48,9 +51,11 @@ static void data_logging_sub_odpm_lpf_task(struct bcl_device *bcl_dev)
 	if (!IS_ENABLED(CONFIG_REGULATOR_S2MPG14))
 		return;
 	core_pmic_sub_meter_read_lpf_data(bcl_dev, bcl_dev->br_stats);
-	compute_mitigation_modules(bcl_dev,
+	compute_odpm_lpf(bcl_dev,
+				   bcl_dev->br_stats->sub_odpm_lpf.time,
 				   bcl_dev->sub_mitigation_conf,
-				   bcl_dev->br_stats->sub_odpm_lpf.value);
+				   &bcl_dev->br_stats->sub_odpm_lpf,
+				   bcl_dev->max_odpm_stats->sub_max_odpm_lpf);
 }
 
 static void google_bcl_write_irq_triggered_event(struct bcl_device *bcl_dev, int idx)
@@ -113,8 +118,10 @@ void google_bcl_start_data_logging(struct bcl_device *bcl_dev, int idx)
 
 void google_bcl_remove_data_logging(struct bcl_device *bcl_dev)
 {
-	if (bcl_dev->data_logging_initialized)
+	if (bcl_dev->data_logging_initialized) {
 		kfree(bcl_dev->br_stats);
+		kfree(bcl_dev->max_odpm_stats);
+	}
 	bcl_dev->data_logging_initialized = false;
 }
 
@@ -125,6 +132,12 @@ int google_bcl_init_data_logging(struct bcl_device *bcl_dev)
 	bcl_dev->br_stats = kmalloc(bcl_dev->br_stats_size, GFP_KERNEL);
 	if (!bcl_dev->br_stats)
 		return -ENOMEM;
+	bcl_dev->max_odpm_stats = kzalloc(sizeof(struct max_odpm_stats), GFP_KERNEL);
+	if (!bcl_dev->max_odpm_stats) {
+		kfree(bcl_dev->br_stats);
+		return -ENOMEM;
+	}
+
 	google_bcl_init_brownout_stats(bcl_dev);
 	bcl_dev->data_logging_initialized = true;
 

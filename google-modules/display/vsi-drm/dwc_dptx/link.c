@@ -708,6 +708,7 @@ fail:
 		dptx_phy_set_pattern(dptx, DPTX_PHYIF_CTRL_TPS_NONE);
 		dptx_link_training_pattern_set(dptx, DP_TRAINING_PATTERN_DISABLE);
 		dptx_err(dptx, "--- LINK TRAINING FAILED: %d ---\n", retval);
+		dptx->stats.link_negotiation_failures++;
 	} else {
 		dptx_err(dptx, "--- LINK TRAINING FAILED: sink disconnected %d ---\n", retval);
 	}
@@ -835,6 +836,7 @@ int dptx_link_check_status(struct dptx *dptx)
 	    (!drm_dp_channel_eq_ok(dptx->link.status, dptx->link.lanes) ||
 	     !drm_dp_clock_recovery_ok(dptx->link.status, dptx->link.lanes))) {
 		dptx_dbg_link(dptx, "%s: Retraining link\n", __func__);
+		dptx->stats.link_unstable_failures++;
 		handle_hotunplug_core(dptx);
 		handle_hotplug_core(dptx);
 	}

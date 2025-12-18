@@ -3,6 +3,7 @@
  * Copyright (C) 2025 Google, LLC.
  */
 
+#include <linux/io.h>
 #include <linux/types.h>
 
 #include <gs_drm/gs_reg_dump.h>
@@ -29,6 +30,7 @@ inline void sc_write(struct sc_hw *hw, u32 reg, u32 value)
 	writel(value, hw->reg_base + reg - G2D_IP_OFFSET);
 }
 
+/* TODO(b/421978624) Remove this callback, it's fine to call plane_commit directly from hw_commit */
 static const struct sc_hw_funcs hw_func = {
 	.plane = plane_commit,
 };
@@ -36,6 +38,11 @@ static const struct sc_hw_funcs hw_func = {
 void sc_hw_commit(struct sc_hw *hw, u8 display_id)
 {
 	hw->func->plane(hw, display_id);
+}
+
+void sc_hw_wb_commit(struct sc_hw *hw, u8 display_id)
+{
+	wb_hw_commit(hw, display_id);
 }
 
 void sc_hw_start_trigger(struct sc_hw *hw, u8 display_id)

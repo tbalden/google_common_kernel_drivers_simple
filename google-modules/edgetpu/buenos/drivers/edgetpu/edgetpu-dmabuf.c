@@ -168,7 +168,7 @@ int edgetpu_unmap_dmabuf(struct edgetpu_device_group *group, tpu_addr_t tpu_addr
 	struct edgetpu_mapping *map;
 
 	edgetpu_mapping_lock(mappings);
-	map = edgetpu_mapping_find_locked(mappings, tpu_addr);
+	map = edgetpu_mapping_find_locked(mappings, tpu_addr, /*limited=*/false);
 	if (!map) {
 		edgetpu_mapping_unlock(mappings);
 		etdev_err(group->etdev, "unmap group=%u tpu_addr=%pad not found",

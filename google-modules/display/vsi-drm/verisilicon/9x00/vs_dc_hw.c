@@ -24,6 +24,7 @@
 #include "vs_dc_reg_fe0.h"
 #include "vs_dc_reg_fe1.h"
 #include "vs_dc_sram.h"
+#include "display_compress/vs_dc_dsc.h"
 #include "postprocess/vs_dc_display_blender.h"
 #include "postprocess/vs_dc_postprocess.h"
 #include "postprocess/vs_dc_histogram.h"
@@ -40,6 +41,7 @@
 #define UNDERRUN_MARGIN_PCT 99
 /* Reference clock in MHz*/
 #define DPU_REF_CLK_MHZ 100
+#define PRINT_NAME_WIDTH "%-25s"
 
 static u8 display_wb_pos[HW_DISPLAY_NUM] = { VS_WB_POS_CNT, VS_WB_POS_CNT, VS_WB_POS_CNT,
 					     VS_WB_POS_CNT, VS_WB_POS_CNT, VS_WB_POS_CNT };
@@ -92,6 +94,10 @@ static const struct dc_hw_funcs hw_func;
 static const struct dc_hw_sub_funcs hw_sub_func[];
 static void wb_enable_shadow(struct dc_hw *hw, u8 hw_id, bool enable);
 static void wb_ex_enable_shadow(struct dc_hw *hw, u8 hw_id, bool enable);
+static void print_display_state(struct seq_file *s, const struct dc_hw_display *display,
+				const u8 indent);
+static void print_plane_state(struct seq_file *s, const struct dc_hw_plane *plane, const u8 indent);
+static void print_wb_state(struct seq_file *s, const struct dc_hw_wb *wb, const u8 indent);
 
 u8 dc_hw_get_plane_id(u8 layer, struct dc_hw *hw)
 {
@@ -661,6 +667,7 @@ int dc_fe0_hw_init(struct dc_hw *hw)
 	for (i = 0; i < hw->info->plane_fe0_num; i++) {
 		plane_info = &hw->info->planes_fe0[i];
 		hw->plane[i].info = plane_info;
+		hw->plane[i].func.print_state = print_plane_state;
 
 		/* Write scale coeffs the first time a plane uses scaling */
 		if (plane_info->min_scale != VS_PLANE_NO_SCALING ||
@@ -705,6 +712,7 @@ int dc_fe1_hw_init(struct dc_hw *hw)
 		plane_info = &hw->info->planes_fe1[i];
 		j = hw->info->plane_fe0_num + i;
 		hw->plane[j].info = plane_info;
+		hw->plane[j].func.print_state = print_plane_state;
 
 		/* Write scale coeffs the first time a plane uses scaling */
 		if (plane_info->min_scale != VS_PLANE_NO_SCALING ||
@@ -787,6 +795,7 @@ int dc_be_hw_init(struct dc_hw *hw)
 	for (i = 0; i < hw->info->display_num; i++) {
 		display_info = &hw->info->displays[i];
 		hw->display[i].info = display_info;
+		hw->display[i].func.print_state = print_display_state;
 		hw_id = display_info->id;
 
 		if (display_info->min_scale != FRAC_16_16(1, 1) ||
@@ -833,6 +842,7 @@ int dc_wb_hw_init(struct dc_hw *hw)
 	for (i = 0; i < hw->info->wb_num; i++) {
 		wb_info = &hw->info->write_back[i];
 		hw->wb[i].info = wb_info;
+		hw->wb[i].func.print_state = print_wb_state;
 
 		/* Initialize property states */
 		if (!vs_dc_register_writeback_states(&hw->wb[i].states, wb_info)) {
@@ -902,48 +912,50 @@ err_cleanup:
 
 void dc_fe0_hw_deinit(struct dc_hw *hw)
 {
-	int i;
+	u8 i;
 
-	for (i = 0; i < hw->info->layer_fe0_num; i++)
+	for (i = 0; i < hw->info->layer_fe0_num; i++) {
 		vs_dc_deinitialize_property_states(&hw->plane[i].states);
+		memset(&hw->plane[i], 0, sizeof(struct dc_hw_plane));
+	}
 }
 
 void dc_fe1_hw_deinit(struct dc_hw *hw)
 {
-	int i;
+	u8 i;
 
-	for (i = hw->info->layer_fe0_num; i < hw->info->layer_num; i++)
+	for (i = hw->info->layer_fe0_num; i < hw->info->layer_num; i++) {
 		vs_dc_deinitialize_property_states(&hw->plane[i].states);
+		memset(&hw->plane[i], 0, sizeof(struct dc_hw_plane));
+	}
 }
 
 void dc_be_hw_deinit(struct dc_hw *hw)
 {
-	int i;
+	u8 i;
 
-	for (i = 0; i < hw->info->display_num; i++)
+	for (i = 0; i < hw->info->display_num; i++) {
 		vs_dc_deinitialize_property_states(&hw->display[i].states);
+		memset(&hw->display[i], 0, sizeof(struct dc_hw_display));
+	}
 }
 
 void dc_wb_hw_deinit(struct dc_hw *hw)
 {
-	int i;
+	u8 i;
 
-	for (i = 0; i < hw->info->wb_num; i++)
+	for (i = 0; i < hw->info->wb_num; i++) {
 		vs_dc_deinitialize_property_states(&hw->wb[i].states);
+		memset(&hw->wb[i], 0, sizeof(struct dc_hw_wb));
+	}
 }
 
 void dc_hw_deinit(struct dc_hw *hw)
 {
-	int i;
-
-	for (i = 0; i < hw->info->layer_num; i++)
-		vs_dc_deinitialize_property_states(&hw->plane[i].states);
-
-	for (i = 0; i < hw->info->display_num; i++)
-		vs_dc_deinitialize_property_states(&hw->display[i].states);
-
-	for (i = 0; i < hw->info->wb_num; i++)
-		vs_dc_deinitialize_property_states(&hw->wb[i].states);
+	dc_fe0_hw_deinit(hw);
+	dc_fe1_hw_deinit(hw);
+	dc_be_hw_deinit(hw);
+	dc_wb_hw_deinit(hw);
 }
 
 void dc_hw_reinit(struct dc_hw *hw)
@@ -954,6 +966,7 @@ void dc_hw_reinit(struct dc_hw *hw)
 	dc_be_hw_init(hw);
 	dc_fe0_hw_init(hw);
 	dc_fe1_hw_init(hw);
+	dc_wb_hw_init(hw);
 }
 
 void dc_hw_update_plane(struct dc_hw *hw, u8 id, struct dc_hw_fb *fb)
@@ -1330,6 +1343,18 @@ void dc_hw_config_wb_status(struct dc_hw *hw, u8 id, bool config)
 		wb->config_status = !!config;
 }
 
+void dc_hw_enable_clock_domain_iso(struct dc_hw *hw, bool enable)
+{
+	u32 config = 0;
+
+	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DSI0_ISOLATE, !!enable);
+	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DSI1_ISOLATE, !!enable);
+	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DP0_ISOLATE, !!enable);
+	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DP1_ISOLATE, !!enable);
+
+	dc_write_immediate(hw, DCREG_CLOCK_DOMAIN_ISOLATION_Address, config);
+}
+
 void dc_hw_enable_frame_irqs(struct dc_hw *hw, u8 id, bool enable)
 {
 	u32 config = 0, output_id = hw->display[id].output_id;
@@ -1419,8 +1444,15 @@ void dc_hw_enable_vblank_irqs(struct dc_hw *hw, u8 id, bool enable)
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE), config);
 
 				if (enable) {
-					if (set_output_start)
+					if (set_output_start) {
+						dc_write(hw,
+							 VS_SET_OUTPUT_FIELD(DCREG_OUTPUT,
+									     output_id, Address),
+							 VS_SET_FIELD(0, DCREG_OUTPUT0, WORK_MODE,
+								      1));
+
 						dc_hw_set_output_start(hw, output_id, true);
+					}
 
 					dc_write_immediate(hw,
 							   VS_SET_PANEL_FIELD(DCREG_SH_OUTPUT,
@@ -1451,8 +1483,15 @@ void dc_hw_enable_vblank_irqs(struct dc_hw *hw, u8 id, bool enable)
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE), config);
 
 				if (enable) {
-					if (set_output_start)
+					if (set_output_start) {
+						dc_write(hw,
+							 VS_SET_OUTPUT_FIELD(DCREG_OUTPUT,
+									     output_id, Address),
+							 VS_SET_FIELD(0, DCREG_OUTPUT0, WORK_MODE,
+								      1));
+
 						dc_hw_set_output_start(hw, output_id, true);
+					}
 
 					dc_write_immediate(hw,
 							   VS_SET_PANEL_FIELD(DCREG_SH_OUTPUT,
@@ -3754,8 +3793,8 @@ static void plane_set_y2r(struct dc_hw *hw, u8 hw_id, struct dc_hw_y2r *y2r_conf
 static void plane_set_scale(struct dc_hw *hw, u8 hw_id, struct dc_hw_scale *scale)
 {
 	u32 config = 0;
-	u32 offset_x;
-	u32 offset_y;
+	u32 offset_x = 0x0;
+	u32 offset_y = 0x0;
 
 	trace_config_hw_layer_feature_en("SCALE", hw_id, scale->enable);
 	trace_config_hw_layer_feature_en("SCALE_COEFF", hw_id, scale->coefficients_enable);
@@ -3777,22 +3816,6 @@ static void plane_set_scale(struct dc_hw *hw, u8 hw_id, struct dc_hw_scale *scal
 			dc_hw_config_load_filter(hw, hw_id, NULL, NULL);
 
 		scale->coefficients_dirty = false;
-	}
-
-	/*
-	 * See b/294939884 for details on offset calculation.
-	 * Note that factors are computed as src/dest, so scale factors < 1 are _upscaling_
-	 */
-	if (scale->stretch_mode) {
-		offset_x = (scale->factor_x < VS_PLANE_NO_SCALING) ?
-				   (scale->factor_x >> 1) + (8 << 7) :
-				   0x0;
-		offset_y = (scale->factor_y < VS_PLANE_NO_SCALING) ?
-				   (scale->factor_y >> 1) + (8 << 7) :
-				   0x0;
-	} else {
-		offset_x = (scale->factor_x < VS_PLANE_NO_SCALING) ? 0x8000 : 0x0;
-		offset_y = (scale->factor_y < VS_PLANE_NO_SCALING) ? 0x8000 : 0x0;
 	}
 
 	dc_write(hw, VS_SH_LAYER_FIELD(hw_id, SCALE_INITIAL_OFFSET_X_Address), offset_x);
@@ -3818,8 +3841,8 @@ static void plane_set_scale(struct dc_hw *hw, u8 hw_id, struct dc_hw_scale *scal
 
 	trace_config_hw_layer_feature(
 		"SCALE_DATA", hw_id,
-		"en:%d stretch_mode:%d factor_[x y]: %u %u offset_[x y]: %u %u", scale->enable,
-		scale->stretch_mode, scale->factor_x, scale->factor_y, offset_x, offset_y);
+		"en:%d factor_[x y]: %u %u offset_[x y]: %u %u", scale->enable,
+		scale->factor_x, scale->factor_y, offset_x, offset_y);
 }
 
 static void plane_set_roi(struct dc_hw *hw, u8 hw_id, struct dc_hw_roi *roi_hw)
@@ -4217,6 +4240,11 @@ static void plane_set_sram(struct dc_hw *hw, u8 hw_id, struct dc_hw_sram_pool *s
 			hw_size = DCREG_SH_LAYER0_DMA_SRAM_SIZE_VALUE_KBYTE384;
 		else
 			hw_size = DCREG_SH_LAYER0_DMA_SRAM_SIZE_VALUE_KBYTE64;
+
+		/* TODO(b/332951297) disallow 320 and 384 KB SRAM allocations */
+		if (sram->sp_size >= (ALIGN64KB * 5))
+			dev_err_ratelimited(hw->dev, "invalid DMA SRAM alloc:%uK",
+					    sram->sp_size >> 10);
 		dc_write(hw, VS_SET_FE_FIELD(DCREG_SH_LAYER, hw_id, DMA_SRAM_SIZE_Address),
 			 hw_size);
 	} else if (sram->sp_unit_size == SRAM_UNIT_SIZE_32KB) {
@@ -5626,6 +5654,8 @@ void dc_hw_display_frame_done(struct dc_hw *hw, u8 display_id,
 {
 	/* histogram channels + rgb */
 	vs_dc_hist_frame_done(hw, display_id, irq_status);
+
+	dc_hw_read_dsc_status(hw, display_id);
 }
 
 /*
@@ -5785,7 +5815,22 @@ const void *vs_dc_hw_get_wb_property(const struct dc_hw *hw, u32 hw_id, const ch
 	return vs_dc_property_get_by_name(&wb->states, prop_name, out_enabled);
 }
 
-#if IS_ENABLED(CONFIG_DEBUG_FS)
+static const struct regmap_access_table *get_allowed_regmap_access_table(struct dc_hw *hw)
+{
+	if (!hw->info->dump_reg_access_table_secure)
+		return hw->info->dump_reg_access_table;
+	if (!bitmap_empty(hw->secured_layers_mask, HW_PLANE_NUM))
+		return hw->info->dump_reg_access_table_secure;
+	return hw->info->dump_reg_access_table;
+}
+
+int dc_hw_reg_dump_custom(struct dc_hw *hw, struct drm_printer *p, const char *desc, u32 offset,
+			  u32 size)
+{
+	return gs_reg_dump_with_skips(desc, hw->reg_base, offset, size, p,
+				      get_allowed_regmap_access_table(hw));
+}
+
 int dc_hw_reg_dump(struct dc_hw *hw, struct drm_printer *p, enum dc_hw_reg_bank_type reg_type)
 {
 	u32 fe0_src, fe1_src, be_src;
@@ -5811,8 +5856,7 @@ int dc_hw_reg_dump(struct dc_hw *hw, struct drm_printer *p, enum dc_hw_reg_bank_
 			 VS_SET_FIELD_PREDEF(be_src, DCREG_BE_REG_READ_SRC, SEL, ACTIVE) :
 			 VS_SET_FIELD_PREDEF(be_src, DCREG_BE_REG_READ_SRC, SEL, SHADOW));
 
-	ret = gs_reg_dump_with_skips("DPU", hw->reg_base, hw->reg_dump_offset, hw->reg_dump_size, p,
-				     hw->info->dump_reg_access_table);
+	ret = dc_hw_reg_dump_custom(hw, p, "DPU", hw->reg_dump_offset, hw->reg_dump_size);
 
 	dc_write(hw, DCREG_FE0_REG_READ_SRC_Address, fe0_src);
 	dc_write(hw, DCREG_FE1_REG_READ_SRC_Address, fe1_src);
@@ -5820,7 +5864,22 @@ int dc_hw_reg_dump(struct dc_hw *hw, struct drm_printer *p, enum dc_hw_reg_bank_
 
 	return ret;
 }
-#endif
+
+void dc_hw_collect_reg_dump(struct device *dev, enum dc_hw_reg_dump_options option,
+			    enum dc_hw_reg_bank_type reg_type)
+{
+	struct drm_printer p = drm_info_printer(dev);
+	struct vs_dc *dc = dev_get_drvdata(dev);
+
+	if (option == DC_HW_REG_DUMP_IN_NONE)
+		return;
+
+	if (option == DC_HW_REG_DUMP_IN_CONSOLE)
+		dc_hw_reg_dump(&dc->hw, &p, DC_HW_REG_BANK_ACTIVE);
+
+	if (option == DC_HW_REG_DUMP_IN_TRACE)
+		dc_hw_reg_dump(&dc->hw, NULL, DC_HW_REG_BANK_ACTIVE);
+}
 
 #if IS_ENABLED(CONFIG_VERISILICON_REGMAP)
 void dc_write(struct dc_hw *hw, u32 reg, u32 value)
@@ -6004,4 +6063,425 @@ int dc_hw_get_ltm_hist(struct dc_hw *hw, u8 hw_id, struct drm_vs_ltm_histogram_d
 	DPU_ATRACE_END(__func__);
 
 	return rc;
+}
+
+void print_tab(struct seq_file *s, u8 indent)
+{
+	while (indent--)
+		seq_puts(s, "\t");
+}
+
+void print_hw_states(struct seq_file *s, const struct vs_dc_property_state_group *states, u8 indent)
+{
+	u8 j;
+
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": %d items\n", "states", states->num);
+	for (j = 0; j < states->num; j++) {
+		const struct vs_dc_property_state *item = &states->items[j];
+
+		print_tab(s, indent + 1);
+		seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", item->proto->name,
+			   item->enable, item->dirty);
+	}
+}
+
+void print_hw_display_mode(struct seq_file *s, const struct dc_hw_display_mode *mode, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d\n", "mode", mode->enable);
+}
+
+void print_hw_display_bld_size(struct seq_file *s, const struct dc_hw_size *bld_size, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "bld_size", bld_size->enable,
+		   bld_size->dirty);
+}
+
+void print_hw_display_data_ext(struct seq_file *s, const struct dc_hw_data_extend *data_ext,
+			       u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "data_ext", data_ext->enable,
+		   data_ext->dirty);
+}
+
+void print_hw_display_gamma(struct seq_file *s, const struct dc_hw_gamma *gamma, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=[%d %d %d], dirty=%d\n", "gamma", gamma->enable[0],
+		   gamma->enable[1], gamma->enable[2], gamma->dirty);
+}
+
+void print_hw_display_wb(struct seq_file *s, const struct dc_hw_display_wb *wb, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "wb", wb->enable, wb->dirty);
+}
+
+void print_hw_display_blur_mask(struct seq_file *s, const struct dc_hw_fb *blur_mask, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "blur_mask", blur_mask->enable,
+		   blur_mask->dirty);
+}
+
+void print_hw_display_brightness_mask(struct seq_file *s, const struct dc_hw_fb *brightness_mask,
+				      u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "brightness_mask",
+		   brightness_mask->enable, brightness_mask->dirty);
+}
+
+void print_hw_display_ltm_enable(struct seq_file *s, const struct dc_hw_ltm_enable *ltm_enable,
+				 u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_enable", ltm_enable->enable,
+		   ltm_enable->dirty);
+}
+
+void print_hw_display_ltm_degamma(struct seq_file *s, const struct dc_hw_ltm_xgamma *ltm_degamma,
+				  u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_degamma",
+		   ltm_degamma->enable, ltm_degamma->dirty);
+}
+
+void print_hw_display_ltm_gamma(struct seq_file *s, const struct dc_hw_ltm_xgamma *ltm_gamma,
+				u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_gamma", ltm_gamma->enable,
+		   ltm_gamma->dirty);
+}
+
+void print_hw_display_ltm_luma(struct seq_file *s, const struct dc_hw_ltm_luma *ltm_luma, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_luma", ltm_luma->enable,
+		   ltm_luma->dirty);
+}
+
+void print_hw_display_freq_decomp(struct seq_file *s,
+				  const struct dc_hw_ltm_freq_decomp *freq_decomp, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "freq_decomp",
+		   freq_decomp->enable, freq_decomp->dirty);
+}
+
+void print_hw_display_luma_adj(struct seq_file *s, const struct dc_hw_ltm_luma_adj *luma_adj,
+			       u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "luma_adj", luma_adj->enable,
+		   luma_adj->dirty);
+}
+
+void print_hw_display_grid_size(struct seq_file *s, const struct dc_hw_ltm_grid *grid_size,
+				u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "grid_size", grid_size->enable,
+		   grid_size->dirty);
+}
+
+void print_hw_display_af_filter(struct seq_file *s, const struct dc_hw_ltm_af_filter *af_filter,
+				u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "af_filter", af_filter->enable,
+		   af_filter->dirty);
+}
+
+void print_hw_display_af_slice(struct seq_file *s, const struct dc_hw_ltm_af_slice *af_slice,
+			       u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "af_slice", af_slice->enable,
+		   af_slice->dirty);
+}
+
+void print_hw_display_af_trans(struct seq_file *s, const struct dc_hw_ltm_af_trans *af_trans,
+			       u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "af_trans", af_trans->enable,
+		   af_trans->dirty);
+}
+
+void print_hw_display_tone_adj(struct seq_file *s, const struct dc_hw_ltm_tone_adj *tone_adj,
+			       u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "tone_adj", tone_adj->enable,
+		   tone_adj->dirty);
+}
+
+void print_hw_display_ltm_color(struct seq_file *s, const struct dc_hw_ltm_color *ltm_color,
+				u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_color", ltm_color->enable,
+		   ltm_color->dirty);
+}
+
+void print_hw_display_ltm_dither(struct seq_file *s, const struct dc_hw_ltm_dither *ltm_dither,
+				 u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_dither", ltm_dither->enable,
+		   ltm_dither->dirty);
+}
+
+void print_hw_display_ltm_luma_set(struct seq_file *s,
+				   const struct dc_hw_ltm_luma_set *ltm_luma_set, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_luma_set",
+		   ltm_luma_set->enable, ltm_luma_set->dirty);
+}
+
+void print_hw_display_ltm_luma_get(struct seq_file *s,
+				   const struct dc_hw_ltm_luma_get *ltm_luma_get, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_luma_get",
+		   ltm_luma_get->enable, ltm_luma_get->dirty);
+}
+
+void print_hw_display_ltm_cd_set(struct seq_file *s, const struct dc_hw_ltm_cd_set *ltm_cd_set,
+				 u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_cd_set", ltm_cd_set->enable,
+		   ltm_cd_set->dirty);
+}
+
+void print_hw_display_ltm_cd_get(struct seq_file *s, const struct dc_hw_ltm_cd_get *ltm_cd_get,
+				 u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_cd_get", ltm_cd_get->enable,
+		   ltm_cd_get->dirty);
+}
+
+void print_hw_display_ltm_hist_set(struct seq_file *s,
+				   const struct dc_hw_ltm_hist_set *ltm_hist_set, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_hist_set",
+		   ltm_hist_set->enable, ltm_hist_set->dirty);
+}
+
+void print_hw_display_ltm_hist_get(struct seq_file *s,
+				   const struct dc_hw_ltm_hist_get *ltm_hist_get, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_hist_get",
+		   ltm_hist_get->enable, ltm_hist_get->dirty);
+}
+
+void print_hw_display_ltm_ds(struct seq_file *s, const struct dc_hw_ltm_ds *ltm_ds, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "ltm_ds", ltm_ds->enable,
+		   ltm_ds->dirty);
+}
+
+void print_hw_display_hw_hist_chan(struct seq_file *s, const struct dc_hw_hist_chan *hw_hist_chan,
+				   u8 indent)
+{
+	u8 j;
+	char name[40] = {};
+
+	for (j = 0; j < VS_HIST_CHAN_IDX_COUNT; j++) {
+		snprintf(name, sizeof(name), "hw_hist_chan[%d]", j);
+		print_tab(s, indent);
+		seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", name,
+			   hw_hist_chan[j].enable, hw_hist_chan[j].dirty);
+	}
+}
+
+void print_hw_display_hw_hist_rgb(struct seq_file *s, const struct dc_hw_hist_rgb *hw_hist_rgb,
+				  u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "hw_hist_rgb",
+		   hw_hist_rgb->enable, hw_hist_rgb->dirty);
+}
+
+void print_hw_display_crc(struct seq_file *s, const struct dc_hw_disp_crc *crc, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d\n", "crc", crc->enable);
+}
+
+void print_hw_display_sram_pool(struct seq_file *s, const struct dc_hw_sram_pool *sram_pool,
+				u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": dirty=%d\n", "sram_pool", sram_pool->dirty);
+}
+
+void print_hw_plane_fb(struct seq_file *s, const struct dc_hw_fb *fb, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "fb", fb->enable, fb->dirty);
+}
+
+void print_hw_plane_fb_ext(struct seq_file *s, const struct dc_hw_fb *fb_ext, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "fb_ext", fb_ext->enable,
+		   fb_ext->dirty);
+}
+
+void print_hw_plane_pos(struct seq_file *s, const struct dc_hw_position *pos, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "pos", pos->enable, pos->dirty);
+}
+
+void print_hw_plane_rcd_mask(struct seq_file *s, const struct dc_hw_rcd_mask *rcd_mask, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "rcd_mask", rcd_mask->enable,
+		   rcd_mask->dirty);
+}
+
+void print_hw_plane_std_bld(struct seq_file *s, const struct dc_hw_std_bld *std_bld, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "std_bld", std_bld->enable,
+		   std_bld->dirty);
+}
+
+void print_hw_plane_y2r(struct seq_file *s, const struct dc_hw_y2r *y2r, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "y2r", y2r->enable, y2r->dirty);
+}
+
+void print_hw_plane_lut_3d(struct seq_file *s, const struct dc_hw_block *lut_3d, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "lut_3d", lut_3d->enable,
+		   lut_3d->dirty);
+}
+
+void print_hw_plane_crc(struct seq_file *s, const struct dc_hw_crc *crc, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d\n", "crc", crc->enable);
+}
+
+void print_hw_plane_scale(struct seq_file *s, const struct dc_hw_scale *scale, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "scale", scale->enable,
+		   scale->dirty);
+}
+
+void print_hw_plane_roi(struct seq_file *s, const struct dc_hw_roi *roi, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "roi", roi->enable, roi->dirty);
+}
+
+void print_hw_plane_clear(struct seq_file *s, const struct dc_hw_clear *clear, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "clear", clear->enable,
+		   clear->dirty);
+}
+
+void print_hw_plane_sram(struct seq_file *s, const struct dc_hw_sram_pool *sram, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": dirty=%d\n", "sram", sram->dirty);
+}
+
+void print_hw_wb_fb(struct seq_file *s, const struct dc_hw_fb *fb, u8 indent)
+{
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": enable=%d, dirty=%d\n", "fb", fb->enable, fb->dirty);
+}
+
+static void print_display_state(struct seq_file *s, const struct dc_hw_display *display, u8 indent)
+{
+	print_hw_display_mode(s, &display->mode, indent);
+	print_hw_display_bld_size(s, &display->bld_size, indent);
+	print_hw_display_data_ext(s, &display->data_ext, indent);
+	print_hw_display_gamma(s, &display->gamma, indent);
+	print_hw_display_wb(s, &display->wb, indent);
+	print_hw_display_blur_mask(s, &display->blur_mask, indent);
+	print_hw_display_brightness_mask(s, &display->brightness_mask, indent);
+	print_hw_display_ltm_enable(s, &display->ltm_enable, indent);
+	print_hw_display_ltm_degamma(s, &display->ltm_degamma, indent);
+	print_hw_display_ltm_gamma(s, &display->ltm_gamma, indent);
+	print_hw_display_ltm_luma(s, &display->ltm_luma, indent);
+	print_hw_display_freq_decomp(s, &display->freq_decomp, indent);
+	print_hw_display_luma_adj(s, &display->luma_adj, indent);
+	print_hw_display_grid_size(s, &display->grid_size, indent);
+	print_hw_display_af_filter(s, &display->af_filter, indent);
+	print_hw_display_af_slice(s, &display->af_slice, indent);
+	print_hw_display_af_trans(s, &display->af_trans, indent);
+	print_hw_display_tone_adj(s, &display->tone_adj, indent);
+	print_hw_display_ltm_color(s, &display->ltm_color, indent);
+	print_hw_display_ltm_dither(s, &display->ltm_dither, indent);
+	print_hw_display_ltm_luma_set(s, &display->ltm_luma_set, indent);
+	print_hw_display_ltm_luma_get(s, &display->ltm_luma_get, indent);
+	print_hw_display_ltm_cd_set(s, &display->ltm_cd_set, indent);
+	print_hw_display_ltm_cd_get(s, &display->ltm_cd_get, indent);
+	print_hw_display_ltm_hist_set(s, &display->ltm_hist_set, indent);
+	print_hw_display_ltm_hist_get(s, &display->ltm_hist_get, indent);
+	print_hw_display_ltm_ds(s, &display->ltm_ds, indent);
+	print_hw_display_hw_hist_chan(s, display->hw_hist_chan, indent);
+	print_hw_display_hw_hist_rgb(s, &display->hw_hist_rgb, indent);
+	print_hw_display_crc(s, &display->crc, indent);
+	print_hw_states(s, &display->states, indent);
+	print_hw_display_sram_pool(s, &display->sram_pool, indent);
+
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": %d\n", "output_id", display->output_id);
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": %d\n", "sbs_split_dirty", display->sbs_split_dirty);
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": %d\n", "wb_split_dirty", display->wb_split_dirty);
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": %d\n", "config_status", display->config_status);
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": %d\n", "vblank_count", display->vblank_count);
+}
+
+static void print_plane_state(struct seq_file *s, const struct dc_hw_plane *plane, u8 indent)
+{
+	print_hw_plane_fb(s, &plane->fb, indent);
+	print_hw_plane_fb_ext(s, &plane->fb_ext, indent);
+	print_hw_plane_pos(s, &plane->pos, indent);
+	print_hw_plane_rcd_mask(s, &plane->rcd_mask, indent);
+	print_hw_plane_std_bld(s, &plane->std_bld, indent);
+	print_hw_plane_y2r(s, &plane->y2r, indent);
+	print_hw_plane_lut_3d(s, &plane->lut_3d, indent);
+	print_hw_plane_crc(s, &plane->crc, indent);
+	print_hw_plane_scale(s, &plane->scale, indent);
+	print_hw_plane_roi(s, &plane->roi, indent);
+	print_hw_plane_clear(s, &plane->clear, indent);
+	print_hw_states(s, &plane->states, indent);
+	print_hw_plane_sram(s, &plane->sram, indent);
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": %d\n", "config_status", plane->config_status);
+}
+
+static void print_wb_state(struct seq_file *s, const struct dc_hw_wb *wb, u8 indent)
+{
+	print_hw_wb_fb(s, &wb->fb, indent);
+	print_hw_states(s, &wb->states, indent);
+	print_tab(s, indent);
+	seq_printf(s, PRINT_NAME_WIDTH ": %d\n", "config_status", wb->config_status);
 }

@@ -25,6 +25,7 @@ struct g2d_crtc_funcs {
 	void (*disable)(struct device *dev, struct drm_crtc *crtc);
 };
 
+struct g2d_device;
 int g2d_crtc_init(struct g2d_device *gdevice);
 
 #endif // _G2D_CRTC_H_

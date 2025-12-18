@@ -11,10 +11,11 @@
 #include <linux/mutex.h>
 #include <linux/pm_runtime.h>
 #include <linux/pm_wakeup.h>
+#include <trace/events/edgetpu.h>
 
 #include <gcip/gcip-pm.h>
+#include <gcip/gcip-status-code.h>
 #include <gcip/gcip-thermal.h>
-
 
 #include "edgetpu-config.h"
 #include "edgetpu-firmware.h"
@@ -66,9 +67,9 @@ static int mobile_pwr_update_freq_limits_locked(struct edgetpu_dev *etdev)
 
 	ret = edgetpu_kci_set_freq_limits(etdev->etkci, etdev->pm->min_freq, etdev->pm->max_freq);
 	switch (ret) {
-	case GCIP_KCI_ERROR_OK:
+	case GCIP_STATUS_CODE_OK:
 		return 0;
-	case GCIP_KCI_ERROR_INVALID_ARGUMENT:
+	case GCIP_STATUS_CODE_INVALID_ARGUMENT:
 		dev_err(etdev->dev,
 			"No valid values within debugfs frequency limits: (%u, %u)\n",
 			etdev->pm->min_freq, etdev->pm->max_freq);
@@ -169,6 +170,22 @@ DEFINE_DEBUGFS_ATTRIBUTE(fops_tpu_pwr_policy, mobile_pwr_policy_get, mobile_pwr_
 
 static int mobile_power_down(void *data);
 
+
+/*
+ * Disable mailbox IRQs during the power up sequence just in case old firmware is still
+ * running, avoid potential RFW access violation during state restore.
+ */
+static int edgetpu_pm_get_irqs_disabled(struct edgetpu_dev *etdev)
+{
+	int ret;
+
+	edgetpu_mailbox_irqs_enable(etdev, false);
+	ret = pm_runtime_get_sync(etdev->dev);
+	/* Re-enable mailbox IRQs. */
+	edgetpu_mailbox_irqs_enable(etdev, true);
+	return ret;
+}
+
 /*
  * Work-around for b/422990510.
  *
@@ -232,7 +249,10 @@ static int mobile_power_up(void *data)
 			usleep_range(BLOCK_DOWN_MIN_DELAY_US, BLOCK_DOWN_MAX_DELAY_US);
 		} while (++times < BLOCK_DOWN_RETRY_TIMES);
 		if (times >= BLOCK_DOWN_RETRY_TIMES && !edgetpu_poll_block_off(etdev)) {
-			etdev_err(etdev, "power up failed: device not in correct power state");
+			etdev_err(
+				etdev,
+				"power up failed: device not in correct power state. pm_runtime_active=%d",
+				pm_runtime_active(etdev->dev));
 			edgetpu_soc_pm_dump_block_state(etdev);
 
 			/*
@@ -250,15 +270,16 @@ static int mobile_power_up(void *data)
 		}
 	}
 
+	edgetpu_eventlog_event(etdev, EVENTLOG_EVENT_POWER_STATE, (void *)1);
 	etdev_info(etdev, "Powering up\n");
-
-	ret = pm_runtime_get_sync(etdev->dev);
-	if (ret) {
+	ret = edgetpu_pm_get_irqs_disabled(etdev);
+	if (ret < 0) {
 		pm_runtime_put_noidle(etdev->dev);
 		etdev_err(etdev, "pm_runtime_get_sync returned %d\n", ret);
 		return ret;
 	}
 
+	trace_edgetpu_power_state(1);
 	edgetpu_soc_pm_lpm_up(etdev);
 
 	/* TODO(b/269374029) Do *_reinit() results need to be checked? */
@@ -275,8 +296,8 @@ static int mobile_power_up(void *data)
 		edgetpu_iif_reinit_mailbox(etdev->etiif);
 	}
 	if (etdev->mailbox_manager) {
-		etdev_dbg(etdev, "Resetting (VII/external) mailboxes\n");
-		edgetpu_mailbox_reset_mailboxes(etdev->mailbox_manager);
+		etdev_dbg(etdev, "Resetting external mailboxes\n");
+		edgetpu_mailbox_reset_ext_mailboxes(etdev->mailbox_manager);
 	}
 
 	if (!etdev->firmware)
@@ -323,7 +344,7 @@ static int mobile_power_up(void *data)
 
 out:
 	if (!ret) {
-		edgetpu_mailbox_restore_active_mailbox_queues(etdev);
+		edgetpu_mailbox_restore_active_ext_mailbox_queues(etdev);
 		mutex_lock(&etdev->pm->freq_limits_lock);
 		/* Only send limits to FW if at least one has been set. */
 		if (etdev->pm->min_freq || etdev->pm->max_freq)
@@ -357,7 +378,9 @@ static int mobile_power_down(void *data)
 	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 	int res = 0;
 
+	edgetpu_eventlog_event(etdev, EVENTLOG_EVENT_POWER_STATE, (void *)0);
 	etdev_info(etdev, "Powering down\n");
+	trace_edgetpu_power_state(0);
 
 	edgetpu_sw_wdt_stop(etdev);
 
@@ -426,7 +449,7 @@ static int mobile_pm_after_create(void *data)
 
 	devm_pm_runtime_enable(dev);
 	ret = pm_runtime_get_sync(dev);
-	if (ret) {
+	if (ret < 0) {
 		dev_err(dev, "pm_runtime_get_sync returned %d\n", ret);
 		goto err_pm_runtime_put;
 	}
@@ -525,59 +548,52 @@ static int __maybe_unused edgetpu_pm_suspend(struct device *dev)
 	struct edgetpu_dev *etdev = dev_get_drvdata(dev);
 	struct edgetpu_list_device_client *lc;
 	int count;
-	bool all_wakelocks_suspendable = true;
-	int nonsuspend_req_count = 0;
-	int suspendable_req_count = 0;
+	bool suspendable;
 
 	if (!edgetpu_pm_trylock(etdev)) {
 		etdev_warn_ratelimited(etdev, "cannot suspend during power state transition\n");
 		return -EAGAIN;
 	}
 
-	count = edgetpu_pm_get_count(etdev);
+	suspendable = gcip_pm_suspendable_locked(edgetpu_gcip_pm(etdev), &count);
 	edgetpu_pm_unlock(etdev);
 
-	if (!count) {
-		etdev_info_ratelimited(etdev, "suspended\n");
+	if (suspendable) {
+		if (count) {
+			etdev_info_ratelimited(etdev, "suspend allowed while powered\n");
+			device_set_wakeup_path(etdev->dev);
+		} else {
+			etdev_info_ratelimited(etdev, "suspended\n");
+		}
 		return 0;
 	}
+
+	/* Not suspendable but count 0 means there is pending power down transition. */
+	if (!count)
+		return -EAGAIN;
+
+	etdev_warn_ratelimited(etdev,
+			       "cannot suspend; power up count = %d\n", count);
 
 	if (!mutex_trylock(&etdev->clients_lock))
 		return -EAGAIN;
 	for_each_list_device_client(etdev, lc) {
 		if (!lc->client->wakelock.req_count)
 			continue;
-		if (lc->client->wakelock.suspendable) {
-			suspendable_req_count++;
+		if (lc->client->wakelock.suspendable)
 			continue;
-		}
 		if (lc->client == etdev->debugfs_wakelock_client)
 			etdev_warn_ratelimited(etdev,
 					       "debugfs client count %d\n",
 					       lc->client->wakelock.req_count);
 		else
-			etdev_warn_ratelimited(etdev,
-					       "client pid %d tgid %d count %d\n",
-					       lc->client->pid,
-					       lc->client->tgid,
-					       lc->client->wakelock.req_count);
-		nonsuspend_req_count += lc->client->wakelock.req_count;
-		all_wakelocks_suspendable = false;
+			etdev_warn_ratelimited(
+				etdev,
+				"client pid %d tgid %d limited_pid %d limited_tgid %d count %d\n",
+				lc->client->pid, lc->client->tgid, lc->client->limited_pid,
+				lc->client->limited_tgid, lc->client->wakelock.req_count);
 	}
 	mutex_unlock(&etdev->clients_lock);
-
-	/*
-	 * Check count in case a driver-issued power up (not a client wakelock) must block suspend.
-	 */
-	if (all_wakelocks_suspendable && count == suspendable_req_count) {
-		etdev_info_ratelimited(etdev, "suspend allowed while powered\n");
-		device_set_wakeup_path(etdev->dev);
-		return 0;
-	}
-
-	etdev_warn_ratelimited(etdev,
-			       "cannot suspend; power up count = %d, clients nonsusp=%d susp=%d\n",
-			       count, nonsuspend_req_count, suspendable_req_count);
 	return -EAGAIN;
 }
 

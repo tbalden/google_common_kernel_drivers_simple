@@ -150,6 +150,8 @@ struct vs_crtc_state {
 	bool wb_connectors_updated;
 	bool need_boost_fabrt;
 
+	bool needs_recovery;
+
 	struct vs_drm_property_state drm_states[VS_DC_MAX_PROPERTY_NUM];
 
 	struct kthread_work commit_work;

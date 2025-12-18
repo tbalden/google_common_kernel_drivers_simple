@@ -397,6 +397,9 @@ static int fwtp_google_gdmc_probe(struct platform_device *pdev)
 	fwtp_dev->dev = dev;
 	fwtp_dev->fwtp_ipc_client.fwtp_if.send_message =
 		fwtp_google_gdmc_send_message;
+	fwtp_dev->printer_ctx.name = "gdmc";
+	fwtp_dev->log_enabled = true;
+	fwtp_dev->ftrace_enabled = true;
 	ret = fwtp_dev_init(fwtp_dev);
 	if (ret) {
 		dev_err(dev,

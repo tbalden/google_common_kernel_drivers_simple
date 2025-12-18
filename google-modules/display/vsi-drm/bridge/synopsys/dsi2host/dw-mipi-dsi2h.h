@@ -201,6 +201,25 @@ enum dsi2h_ipi_format {
 	F_COMPRESSED = 0xB,
 };
 
+/**
+ * enum dsi2h_rstn - recommended behavior as a result of dsi errors read
+ *
+ * These parallel @enum gs_dsi_err values, but are designed to be OR'd
+ * together directly in relation to individual error bit reads.
+ */
+enum dsi2h_rstn {
+	/** @NO_RSTN: no reset is recommended */
+	NO_RSTN = 0,
+	/** @SYS_RSTN: System reset needed */
+	SYS_RSTN = BIT(GS_DSI_ERR_SYS_RSTN),
+	/** @PHY_RSTN: PHY reset needed */
+	PHY_RSTN = BIT(GS_DSI_ERR_PHY_RSTN),
+	/** @IPI_RSTN: IPI reset needed */
+	IPI_RSTN = BIT(GS_DSI_ERR_IPI_RSTN),
+	/** @HARD_RSTN: Hard reset needed */
+	HARD_RSTN = BIT(GS_DSI_ERR_HARD_RSTN),
+};
+
 struct dsi2h_color_format {
 	enum dsi2h_ipi_format format;
 	enum dsi2h_ipi_depth depth;
@@ -353,6 +372,8 @@ struct dw_mipi_dsi2h {
 	struct gs_mipi_clks allowed_hs_clks;
 	// Set true to enable setting values outside of allowed_hs_clks.
 	bool force_set_datarate;
+	// Whether enable dynamic hs_clk switch or not
+	bool dynamic_hs_clk_en;
 	u32 reconf;
 	u32 lp2hs_time;
 	u32 hs2lp_time;
@@ -366,7 +387,10 @@ struct dw_mipi_dsi2h {
 
 	pid_t trace_pid;
 
-	#if IS_ENABLED(CONFIG_DEBUG_FS)
+	/** @rstn: Bitmask of reset behavior recommended */
+	u64 rstn;
+
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 	struct dentry *debugfs;
 	struct dw_debugfs_hwv *debugfs_hwv;
 	struct dw_dsi2h_int_cntrs int_cntrs;

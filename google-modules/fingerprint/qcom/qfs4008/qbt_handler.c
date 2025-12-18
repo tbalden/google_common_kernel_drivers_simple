@@ -825,13 +825,14 @@ static ssize_t qbt_read(struct file *filp, char __user *ubuf,
 		mutex_unlock(&drvdata->fd_events_mutex);
 	} else if (minor_no == MINOR_NUM_IPC) {
 		mutex_lock(&drvdata->ipc_events_mutex);
-		if (!kfifo_get(&drvdata->ipc_events, &fw_event))
+		if (!kfifo_get(&drvdata->ipc_events, &fw_event)) {
 			pr_err("IPC events fifo: error removing item\n");
-		pr_debug("IPC event %d at minor no %d read at time %lu uS\n",
+		} else {
+			pr_debug("IPC event %d at minor no %d read at time %lu uS\n",
 				(int)fw_event.ev, minor_no,
 				(unsigned long)ktime_to_us(ktime_get()));
-		num_bytes = copy_to_user(ubuf, &fw_event.ev,
-				sizeof(fw_event.ev));
+			num_bytes = copy_to_user(ubuf, &fw_event.ev, sizeof(fw_event.ev));
+		}
 		mutex_unlock(&drvdata->ipc_events_mutex);
 	} else {
 		pr_err("Invalid minor number\n");
@@ -1103,7 +1104,7 @@ static int setup_fd_gpio_irq(struct platform_device *pdev,
 	if (irq < 0) {
 		rc = irq;
 		pr_err("unable to get irq number for gpio %d, error %d\n",
-		       desc_to_gpio(drvdata->fd_gpio.gpio), rc);
+					 desc_to_gpio(drvdata->fd_gpio.gpio), rc);
 		goto end;
 	}
 	drvdata->fd_gpio.irq = irq;
@@ -1132,7 +1133,7 @@ static int setup_ipc_irq(struct platform_device *pdev,
 	if (drvdata->fw_ipc.irq < 0) {
 		rc = drvdata->fw_ipc.irq;
 		pr_err("no irq for gpio %d, error=%d\n",
-		       desc_to_gpio(drvdata->fw_ipc.gpio), rc);
+					 desc_to_gpio(drvdata->fw_ipc.gpio), rc);
 		goto end;
 	}
 	rc = devm_request_threaded_irq(&pdev->dev,
@@ -1164,7 +1165,7 @@ static int qbt_read_device_tree(struct platform_device *pdev,
 	int rc = 0;
 	struct gpio_desc *gpio;
 	drvdata->intr2_gpio = devm_gpiod_get_optional(&pdev->dev, "qcom,intr2",
-						      GPIOD_OUT_LOW);
+									GPIOD_OUT_LOW);
 	if (IS_ERR(drvdata->intr2_gpio)) {
 		rc = PTR_ERR(drvdata->intr2_gpio);
 		pr_err("failed to request intr2 gpio, error %d\n", rc);
@@ -1174,14 +1175,14 @@ static int qbt_read_device_tree(struct platform_device *pdev,
 		pr_warn("intr2 gpio not found\n");
 	/* read IPC gpio */
 	drvdata->fw_ipc.gpio = devm_gpiod_get(&pdev->dev, "qcom,ipc",
-					      GPIOD_IN);
+								GPIOD_IN);
 	if (IS_ERR(drvdata->fw_ipc.gpio)) {
 		rc = PTR_ERR(drvdata->fw_ipc.gpio);
 		pr_err("failed to request ipc gpio, error %d\n", rc);
 		goto end;
 	}
 	gpio = devm_gpiod_get_optional(&pdev->dev, "qcom,finger-detect",
-				       GPIOD_IN);
+							 GPIOD_IN);
 	if (IS_ERR(gpio)) {
 		rc = PTR_ERR(gpio);
 		pr_err("failed to request fd gpio, error %d\n", rc);
