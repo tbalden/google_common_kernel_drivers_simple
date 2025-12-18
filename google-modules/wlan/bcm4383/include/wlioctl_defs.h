@@ -24,10 +24,8 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 #ifndef wlioctl_defs_h
 #define wlioctl_defs_h
-
 
 #ifdef EFI
 /*
@@ -452,7 +450,6 @@ typedef uint32 ratespec_t;
 /* check this magic number */
 #define WLC_IOCTL_MAGIC		0x14e46c77
 
-
 /* bss_info_cap_t flags */
 #define WL_BSS_FLAGS_FROM_BEACON	0x01	/* bss_info derived from beacon */
 #define WL_BSS_FLAGS_FROM_CACHE		0x02	/* bss_info collected from cache */
@@ -489,7 +486,6 @@ typedef uint32 ratespec_t;
 #define ioctl_subtype	set		/* subtype param */
 #define ioctl_pid	used		/* pid param */
 #define ioctl_status	needed		/* status param */
-
 
 /* Enumerate crypto algorithms */
 #define	CRYPTO_ALGO_OFF			0
@@ -618,7 +614,6 @@ typedef uint32 ratespec_t;
 #endif /* WLWSEC */
 
 #define WSEC_SES_OW_ENABLED(wsec)	((wsec) & SES_OW_ENABLED)
-
 
 
 /* Following macros are not used any more. Just kept here to
@@ -927,7 +922,6 @@ typedef uint32 ratespec_t;
 /* #define WLC_GET_GLACIAL_TIMER		234 */ /* no longer supported */
 #define WLC_GET_KEY_PRIMARY			235
 #define WLC_SET_KEY_PRIMARY			236
-
 
 /* #define WLC_DUMP_RADIOREGS			237 */ /* no longer supported */
 #define WLC_GET_ACI_ARGS			238
@@ -1463,7 +1457,6 @@ typedef uint32 ratespec_t;
 #define WL_MBO_VAL		0x04000000
 
 
-
 #define WL_NET_DETECT_VAL	0x20000000
 #define WL_OCE_VAL		0x20000000 /* reuse */
 #define WL_PCIE_VAL		0x40000000
@@ -1643,7 +1636,6 @@ typedef uint32 ratespec_t;
 #define WL_NUMCHANSPECS 110
 #endif
 #endif /* WL_BAND6G */
-
 
 /* WDS link local endpoint WPA role */
 #define WL_WDS_WPA_ROLE_AUTH	0	/* authenticator */
@@ -2283,7 +2275,6 @@ typedef uint32 ratespec_t;
 #endif /* WL_PKT_FLTR_EXT && !WL_PKT_FLTR_EXT_DISABLED */
 #define ND_REQUEST_MAX		5	/* Max set of offload params */
 
-
 /* AOAC wake event flag */
 #define WAKE_EVENT_NLO_DISCOVERY_BIT		1
 #define WAKE_EVENT_AP_ASSOCIATION_LOST_BIT	2
@@ -2292,7 +2283,6 @@ typedef uint32 ratespec_t;
 #define WAKE_EVENT_NET_PACKET_BIT 0x10
 
 #define MAX_NUM_WOL_PATTERN	22 /* LOGO requirements min 22 */
-
 
 /* Packet filter operation mode */
 /* True: 1; False: 0 */
@@ -2407,13 +2397,11 @@ typedef uint32 ratespec_t;
 #define WL_PROXD_MODE_TARGET	3
 #define WL_PROXD_RANDOM_WAKEUP	0x8000
 
-
 #ifdef NET_DETECT
 #define NET_DETECT_MAX_WAKE_DATA_SIZE	2048
 #define NET_DETECT_MAX_PROFILES		16
 #define NET_DETECT_MAX_CHANNELS		50
 #endif /* NET_DETECT */
-
 
 /* Bit masks for radio disabled status - returned by WL_GET_RADIO */
 #define WL_RADIO_SW_DISABLE		(1<<0)
@@ -2426,7 +2414,6 @@ typedef uint32 ratespec_t;
 #define	WL_SPURAVOID_OFF	0
 #define	WL_SPURAVOID_ON1	1
 #define	WL_SPURAVOID_ON2	2
-
 
 #define WL_4335_SPURAVOID_ON1	1
 #define WL_4335_SPURAVOID_ON2	2
@@ -2500,7 +2487,6 @@ typedef uint32 ratespec_t;
 #define WL_PWRSTATS_TYPE_USB_HSIC	2 /**< struct wl_pwr_usb_hsic_stats */
 #define WL_PWRSTATS_TYPE_PM_AWAKE1	3 /**< struct wl_pwr_pm_awake_stats_v1 */
 #define WL_PWRSTATS_TYPE_CONNECTION	4 /* struct wl_pwr_connect_stats; assoc and key-exch time */
-
 
 #define WL_PWRSTATS_TYPE_PCIE		6 /**< struct wl_pwr_pcie_stats */
 #define WL_PWRSTATS_TYPE_PM_AWAKE2	7 /**< struct wl_pwr_pm_awake_stats_v2 */
@@ -2686,7 +2672,6 @@ enum {
 										   * this to src
 										   */
 #define REINIT_RSN_IDX_V2(_x)	(((_x) <= WL_REINIT_RC_LAST_V2) ? (_x) : 0)
-
 
 #define WL_CNT_VERSION_6	6
 #define WL_CNT_VERSION_7	7
@@ -3033,6 +3018,7 @@ enum wl_ifstats_xtlv_id {
 	WL_IFSTATS_XTLV_WL_SLICE_UWBCX = 0x31D,
 	/* Per-slice UWBCX stats */
 	WL_IFSTATS_XTLV_WL_SLICE_PWRSTATS_SCAN_6E = 0x31E,
+
 	/* Per-interface */
 	/* XTLV container for reporting */
 	WL_IFSTATS_XTLV_IF = 0x501,
@@ -3045,7 +3031,6 @@ enum wl_ifstats_xtlv_id {
 	/* AMPDU stats on per-IF */
 	WL_IFSTATS_XTLV_AMPDU_DUMP = 0x505,
 	WL_IFSTATS_XTLV_IF_SPECIFIC = 0x506,
-
 
 	WL_IFSTATS_XTLV_IF_LQM = 0x508,
 	/* Interface specific state capture in periodic fashion */
@@ -3267,6 +3252,7 @@ enum wlc_capext_feature_bitpos {
 
 	WLC_CAPEXT_FEATURE_BITPOS_FBT			= 55,	/* feature with sub-features */
 	WLC_CAPEXT_FEATURE_BITPOS_CDEF			= 56,
+
 	WLC_CAPEXT_FEATURE_BITPOS_TXPWRCAP		= 58,	/* feature with sub-features */
 	WLC_CAPEXT_FEATURE_BITPOS_MIMO_PS		= 59,
 
@@ -3296,6 +3282,7 @@ enum wlc_capext_feature_bitpos {
 
 	WLC_CAPEXT_FEATURE_BITPOS_CLM_RESTRICT		= 80,
 	WLC_CAPEXT_FEATURE_BITPOS_EVT_EXT		= 81,
+
 	WLC_CAPEXT_FEATURE_BITPOS_TDMTX			= 83,
 	WLC_CAPEXT_FEATURE_BITPOS_NATOE			= 84,
 

@@ -662,7 +662,6 @@ void dhd_lb_stats_deinit(dhd_pub_t *dhdp)
 		MFREE(dhdp->osh, dhd->napi_latency, DHD_NAPI_LATENCY_SIZE);
 	}
 
-
 	for (j = 0; j < HIST_BIN_SIZE; j++) {
 		if (dhd->napi_rx_hist[j]) {
 			MFREE(dhdp->osh, dhd->napi_rx_hist[j], alloc_size);

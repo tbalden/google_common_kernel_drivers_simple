@@ -95,7 +95,6 @@
 #define SLAVEPORT_ADDR_SIZE(adesc)	(1u << ((adesc & SLAVEPORT_ADDR_SIZE_MASK) + \
 			SLAVEPORT_ADDR_MIN_SHIFT))
 
-
 #define GET_NEXT_EROM_ADDR(addr)	((uint32*)((uintptr)(addr) + 4u))
 
 #define NCI_DEFAULT_CORE_UNIT		(0u)
@@ -934,7 +933,6 @@ BCMATTACHFN(nci_find_numcores)(si_t *sih)
 	uint32 num_oobr_cores = 0u;
 	uint32 num_nonoobr_cores = 0u;
 
-
 	/* No of Non-OOBR Cores */
 	num_nonoobr_cores = NCI_NONOOBR_CORES(nci->cc_erom2base);
 	if (num_nonoobr_cores <= 0u) {
@@ -987,7 +985,6 @@ fail:
 }
 
 #define NCI_MAX_APB_COUNT 10u
-
 
 static void
 BCMATTACHFN(nci_update_shared_pmni_iface)(nci_info_t *nci)
@@ -1075,7 +1072,6 @@ BCMATTACHFN(nci_scan)(si_t *sih)
 	uint8 iface_idx;
 	uint32 core_idx;
 	int err = 0;
-
 
 	/* If scan was finished already */
 	if (nci->scan_done) {
@@ -2368,7 +2364,6 @@ BCMPOSTTRAPFN(nci_get_core_baaddr)(const si_t *sih, uint32 *size, int32 baidx)
 
 	return addr;
 }
-
 
 /*
  * Returns APB/AXI SP address,

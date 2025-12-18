@@ -78,6 +78,7 @@ static int google_bcl_usb_votable_callback(struct gvotable_election *el,
 	int ret = 0, err = 0;
 	struct bcl_device *bcl_dev = gvotable_get_data(el);
 	u8 usb_enable = (long)value ? USB_PLUGGED: USB_UNPLUGGED;
+	u8 val = 0;
 	union power_supply_propval prop = { };
 
 	if (!smp_load_acquire(&bcl_dev->initialized))
@@ -104,9 +105,13 @@ static int google_bcl_usb_votable_callback(struct gvotable_election *el,
 	}
 
 #if IS_ENABLED(CONFIG_REGULATOR_S2MPG14)
-	pmic_write(CORE_PMIC_MAIN_RTC, bcl_dev, S2MPG14_RTC_SCRATCH1, usb_enable);
+	pmic_read(CORE_PMIC_MAIN_RTC, bcl_dev, S2MPG14_RTC_SCRATCH1, &val);
+	pmic_write(CORE_PMIC_MAIN_RTC, bcl_dev, S2MPG14_RTC_SCRATCH1,
+			   usb_enable ? val | USB_ENABLE_MASK : val & ~USB_ENABLE_MASK);
 #elif IS_ENABLED(CONFIG_REGULATOR_S2MPG12)
-	pmic_write(CORE_PMIC_MAIN_RTC, bcl_dev, S2MPG12_RTC_SCRATCH1, usb_enable);
+	pmic_read(CORE_PMIC_MAIN_RTC, bcl_dev, S2MPG12_RTC_SCRATCH1, &val);
+	pmic_write(CORE_PMIC_MAIN_RTC, bcl_dev, S2MPG12_RTC_SCRATCH1,
+			   usb_enable ? val | USB_ENABLE_MASK : val & ~USB_ENABLE_MASK);
 #endif
 
 	if (bcl_dev->usb_otg_conf) {

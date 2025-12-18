@@ -20,6 +20,7 @@
 
 #include <gcip/gcip-firmware.h>
 #include <gcip/gcip-memory.h>
+#include <gcip/gcip-status-code.h>
 #include <gcip/gcip-telemetry.h>
 #include <gcip/gcip-usage-stats.h>
 
@@ -155,32 +156,31 @@ static void edgetpu_reverse_kci_handle_response(struct gcip_kci *kci,
 {
 	struct edgetpu_mailbox *mailbox = gcip_kci_get_data(kci);
 	struct edgetpu_dev *etdev = mailbox->etdev;
+	int ret;
 
-	/*
-	 * GCIP_RKCI_CLIENT_FATAL_ERROR_NOTIFY does not have chip-specific behavior, despite
-	 * being labeled as non-generic.
-	 */
-	if (resp->code <= GCIP_RKCI_CHIP_CODE_LAST &&
-	    resp->code != GCIP_RKCI_CLIENT_FATAL_ERROR_NOTIFY) {
-		edgetpu_soc_handle_reverse_kci(etdev, resp);
+	ret = edgetpu_soc_handle_reverse_kci(etdev, resp);
+	if (ret != -EOPNOTSUPP)
 		return;
-	}
 
 	switch (resp->code) {
 	case GCIP_RKCI_CLIENT_FATAL_ERROR_NOTIFY:
 		edgetpu_handle_client_fatal_error_notify(etdev, resp->rkci_value2);
 		break;
 	case GCIP_RKCI_CLIENT_INACTIVITY_TIMEOUT:
+	case GCIP_RKCI_CLIENT_INACTIVITY_TIMEOUT_LEGACY:
 		edgetpu_handle_client_inactivity_timeout(etdev, resp->rkci_value2);
 		break;
 	case GCIP_RKCI_FIRMWARE_CRASH:
+	case GCIP_RKCI_FIRMWARE_CRASH_LEGACY:
 		edgetpu_handle_firmware_crash(etdev, (enum gcip_fw_crash_type)resp->rkci_value2);
 		break;
 	case GCIP_RKCI_JOB_LOCKUP:
+	case GCIP_RKCI_JOB_LOCKUP_LEGACY:
 		edgetpu_handle_job_lockup(etdev, resp->rkci_value2);
 		break;
 #if EDGETPU_HAS_FW_DEBUG
 	case GCIP_RKCI_DEBUG_ASYNC_RESP:
+	case GCIP_RKCI_DEBUG_ASYNC_RESP_LEGACY:
 		edgetpu_fw_debug_resp_ready(etdev, resp->rkci_value1, resp->rkci_value2);
 		break;
 #endif
@@ -450,7 +450,7 @@ enum gcip_fw_flavor edgetpu_kci_fw_info(struct edgetpu_kci *etkci, struct gcip_f
 		edgetpu_iremap_free(etdev, &mem);
 	}
 
-	if (ret == GCIP_KCI_ERROR_OK) {
+	if (ret == GCIP_STATUS_CODE_OK) {
 		switch (fw_info->fw_flavor) {
 		case GCIP_FW_FLAVOR_BL1:
 		case GCIP_FW_FLAVOR_SYSTEST:
@@ -546,9 +546,9 @@ int edgetpu_kci_update_usage_locked(struct edgetpu_dev *etdev)
 	memset(mem.virt_addr, 0, sizeof(struct gcip_usage_stats_header));
 	ret = gcip_kci_send_cmd_return_resp(etdev->etkci->kci, &cmd, &resp);
 
-	if (ret == GCIP_KCI_ERROR_UNIMPLEMENTED || ret == GCIP_KCI_ERROR_UNAVAILABLE) {
+	if (ret == GCIP_STATUS_CODE_UNIMPLEMENTED || ret == GCIP_STATUS_CODE_UNAVAILABLE) {
 		etdev_dbg(etdev, "firmware does not report usage\n");
-	} else if (ret == GCIP_KCI_ERROR_OK) {
+	} else if (ret == GCIP_STATUS_CODE_OK) {
 		edgetpu_usage_stats_process_buffer(etdev, mem.virt_addr);
 	} else if (ret != -ETIMEDOUT) {
 		etdev_warn_once(etdev, "fw usage stats error %d", ret);
@@ -565,17 +565,13 @@ void edgetpu_kci_mappings_show(struct edgetpu_dev *etdev, struct seq_file *s)
 	struct edgetpu_kci *etkci = etdev->etkci;
 	struct gcip_memory *cmd_queue_mem = &etkci->cmd_queue_mem;
 	struct gcip_memory *resp_queue_mem = &etkci->resp_queue_mem;
-	struct edgetpu_iommu_domain *default_etdomain = edgetpu_mmu_default_domain(etdev);
 
-	seq_printf(s, "kci pasid %u:\n", default_etdomain->pasid);
-	seq_printf(s, "  %pad %lu cmdq\n", &cmd_queue_mem->dma_addr,
+	seq_printf(s, "  %pad %lu kci cmdq\n", &cmd_queue_mem->dma_addr,
 		   DIV_ROUND_UP(QUEUE_SIZE * gcip_kci_queue_element_size(GCIP_MAILBOX_CMD_QUEUE),
 				PAGE_SIZE));
-	seq_printf(s, "  %pad %lu rspq\n", &resp_queue_mem->dma_addr,
+	seq_printf(s, "  %pad %lu kci rspq\n", &resp_queue_mem->dma_addr,
 		   DIV_ROUND_UP(QUEUE_SIZE * gcip_kci_queue_element_size(GCIP_MAILBOX_RESP_QUEUE),
 				PAGE_SIZE));
-	edgetpu_telemetry_mappings_show(etdev, s);
-	edgetpu_firmware_mappings_show(etdev, s);
 }
 
 int edgetpu_kci_shutdown(struct edgetpu_kci *etkci)
@@ -718,7 +714,7 @@ int edgetpu_kci_firmware_tracing_level(void *data, unsigned long level, unsigned
 	int ret;
 
 	ret = gcip_kci_send_cmd_return_resp(etdev->etkci->kci, &cmd, &resp);
-	if (ret == GCIP_KCI_ERROR_OK)
+	if (ret == GCIP_STATUS_CODE_OK)
 		*active_level = resp.retval;
 
 	return ret;
@@ -787,11 +783,11 @@ bool edgetpu_kci_flush_rkci(struct edgetpu_dev *etdev)
 	return flush_work(&etdev->etkci->kci->rkci.work);
 }
 
-int edgetpu_kci_fault_injection(struct gcip_fault_inject *injection)
+int edgetpu_kci_fault_inject(struct gcip_fault_inject *injection)
 {
 	struct edgetpu_kci *etkci = injection->kci_data;
 	struct gcip_kci_command_element cmd = {
-		.code = GCIP_KCI_CODE_FAULT_INJECTION,
+		.code = GCIP_KCI_CODE_FAULT_INJECT,
 	};
 
 	return edgetpu_kci_send_cmd_with_data(etkci, &cmd, injection->opaque,
@@ -823,7 +819,7 @@ int edgetpu_kci_fw_debug_cmd(struct edgetpu_dev *etdev, dma_addr_t daddr, size_t
 	cmd.dma.address = daddr;
 	cmd.dma.size = count;
 	ret = gcip_kci_send_cmd_return_resp(etdev->etkci->kci, &cmd, &resp);
-	if (ret == GCIP_KCI_ERROR_OK)
+	if (ret == GCIP_STATUS_CODE_OK)
 		edgetpu_fw_debug_resp_ready(etdev, 0, resp.retval);
 	return ret;
 }

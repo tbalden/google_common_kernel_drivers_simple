@@ -256,7 +256,6 @@ int wifi_platform_set_power(wifi_adapter_info_t *adapter, bool on, unsigned long
 	}
 #endif /* WBRC_HW_QUIRKS */
 
-
 	return err;
 }
 
@@ -572,7 +571,6 @@ static int wifi_ctrlfunc_register_drv(void)
 	}
 #endif /* !defined(CONFIG_DTS) */
 
-
 #ifdef CONFIG_DTS
 	wifi_plat_dev_probe_ret = platform_driver_register(&wifi_platform_dev_driver);
 #endif /* CONFIG_DTS */
@@ -809,7 +807,6 @@ static int dhd_wifi_platform_load_pcie(void)
 }
 #endif /* BCMPCIE  */
 
-
 void dhd_wifi_platform_unregister_drv(void)
 {
 	if (cfg_multichip)
@@ -1018,7 +1015,6 @@ concate_custom_board_revision(char *nv_path)
 
 }
 #endif /* SUPPORT_MULTIPLE_BOARD_REVISION */
-
 
 /* Weak functions that can be overridden in Platform specific implementation */
 char* __attribute__ ((weak)) dhd_get_device_dt_name(void)

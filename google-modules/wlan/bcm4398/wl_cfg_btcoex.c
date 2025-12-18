@@ -298,7 +298,6 @@ wl_cfg80211_bt_setflag(struct net_device *dev, bool set)
 	char buf_flag7_default[8]   = { 7, 00, 00, 00, 0x0, 0x00, 0x00, 0x00};
 #endif
 
-
 #if defined(BT_DHCP_eSCO_FIX)
 	/*  ANREY: New Yury's eSco pacifier */
 	/* set = 1, save & turn on  0 - off & restore prev settings */
@@ -529,7 +528,7 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 
 				/* Disable PM mode during dhpc session */
 #ifndef OEM_ANDROID
-				dev_wlc_ioctl(dev, WLC_SET_PM, &pm_local, sizeof(pm_local));
+				wl_cfg80211_set_pm(dev, pm_local, PM_STATE_BTCOEX);
 #endif
 				/* Disable BLE Scan Grant during DHCP session */
 				wldev_iovar_setint(dev, "btc_ble_grants", 0);
@@ -570,7 +569,6 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 	else if (powermode_val == '0') {
 #endif
 
-
 #if defined(OEM_ANDROID) && defined(DHCP_SCAN_SUPPRESS)
 		/* Since DHCP is complete, enable the scan back */
 		wl_cfg80211_scan_suppress(dev, 0);
@@ -595,7 +593,7 @@ int wl_cfg80211_set_btcoex_dhcp(struct net_device *dev, dhd_pub_t *dhd, char *co
 
 		/* Restoring PM mode */
 #ifndef OEM_ANDROID
-		dev_wlc_ioctl(dev, WLC_SET_PM, &pm, sizeof(pm));
+		wl_cfg80211_set_pm(dev, pm, PM_STATE_BTCOEX);
 #endif
 
 		/* Stop any bt timer because DHCP session is done */

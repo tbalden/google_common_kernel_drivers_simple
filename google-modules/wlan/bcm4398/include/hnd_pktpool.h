@@ -90,7 +90,6 @@ typedef struct {
 	void *arg;
 } pktpool_cbextn_info_t;
 
-
 #ifdef BCMDBG_POOL
 /* pkt pool debug states */
 #define POOL_IDLE	0
@@ -222,7 +221,6 @@ bool pktpool_validate_freelist(pktpool_t *pktp);
 #define pktpool_max_pkt_bytes(pp)    (POOLPTR(pp)->max_pkt_bytes)
 #define pktpool_max_pkts(pp)  (POOLPTR(pp)->maxlen)
 
-
 /*
  * ----------------------------------------------------------------------------
  * A pool ID is assigned with a pkt pool during pool initialization. This is
@@ -324,7 +322,6 @@ extern uint32 hnd_pktpool_get_total_poolheap_count(void);
 #else /* BCMPKTPOOL */
 #define SHARED_POOL		((struct pktpool *)NULL)
 #endif /* BCMPKTPOOL */
-
 
 #ifdef __cplusplus
 	}

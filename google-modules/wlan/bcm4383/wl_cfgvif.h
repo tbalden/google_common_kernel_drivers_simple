@@ -44,7 +44,6 @@
 #include <wl_bam.h>
 #endif  /* WL_BAM */
 
-
 #ifdef SUPPORT_AP_RADIO_PWRSAVE
 #define RADIO_PWRSAVE_PPS               10
 #define RADIO_PWRSAVE_QUIET_TIME        10
@@ -85,7 +84,6 @@ extern int wl_cfg80211_set_mgmt_vndr_ies(struct bcm_cfg80211 *cfg,
 	bcm_struct_cfgdev *cfgdev, s32 bssidx, s32 pktflag,
 	const u8 *vndr_ie, u32 vndr_ie_len);
 
-
 #ifdef WL_SUPPORT_ACS
 #define ACS_MSRMNT_DELAY 1000 /* dump_obss delay in ms */
 #define IOCTL_RETRY_COUNT 5
@@ -98,12 +96,10 @@ extern int wl_cfg80211_set_mgmt_vndr_ies(struct bcm_cfg80211 *cfg,
 #define IDLE_TOKEN_IDX 12
 #endif /* WL_SUPPORT_ACS */
 
-
 extern s32 wl_cfg80211_dfs_ap_move(struct net_device *ndev, char *data,
 		char *command, int total_len);
 extern s32 wl_cfg80211_get_band_chanspecs(struct net_device *ndev,
 		void *buf, s32 buflen, chanspec_band_t band, bool acs_req);
-
 
 #ifdef WLTDLS
 extern s32 wl_cfg80211_tdls_config(struct bcm_cfg80211 *cfg,
@@ -111,7 +107,6 @@ extern s32 wl_cfg80211_tdls_config(struct bcm_cfg80211 *cfg,
 extern s32 wl_tdls_event_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	const wl_event_msg_t *e, void *data);
 #endif /* WLTDLS */
-
 
 #ifdef SUPPORT_AP_HIGHER_BEACONRATE
 int wl_set_ap_beacon_rate(struct net_device *dev, int val, char *ifname);
@@ -237,7 +232,6 @@ extern s32 wl_cfg80211_set_ap_role(struct bcm_cfg80211 *cfg, struct net_device *
 extern int wl_cfg80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
 	struct cfg80211_csa_settings *params);
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0) */
-
 
 extern bcm_struct_cfgdev *
 wl_cfg80211_add_virtual_iface(struct wiphy *wiphy,

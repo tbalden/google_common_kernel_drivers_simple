@@ -178,7 +178,6 @@ do { \
 		} \
 	} while (0)
 
-
 /* Log Filter APIs */
 int32
 dhd_log_enable_type(dhd_logger_t *pdl, uint32 type);

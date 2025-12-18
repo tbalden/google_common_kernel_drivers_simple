@@ -81,6 +81,8 @@ extern void dhd_plat_pcie_register_dump(void *plat_info);
 extern void dhd_plat_pin_dbg_show(void *plat_info);
 extern void dhd_plat_get_rc_port_dev_details(void *plat_info, void *ep_pdev);
 extern void dhd_plat_bus_post_init_quirks(void *plat_info, void *dhd_bus);
+extern void dhd_plat_tx_pktcount(void *plat_info, uint cnt);
+extern void dhd_plat_rx_pktcount(void *plat_info, uint cnt);
 
 extern uint32 dhd_plat_get_info_size(void);
 extern void dhd_plat_l1ss_ctrl(bool ctrl);

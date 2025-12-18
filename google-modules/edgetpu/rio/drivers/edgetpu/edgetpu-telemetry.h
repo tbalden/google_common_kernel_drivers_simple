@@ -43,10 +43,9 @@ int edgetpu_telemetry_kci(struct edgetpu_dev *etdev);
  *
  * Returns 0 on success, or a negative errno on error.
  */
-int edgetpu_telemetry_set_event(struct edgetpu_dev *etdev, enum gcip_telemetry_type type,
-				u32 eventfd);
+int edgetpu_telemetry_set_event(struct edgetpu_dev *etdev, struct gcip_telemetry *tel, u32 eventfd);
 /* Removes previously set event. */
-void edgetpu_telemetry_unset_event(struct edgetpu_dev *etdev, enum gcip_telemetry_type type);
+void edgetpu_telemetry_unset_event(struct edgetpu_dev *etdev, struct gcip_telemetry *tel);
 
 /* Checks telemetries and signals eventfd if needed. */
 void edgetpu_telemetry_irq_handler(struct edgetpu_dev *etdev);
@@ -56,7 +55,7 @@ void edgetpu_telemetry_mappings_show(struct edgetpu_dev *etdev,
 				     struct seq_file *s);
 
 /* Map telemetry buffer into user space. */
-int edgetpu_mmap_telemetry_buffer(struct edgetpu_dev *etdev, enum gcip_telemetry_type type,
+int edgetpu_mmap_telemetry_buffer(struct edgetpu_dev *etdev, struct gcip_telemetry *tel,
 				  struct vm_area_struct *vma, int core_id);
 
 #endif /* __EDGETPU_TELEMETRY_H__ */

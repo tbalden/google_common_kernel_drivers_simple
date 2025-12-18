@@ -21,7 +21,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 #include <linux/vmalloc.h>
 #include <net/rtnetlink.h>
 
@@ -116,6 +115,7 @@ s32 dhd_cfg80211_clean_p2p_info(struct bcm_cfg80211 *cfg)
 
 	return 0;
 }
+
 #ifdef WL_STATIC_IF
 int32
 wl_cfg80211_update_iflist_info(struct bcm_cfg80211 *cfg, struct net_device *ndev,
@@ -124,6 +124,7 @@ wl_cfg80211_update_iflist_info(struct bcm_cfg80211 *cfg, struct net_device *ndev
 		return dhd_update_iflist_info(cfg->pub, ndev, ifidx, addr, bssidx, name, if_state);
 }
 #endif /* WL_STATIC_IF */
+
 struct net_device* wl_cfg80211_allocate_if(struct bcm_cfg80211 *cfg, int ifidx, const char *name,
 	uint8 *mac, uint8 bssidx, const char *dngl_name)
 {

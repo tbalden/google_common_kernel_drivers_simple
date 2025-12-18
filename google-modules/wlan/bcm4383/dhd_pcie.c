@@ -520,7 +520,6 @@ enum {
 	IOV_PCIE_LAST /**< unused IOVAR */
 };
 
-
 const bcm_iovar_t dhdpcie_iovars[] = {
 	{"intr",	IOV_INTR,	0, 	0, IOVT_BOOL,	0 },
 #ifdef DHD_BUS_MEM_ACCESS
@@ -761,7 +760,6 @@ dhd_bus_unregister(void)
 	return;
 }
 
-
 /** returns a host virtual address */
 uint32 *
 dhdpcie_bus_reg_map(osl_t *osh, ulong addr, int size)
@@ -919,7 +917,6 @@ dhd_bus_pcie_pwr_req_clear_nolock(struct dhd_bus *bus)
 {
 	_dhd_bus_pcie_pwr_req_clear_cmn(bus);
 }
-
 
 static INLINE void
 _dhd_bus_pcie_pwr_req_cmn(struct dhd_bus *bus)
@@ -1213,7 +1210,6 @@ dhdpcie_ltr_active_sanity_check(dhd_pub_t *dhdp)
 	/* for debug information */
 	dhdpcie_ltr_sleep_lat_get(dhdp, &ltr_sleep_lat_ns);
 }
-
 
 /* This is the function to plug-in any post prot init quirks */
 void
@@ -2656,7 +2652,6 @@ dhdpcie_dongle_attach(dhd_bus_t *bus)
 			(val | PCIE_BARCOHERENTACCEN_MASK));
 	}
 
-
 	/* EFI requirement - stop driver load if FW is already running
 	*  need to do this here before pcie_watchdog_reset, because
 	*  pcie_watchdog_reset will put the ARM back into halt state
@@ -2759,7 +2754,6 @@ dhdpcie_dongle_attach(dhd_bus_t *bus)
 	if (dongle_reset_needed) {
 		dhdpcie_dongle_reset(bus);
 	}
-
 
 	dhdpcie_dongle_flr_or_pwr_toggle(bus);
 
@@ -4125,7 +4119,6 @@ dhdpcie_download_firmware(struct dhd_bus *bus, osl_t *osh)
 	DHD_OS_WAKE_LOCK(bus->dhd);
 	ret = _dhdpcie_download_firmware(bus);
 
-
 	DHD_OS_WAKE_UNLOCK(bus->dhd);
 	return ret;
 } /* dhdpcie_download_firmware */
@@ -4535,7 +4528,6 @@ dhdpcie_download_nvram(struct dhd_bus *bus)
 		}
 	}
 
-
 err:
 	if (memblock) {
 #ifdef SUPPORT_OTA_UPDATE
@@ -4636,7 +4628,6 @@ _dhdpcie_free_nvram_params(struct dhd_bus *bus)
 	}
 }
 
-
 /** Handler to send a signal to the dhdmonitor process to notify of firmware traps */
 void
 dhdpcie_handle_dongle_trap(struct dhd_bus *bus)
@@ -4707,7 +4698,6 @@ _dhdpcie_download_firmware(struct dhd_bus *bus)
 	/* EXAMPLE: nvram_array */
 	/* If a valid nvram_arry is specified as above, it can be passed down to dongle */
 	/* dhd_bus_set_nvram_params(bus, (char *)&nvram_array); */
-
 
 	/* External nvram takes precedence if specified */
 	bcmerror = dhdpcie_download_nvram(bus);
@@ -5312,7 +5302,6 @@ done2:
 
 	return bcmerror;
 } /* dhdpcie_checkdied */
-
 
 /* Custom copy of dhdpcie_mem_dump() that can be called at interrupt level */
 void dhdpcie_mem_dump_bugcheck(dhd_bus_t *bus, uint8 *buf)
@@ -7890,7 +7879,6 @@ aspm_enab:
 	return ret;
 }
 
-
 #if defined(__linux__)
 int
 dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
@@ -9925,7 +9913,6 @@ dhdpcie_bus_doiovar(dhd_bus_t *bus, const bcm_iovar_t *vi, uint32 actionid, cons
 		break;
 
 
-
 	case IOV_GVAL(IOV_DONGLE_RXLAT_INFO):
 	{
 		unsigned long flags = 0;
@@ -10318,6 +10305,11 @@ dhd_recover_timeout_by_scheduling_dpc(struct dhd_bus *bus)
 {
 	int host_irq_disabled = dhdpcie_irq_disabled(bus);
 	bool dpc_scheduled = FALSE;
+
+	if (dhd_get_reboot_status(bus->dhd) >= 0) {
+		DHD_ERROR(("%s: not to reschedule dpc, reboot is in progress\n", __FUNCTION__));
+		goto exit;
+	}
 
 	/* For INTX, reschedule only if INTSTATUS is set */
 	if (bus->d2h_intr_method == PCIE_INTX) {
@@ -12432,7 +12424,6 @@ dhdpcie_lcreg(osl_t *osh, uint32 mask, uint32 val)
 	uint8	lcreg_offset;	/* PCIE capability LCreg offset in the config space */
 	uint32	reg_val;
 
-
 	pcie_cap = dhdpcie_find_pci_capability(osh, PCI_CAP_PCIECAP_ID);
 
 	if (!pcie_cap) {
@@ -12617,7 +12608,6 @@ exit:
 	si_setcoreidx(bus->sih, save_idx);
 	return ret;
 }
-
 
 #ifdef DNGL_AXI_ERROR_LOGGING
 bool
@@ -12812,7 +12802,6 @@ dhd_bus_gen_devmb_intr(struct dhd_bus *bus)
 #else
 #define DB7_TRAP_ACK_RETRIES	50u
 #endif /* BCMQT */
-
 
 /* Upon receiving a mailbox interrupt,
  * if H2D_FW_TRAP bit is set in mailbox location
@@ -13558,7 +13547,6 @@ dhd_bus_handle_mb_data(dhd_bus_t *bus, uint32 d2h_mb_data, const char *context)
 	driver_state_t driver_state;
 	BCM_REFERENCE(driver_state);
 
-
 	DHD_INFO(("D2H_MB_DATA: 0x%04x\n", d2h_mb_data));
 	DHD_LOG_MSGTYPE(bus->dhd, bus->dhd->logger, &driver_state, MSG_TYPE_D2H_MAILBOX_DATA,
 		&d2h_mb_data, sizeof(d2h_mb_data));
@@ -14015,7 +14003,6 @@ dhdpci_bus_rte_log_time_sync_poll(dhd_bus_t *bus)
 	}
 }
 #endif /* DHD_H2D_LOG_TIME_SYNC */
-
 
 static bool
 dhdpci_bus_read_frames(dhd_bus_t *bus)
@@ -14765,7 +14752,6 @@ dhdpcie_readshared(dhd_bus_t *bus)
 		bus->h2d_mb_data_ptr_addr = ltoh32(sh->h2d_mb_data_ptr);
 		bus->d2h_mb_data_ptr_addr = ltoh32(sh->d2h_mb_data_ptr);
 
-
 		if (bus->api.fw_rev >= PCIE_SHARED_VERSION_6) {
 			bus->max_tx_flowrings = ltoh16(ring_info.max_tx_flowrings);
 			bus->max_submission_rings = ltoh16(ring_info.max_submission_queues);
@@ -15487,7 +15473,6 @@ dhdpcie_init_shared_addr(dhd_bus_t *bus)
 #endif /* DHD_PCIE_RUNTIMEPM */
 	dhdpcie_bus_membytes(bus, TRUE, DHD_PCIE_MEM_BAR1, addr, (uint8 *)&val, sizeof(val));
 }
-
 
 bool
 dhdpcie_chipmatch(uint16 vendor, uint16 device)
@@ -16466,7 +16451,6 @@ dhd_bus_flow_ring_cnt_update(dhd_bus_t *bus, uint16 flowid, uint32 txstatus)
 {
 	flow_ring_node_t *flow_ring_node;
 
-
 	/* If we have d2h sync enabled due to marker overloading, we cannot update this. */
 	if (bus->dhd->d2h_sync_mode)
 		return;
@@ -16484,11 +16468,9 @@ dhd_bus_flow_ring_cnt_update(dhd_bus_t *bus, uint16 flowid, uint32 txstatus)
 	ASSERT(flow_ring_node->flowid == flowid);
 	flow_ring_node->flow_info.tx_status[txstatus]++;
 
-
 	return;
 }
 #endif /* BCMDBG */
-
 
 bool
 dhdpcie_bus_get_pcie_hostready_supported(dhd_bus_t *bus)
@@ -16927,7 +16909,6 @@ dhd_bus_get_armca7_pc(struct dhd_bus *bus, bool loop_print)
 		serialized_backplane_access(bus, debug_base + CA7_REG_OFF(ProgramCounterSampling),
 			4, &val, TRUE);
 	}
-
 
 exit:
 	/* lock back OsLockCtrl register to prevent access to ARMCA7 debug registers */

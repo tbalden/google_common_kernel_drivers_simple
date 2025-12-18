@@ -147,7 +147,6 @@ static struct platform_device sscd_dev = {
 		},
 };
 
-
 /* Google PCIe interface */
 static int pcie_ch_num = GOOGLE_PCIE_CH_NUM;
 static dhd_pcie_event_cb_t g_pfn = NULL;
@@ -1295,7 +1294,7 @@ irq_affinity_hysteresis_control(struct pci_dev *pdev,
 	 * is used to drop irq affinity to small core.
 	 */
 	bool has_less_recent_affinity_update = (curr_time_ns - last_affinity_update_time_ns)
-		< ((AFFINITY_UPDATE_MIN_PERIOD_SEC << 4 )  * NSEC_PER_SEC);
+		< ((AFFINITY_UPDATE_MIN_PERIOD_SEC << 4) * NSEC_PER_SEC);
 	if (!pdev) {
 		DHD_ERROR(("%s : pdev is NULL\n", __FUNCTION__));
 		return;
@@ -1312,7 +1311,7 @@ irq_affinity_hysteresis_control(struct pci_dev *pdev,
 				DHD_INFO(("%s switches to big core successfully\n", __FUNCTION__));
 			} else {
 				DHD_ERROR(("%s switches to big core unsuccessfully!\n",
-					 __FUNCTION__));
+					__FUNCTION__));
 			}
 		}
 #ifdef DHD_HOST_CPUFREQ_BOOST

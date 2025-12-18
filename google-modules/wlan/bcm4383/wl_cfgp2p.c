@@ -555,7 +555,6 @@ wl_cfgp2p_ifchange(struct bcm_cfg80211 *cfg, struct ether_addr *mac, u8 if_type,
 	return err;
 }
 
-
 /* Get the index of a created P2P BSS.
  * Parameters:
  * @mac      : MAC address of the created BSS
@@ -1314,7 +1313,6 @@ exit:
 #define wl_cfgp2p_is_wfd_ie(ie, tlvs, len)	wl_cfgp2p_has_ie(ie, tlvs, len, \
 		(const uint8 *)WFA_OUI, WFA_OUI_LEN, WFA_OUI_TYPE_WFD)
 
-
 /* Is any of the tlvs the expected entry? If
  * not update the tlvs buffer pointer/length.
  */
@@ -1737,7 +1735,6 @@ wl_cfgp2p_discover_listen(struct bcm_cfg80211 *cfg, s32 channel, u32 duration_ms
 exit:
 	return ret;
 }
-
 
 s32
 wl_cfgp2p_discover_enable_search(struct bcm_cfg80211 *cfg, u8 enable)

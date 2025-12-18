@@ -850,12 +850,10 @@ static void fts_update_abnormal_reset(struct fts_ts_data *data,
           break;
         case 6:
           FTS_ERROR("Touch ic reset: 6");
-          fts_update_feature_setting(data);
-          break;
+          return;
         case 7:
           FTS_ERROR("Touch ic reset: 7");
-          fts_update_feature_setting(data);
-          break;
+          return;
         default:
           return;
     }
@@ -1106,6 +1104,10 @@ static int fts_read_parse_touchdata(struct fts_ts_data *data)
 			}
 			break;
 	}
+
+#if GOOGLE_REPORT_TIMESTAMP_MODE
+    data->timestamp = (u32)((buf[84] << 24) + (buf[85] << 16) + (buf[86] << 8) + buf[87]);
+#endif // GOOGLE_REPORT_TIMESTAMP_MODE
 
     if (data->touch_point == 0) {
         FTS_INFO("no touch point information(%02x)", buf[1]);
@@ -2103,8 +2105,6 @@ static int fts_ts_probe_entry(struct fts_ts_data *ts_data)
     memset(ts_data->current_host_status.data, 0, sizeof(struct fw_status_ts));
 #endif
 
-    ts_data->enable_fw_grip = FW_GRIP_ENABLE;
-    ts_data->enable_fw_palm = FW_GRIP_ENABLE;
     ts_data->glove_mode = DISABLE;
     fts_update_feature_setting(ts_data);
 
@@ -2394,32 +2394,28 @@ int fts_set_heatmap_mode(struct fts_ts_data *ts_data, u8 heatmap_mode)
     return ret;
 }
 
-int fts_set_grip_mode(struct fts_ts_data *ts_data, u8 grip_mode)
+int fts_set_grip_mode(struct fts_ts_data *ts_data, bool en)
 {
     int ret = 0;
-    bool en = grip_mode % 2;
-    u8 value = en ? 0x01 : 0xAA;
+    u8 value = en ? 0x00 : 0xAA;
     u8 reg = FTS_REG_EDGE_MODE_EN;
 
     ret = fts_write_reg_safe(reg, value);
 
-    FTS_DEBUG("%s fw_grip(%d) %s.\n", en ? "Enable" : "Disable",
-        ts_data->enable_fw_grip,
+    FTS_DEBUG("%s fw_grip %s.\n", en ? "Enable" : "Disable",
         (ret == 0)  ? "successfully" : "unsuccessfully");
     return ret;
 }
 
-int fts_set_palm_mode(struct fts_ts_data *ts_data, u8 palm_mode)
+int fts_set_palm_mode(struct fts_ts_data *ts_data, bool en)
 {
     int ret = 0;
-    bool en = palm_mode % 2;
     u8 value = en ? ENABLE : DISABLE;
     u8 reg = FTS_REG_PALM_EN;
 
     ret = fts_write_reg_safe(reg, value);
 
-    FTS_DEBUG("%s fw_palm(%d) %s.\n", en ? "Enable" : "Disable",
-        ts_data->enable_fw_palm,
+    FTS_DEBUG("%s fw_palm %s.\n", en ? "Enable" : "Disable",
         (ret == 0) ? "successfully" : "unsuccessfully");
     return ret;
 }
@@ -2494,6 +2490,9 @@ void fts_update_feature_setting(struct fts_ts_data *ts_data)
 
     goog_notify_fw_status_changed(ts_data->gti, GTI_FW_STATUS_RESET, &gti_status_data);
 #endif /* IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE) */
+#if GOOGLE_REPORT_TIMESTAMP_MODE
+    ts_data->raw_timestamp_sensing = 0;
+#endif // GOOGLE_REPORT_TIMESTAMP_MODE
 
     fts_set_irq_report_onoff(ENABLE);
 }

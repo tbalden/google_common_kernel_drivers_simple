@@ -101,7 +101,6 @@
 #define	MAX_VIF_OFFSET	15
 #define MAX_WAIT_TIME 1500
 
-
 #if !defined(BCMDONGLEHOST)
 #ifdef ntoh32
 #undef ntoh32
@@ -185,11 +184,9 @@ static int bw2cap[] = { 0, 0, WLC_BW_CAP_20MHZ, WLC_BW_CAP_40MHZ, WLC_BW_CAP_80M
 #define DHD_OS_WAKE_LOCK_TIMEOUT(pub)
 #endif /* defined(BCMDONGLEHOST) */
 
-
 #define IS_WPA_AKM(akm) ((akm) == RSN_AKM_NONE ||			\
 				 (akm) == RSN_AKM_UNSPECIFIED ||	\
 				 (akm) == RSN_AKM_PSK)
-
 
 #ifdef SUPPORT_AP_BWCTRL
 static void
@@ -202,7 +199,6 @@ struct chan_info {
 	int chan_type;
 };
 #endif
-
 
 #if defined(WL_FW_OCE_AP_SELECT)
 bool wl_cfg80211_is_oce_ap(struct wiphy *wiphy, const u8 *bssid_hint)
@@ -382,7 +378,6 @@ wl_validate_wps_ie(const char *wps_ie, s32 wps_ie_len, bool *pbc)
 		subel += subelt_len;
 	}
 }
-
 
 bool
 wl_cfg80211_check_vif_in_use(struct net_device *ndev)
@@ -3839,7 +3834,8 @@ wl_cfg80211_set_ap_role(
 
 	if (bssidx == 0) {
 		pm = 0;
-		if ((err = wldev_ioctl_set(dev, WLC_SET_PM, &pm, sizeof(pm))) != 0) {
+		err = wl_cfg80211_set_pm(dev, pm, PM_STATE_AP_START);
+		if (err != 0) {
 			WL_ERR(("wl PM 0 returned error:%d\n", err));
 			/* Ignore error, if any */
 			err = BCME_OK;
@@ -4132,7 +4128,6 @@ wl_cfg80211_bcn_bringup_ap(
 				WLC_IOCTL_SMLEN, bssidx, &cfg->ioctl_buf_sync);
 			if (err < 0) {
 				WL_ERR(("bip set error %d bip:0x%x\n", err, sec->bip));
-
 
 				{
 					goto exit;
@@ -5727,6 +5722,10 @@ wl_cfgvif_update_mlo_peer_info(struct bcm_cfg80211 *cfg, struct net_device *ndev
 				mlo_peer_info.num_links++;
 
 				match_found = true;
+				if (mlo_peer_info.num_links >= MAX_MLO_LINK) {
+					WL_INFORM_MEM(("Reached the count of max mlo link.\n"));
+					break;
+				}
 			}
 		}
 	}
@@ -6360,7 +6359,6 @@ out:
 }
 #endif /* LINUX_VERSION > VERSION(3,2,0) || WL_COMPAT_WIRELESS */
 
-
 static bool check_dev_role_integrity(struct bcm_cfg80211 *cfg, u32 dev_role)
 {
 #if defined(BCMDONGLEHOST)
@@ -6376,7 +6374,6 @@ static bool check_dev_role_integrity(struct bcm_cfg80211 *cfg, u32 dev_role)
 #endif /* defined(BCMDONGLEHOST) */
 	return true;
 }
-
 
 s32
 wl_cfg80211_dfs_ap_move(struct net_device *ndev, char *data, char *command, int total_len)
@@ -6456,7 +6453,6 @@ wl_cfg80211_dfs_ap_move(struct net_device *ndev, char *data, char *command, int 
 	}
 	return err;
 }
-
 
 #ifdef WL_CFG80211_ACL
 static int
@@ -6960,7 +6956,6 @@ const wl_event_msg_t *e, void *data)
 	return 0;
 }
 
-
 #ifdef WLTDLS
 s32
 wl_cfg80211_tdls_config(struct bcm_cfg80211 *cfg, enum wl_tdls_config state, bool auto_mode)
@@ -7109,7 +7104,6 @@ struct net_device* wl_get_ap_netdev(struct bcm_cfg80211 *cfg, char *ifname)
 
 	return ndev;
 }
-
 
 #ifdef SUPPORT_AP_HIGHER_BEACONRATE
 #define WLC_RATE_FLAG	0x80
@@ -7501,7 +7495,6 @@ wl_cfg80211_iface_count(struct net_device *dev)
 	return iface_count;
 }
 
-
 typedef struct {
 	uint16 id;
 	uint16 len;
@@ -7544,7 +7537,6 @@ wl_pack_uint_cb(void *ctx, uint16 id, uint16 len, uint8 *buf)
 			break;
 	}
 }
-
 
 int wl_cfg80211_set_he_mode(struct net_device *dev, struct bcm_cfg80211 *cfg,
 		s32 bssidx, u32 he_flag, bool set)
@@ -7712,7 +7704,6 @@ wl_cfg80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
 	return err;
 }
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0) */
-
 
 #ifdef SUPPORT_AP_SUSPEND
 void
@@ -9297,7 +9288,6 @@ wl_cfgvif_clone_bss_info(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 		return BCME_ERROR;
 	}
 
-
 	if (!src_bss->ies || !src_bss->ies->len) {
 		WL_ERR(("empty bss ies\n"));
 		err = BCME_NOMEM;
@@ -9705,7 +9695,6 @@ wl_cfgvif_to_fw_iftype(wl_iftype_t iftype)
 		case WL_IF_TYPE_P2P_GC:
 			ret = WL_INTERFACE_TYPE_P2P_GC;
 			break;
-
 
 		default:
 			WL_ERR(("Unsupported type:%d \n", iftype));

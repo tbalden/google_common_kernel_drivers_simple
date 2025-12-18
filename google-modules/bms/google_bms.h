@@ -40,6 +40,37 @@ struct device_node;
 #define GBMS_AAFV_VOLTAGE_OFFSET_SCALE 1000
 #define GBMS_AACT_NB_LIMITS_MAX 5
 #define GBMS_AACT_PROFILE_MAX 100
+#define GBMS_AACC_TEMP_NB_MAX 10
+#define GBMS_AACC_SOC_SIZE 100
+
+struct aacc_weight_profile {
+	/* the profile of aacc_chg/aacc_dsg */
+	int temp_nb_limits;
+	s32 temp_limits[GBMS_AACC_TEMP_NB_MAX];
+	u32 *weight_limits;
+};
+
+struct aacc_profile {
+	struct aacc_weight_profile chg;	/* the data of the charging session */
+	struct aacc_weight_profile dsg;	/* the data of the discharging session */
+	int start_soc;			/* the start soc in each session */
+	int end_soc;			/* the end soc in each session */
+	int aawc;			/* wrights cycles */
+
+	/* to calculate the average temperature */
+	long long temp_sum;
+	ktime_t time_sum;
+	ktime_t last_update;
+};
+
+/* index 0 will correspond to soc 1%, and so on, index 99 will correspond to soc 100% */
+#define GBMS_CHG_WEIGHTS(profile, ti, soc) \
+	(((ti) >= 0 && (soc) >= 1) ? \
+	profile->aacc_cycles.chg.weight_limits[((ti) * GBMS_AACC_SOC_SIZE) + (soc - 1)] : 0)
+
+#define GBMS_DSG_WEIGHTS(profile, ti, soc) \
+	(((ti) >= 0 && (soc) >= 1) ? \
+	profile->aacc_cycles.dsg.weight_limits[((ti) * GBMS_AACC_SOC_SIZE) + (soc - 1)] : 0)
 
 struct gbms_chg_profile {
 	const char *owner_name;
@@ -95,6 +126,9 @@ struct gbms_chg_profile {
 	bool aact_support_multiple_profiles;
 	bool aact_load_chg_ecc;
 	u32 *aact_cccm_limits;
+
+	/* AACC feature */
+	struct aacc_profile aacc_cycles;
 
 	bool debug_chg_profile;
 	bool enable_switch_chg_profile;
@@ -384,9 +418,9 @@ enum gbms_stats_tier_idx_t {
 	GBMS_STATS_BASE_BATT = 90,
 	GBMS_STATS_SEC_BATT = 91,
 
-	/* TODO: rename, these are not really related to AC */
-	GBMS_STATS_AC_TI_FULL_CHARGE = 100,
-	GBMS_STATS_AC_TI_HIGH_SOC = 101,
+	GBMS_STATS_TI_FULL_CHARGE = 100,
+	GBMS_STATS_TI_HIGH_SOC = 101,
+	GBMS_STATS_TI_EOC = 102,
 
 	/* Defender TEMP or DWELL */
 	GBMS_STATS_BD_TI_OVERHEAT_TEMP = 110,
@@ -455,8 +489,9 @@ struct gbms_charging_event {
 	uint16_t csi_aggregate_type;
 
 	int aacp_version;
-	int aacc;
 	int aafv;
+	int aacc;
+	int aacc_chg_cc;
 	int max_charge_voltage;
 
 	/* health based charging */
@@ -476,6 +511,7 @@ struct gbms_charging_event {
 	struct gbms_ce_tier_stats temp_filter_stats;
 	struct gbms_ce_tier_stats policy_longlife_stats;
 	struct gbms_ce_tier_stats policy_force_full_stats;
+	struct gbms_ce_tier_stats eoc_charge_stats;
 };
 
 #define GBMS_CCCM_LIMITS_SET(profile, ti, vi) \
@@ -603,7 +639,9 @@ const char *gbms_chg_ev_adapter_s(int adapter);
 #define REASON_DC_DRV		"DC_DRV"
 #define REASON_MDIS		"MDIS"
 #define REASON_THERM		"THERMAL_DAEMON_VOTER"
-
+#define MSC_PWR_VOTER		"msc_pwr_disable"
+#define DEFENDER_ENABLED_VOTER "DEFENDER_ENABLED_VOTER"
+#define WLC_DEFENDER_VOTABLE "WLC_DEFENDER"
 #define VOTABLE_FORCE_5V	"FORCE_5V"
 
 #define HDA_TZ_NONE		(0)
@@ -694,6 +732,11 @@ int gbms_aafv_get_offset(const struct gbms_chg_profile *profile, const int cycle
 bool gbms_aafv_offset_is_valid(const struct gbms_chg_profile *profile,
 			       const u32 offset, const u32 len);
 int gbms_aafv_get_last_entry(const struct gbms_chg_profile *profile);
+int gbms_read_aacc_chg_weights(struct gbms_chg_profile *profile,
+			       struct device_node *node);
+int gbms_read_aacc_dsg_weights(struct gbms_chg_profile *profile,
+			       struct device_node *node);
+int gbms_aacc_temp_idx(const struct gbms_chg_profile *profile, int temp, bool is_charge);
 
 bool chg_state_is_disconnected(const union gbms_charger_state *chg_state);
 
@@ -730,6 +773,7 @@ enum gbms_charger_modes {
 	GBMS_USB_OTG_ON 	= 0x31,
 	GBMS_USB_OTG_FRS_ON	= 0x32,
 
+	GBMS_CHGR_MODE_WLC_RX	= 0x39,
 	GBMS_CHGR_MODE_WLC_TX	= 0x40,
 
 	GBMS_POGO_VIN		= 0x50,
@@ -960,6 +1004,13 @@ enum gbms_fwupdate_max77779_err_code {
 	FWU_MAX77779_ERR_NONE = 1,
 };
 
+enum bd_trickle_ver {
+	BD_TRICKLE_VER_NONE = 0,
+	BD_TRICKLE_VER_SOC = 1,
+	BD_TRICKLE_VER_FCC = 2,
+	BD_TRICKLE_VER_MAX,
+};
+
 /* Define charger status for stability dump */
 #define CDD_PD_VOLTAGE_UV			9000000
 
@@ -970,5 +1021,13 @@ enum gbms_fwupdate_max77779_err_code {
 #define CDD_CHARGE_WLC_CHARGING			BIT(4)
 #define CDD_CHARGE_EXT_CHARGING			BIT(5)
 #define CDD_CHARGE_INIT_DONE			BIT(7)
+
+enum fg_log_event {
+	FG_LOG_RELAX = 0,
+	FG_LOG_DEBUG,
+	FG_LOG_CHG_DONE,
+	FG_LOG_REACHING_100,
+	FG_LOG_FALL_BELOW_10,
+};
 
 #endif  /* __GOOGLE_BMS_H_ */

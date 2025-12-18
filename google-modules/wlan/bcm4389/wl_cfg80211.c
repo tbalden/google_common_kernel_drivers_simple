@@ -5812,8 +5812,8 @@ wl_fils_add_hlp_container(struct bcm_cfg80211 *cfg, struct net_device *dev,
 
 	if ((hlp_ie = (const bcm_tlv_ext_t*)bcm_parse_tlvs_dot11((const uint8 *)ie_buf, ie_len,
 		FILS_HLP_CONTAINER_EXT_ID, TRUE))) {
-		u16 hlp_len = hlp_ie->len;
-		u16 left_len = (ie_len - ((const uint8*)hlp_ie - ie_buf));
+		uint hlp_len = hlp_ie->len;
+		uint left_len = (ie_len - ((const uint8*)hlp_ie - ie_buf));
 		bcm_iov_buf_t *iov_buf = 0;
 		uint8* pxtlv;
 		int err;
@@ -5838,9 +5838,10 @@ wl_fils_add_hlp_container(struct bcm_cfg80211 *cfg, struct net_device *dev,
 
 		pxtlv = (uint8 *)&iov_buf->data[0];
 		((bcm_xtlv_t*)pxtlv)->id = WL_FILS_XTLV_HLP_IE;
-		((bcm_xtlv_t*)pxtlv)->len = hlp_len;
+		((bcm_xtlv_t *)pxtlv)->len = (uint16)hlp_len;
 
-		memcpy(((bcm_xtlv_t*)pxtlv)->data, hlp_ie, ((bcm_xtlv_t*)pxtlv)->len);
+		(void)memcpy_s(((bcm_xtlv_t *)pxtlv)->data, ((bcm_xtlv_t *)pxtlv)->len, hlp_ie,
+			((bcm_xtlv_t *)pxtlv)->len);
 
 		iov_buf->version = WL_FILS_IOV_VERSION_1_1;
 		iov_buf->id = WL_FILS_CMD_ADD_HLP_IE;
@@ -15370,6 +15371,7 @@ wl_notify_rx_mgmt_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	freq = wl_channel_to_frequency(wf_chspec_ctlchan(chspec), CHSPEC_BAND(chspec));
 #endif
 	if (event == WLC_E_ACTION_FRAME_RX) {
+
 		{
 			u8 ioctl_buf[WLC_IOCTL_SMLEN];
 			if ((err = wldev_iovar_getbuf_bsscfg(ndev, "cur_etheraddr",
@@ -15380,6 +15382,7 @@ wl_notify_rx_mgmt_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 			}
 			eacopy(ioctl_buf, da.octet);
 		}
+
 		{
 			err = wldev_ioctl_get(ndev, WLC_GET_BSSID, &bssid, ETHER_ADDR_LEN);
 			if ((err < 0) && (err != BCME_NOTASSOCIATED)) {

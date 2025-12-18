@@ -1606,6 +1606,8 @@ static int fts_test_malloc_free_mc_sc(struct fts_test *tdata, bool allocate)
     if (true == allocate) {
         fts_malloc_r(thr->rawdata_h_min, buflen);
         fts_malloc_r(thr->rawdata_h_max, buflen);
+        fts_malloc_r(thr->rawdata_h_min_ical, buflen);
+        fts_malloc_r(thr->rawdata_h_max_ical, buflen);
         if (tdata->func->rawdata2_support) {
             fts_malloc_r(thr->rawdata_l_min, buflen);
             fts_malloc_r(thr->rawdata_l_max, buflen);
@@ -1614,6 +1616,10 @@ static int fts_test_malloc_free_mc_sc(struct fts_test *tdata, bool allocate)
         fts_malloc_r(thr->tx_linearity_min, buflen);
         fts_malloc_r(thr->rx_linearity_max, buflen);
         fts_malloc_r(thr->rx_linearity_min, buflen);
+        fts_malloc_r(thr->tx_linearity_max_ical, buflen);
+        fts_malloc_r(thr->tx_linearity_min_ical, buflen);
+        fts_malloc_r(thr->rx_linearity_max_ical, buflen);
+        fts_malloc_r(thr->rx_linearity_min_ical, buflen);
 
         fts_malloc_r(thr->scap_cb_off_min, buflen_sc);
         fts_malloc_r(thr->scap_cb_off_max, buflen_sc);
@@ -1628,6 +1634,10 @@ static int fts_test_malloc_free_mc_sc(struct fts_test *tdata, bool allocate)
         fts_malloc_r(thr->scap_rawdata_off_max, buflen_sc);
         fts_malloc_r(thr->scap_rawdata_on_min, buflen_sc);
         fts_malloc_r(thr->scap_rawdata_on_max, buflen_sc);
+        fts_malloc_r(thr->scap_rawdata_off_min_ical, buflen_sc);
+        fts_malloc_r(thr->scap_rawdata_off_max_ical, buflen_sc);
+        fts_malloc_r(thr->scap_rawdata_on_min_ical, buflen_sc);
+        fts_malloc_r(thr->scap_rawdata_on_max_ical, buflen_sc);
         fts_malloc_r(thr->scap_rawdata_hi_min, buflen_sc);
         fts_malloc_r(thr->scap_rawdata_hi_max, buflen_sc);
         fts_malloc_r(thr->scap_rawdata_hov_min, buflen_sc);
@@ -1655,6 +1665,8 @@ static int fts_test_malloc_free_mc_sc(struct fts_test *tdata, bool allocate)
     } else {
         fts_free(thr->rawdata_h_min);
         fts_free(thr->rawdata_h_max);
+        fts_free(thr->rawdata_h_min_ical);
+        fts_free(thr->rawdata_h_max_ical);
         if (tdata->func->rawdata2_support) {
             fts_free(thr->rawdata_l_min);
             fts_free(thr->rawdata_l_max);
@@ -1663,6 +1675,10 @@ static int fts_test_malloc_free_mc_sc(struct fts_test *tdata, bool allocate)
         fts_free(thr->tx_linearity_min);
         fts_free(thr->rx_linearity_max);
         fts_free(thr->rx_linearity_min);
+        fts_free(thr->tx_linearity_max_ical);
+        fts_free(thr->tx_linearity_min_ical);
+        fts_free(thr->rx_linearity_max_ical);
+        fts_free(thr->rx_linearity_min_ical);
 
         fts_free(thr->scap_cb_off_min);
         fts_free(thr->scap_cb_off_max);
@@ -1677,6 +1693,10 @@ static int fts_test_malloc_free_mc_sc(struct fts_test *tdata, bool allocate)
         fts_free(thr->scap_rawdata_off_max);
         fts_free(thr->scap_rawdata_on_min);
         fts_free(thr->scap_rawdata_on_max);
+        fts_free(thr->scap_rawdata_off_min_ical);
+        fts_free(thr->scap_rawdata_off_max_ical);
+        fts_free(thr->scap_rawdata_on_min_ical);
+        fts_free(thr->scap_rawdata_on_max_ical);
         fts_free(thr->scap_rawdata_hi_min);
         fts_free(thr->scap_rawdata_hi_max);
         fts_free(thr->scap_rawdata_hov_min);

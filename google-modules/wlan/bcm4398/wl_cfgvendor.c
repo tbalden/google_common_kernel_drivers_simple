@@ -676,7 +676,6 @@ wl_cfgvendor_send_hotlist_event(struct wiphy *wiphy,
 	return 0;
 }
 
-
 static int
 wl_cfgvendor_gscan_get_capabilities(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
@@ -856,7 +855,6 @@ wl_cfgvendor_initiate_gscan(struct wiphy *wiphy,
 	} else {
 		return -EINVAL;
 	}
-
 
 }
 
@@ -2015,7 +2013,6 @@ wl_cfgvendor_latency_mode_config(struct wiphy *wiphy,
 #if defined(WL_AUTO_QOS)
 	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(wdev->netdev);
 #endif /* WL_AUTO_QOS */
-
 
 	nla_for_each_attr(iter, data, len, rem) {
 		type = nla_type(iter);
@@ -6079,7 +6076,6 @@ wl_cfgvendor_nan_dp_ind_event_data_filler(struct sk_buff *msg,
 	}
 #endif /* WL_NAN_INSTANT_MODE */
 
-
 fail:
 	return ret;
 }
@@ -7088,7 +7084,6 @@ wl_cfgvendor_nan_stop_handler(struct wiphy *wiphy,
 		WL_ERR(("nan vendor args is invalid\n"));
 		goto exit;
 	}
-
 
 	if (nancfg->nan_init_state == false) {
 		WL_INFORM_MEM(("nan is not initialized/nmi doesnt exists\n"));
@@ -10773,7 +10768,6 @@ wl_cfgvendor_set_p2p_rand_mac(struct wiphy *wiphy,
 				nla_data(data), ETHER_ADDR_LEN);
 		(void)memcpy_s(wdev->address, ETHER_ADDR_LEN, nla_data(data), ETHER_ADDR_LEN);
 
-
 		err = wl_cfgp2p_disable_discovery(cfg);
 		if (unlikely(err < 0)) {
 			WL_ERR(("P2P disable discovery failed, ret=%d\n", err));
@@ -11294,7 +11288,6 @@ wl_cfgvendor_twt_setup(struct wiphy *wiphy,
 	val.desc.wake_dur_max = 0xFFFFFFFF;
 	val.desc.avg_pkt_num  = 0xFFFFFFFF;
 	val.desc.avg_pkt_size = 0xFFFFFFFF;
-
 
 	nla_for_each_attr(iter, data, len, rem_attr) {
 		type = nla_type(iter);
@@ -12755,7 +12748,6 @@ static int wl_cfgvendor_get_usable_channels_handler(struct bcm_cfg80211 *cfg,
 		WL_ERR(("get chan_info_list err(%d)\n", err));
 		goto exit;
 	}
-
 
 #ifdef WL_NAN_INSTANT_MODE
 	if ((u_info->iface_mode_mask & (1 << WIFI_INTERFACE_NAN)) &&

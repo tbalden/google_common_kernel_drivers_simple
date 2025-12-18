@@ -106,7 +106,6 @@ static void wl_cfgnan_periodic_nmi_rand_addr(struct work_struct *work);
 static uint8 wl_cfgnan_map_nan_prot_csid_to_host_csid(uint8 prot_csid);
 static uint8 wl_cfgnan_map_host_csid_to_nan_prot_csid(uint8 host_csid);
 
-
 typedef struct nan_csid_map {
 	uint16 fw_csid;
 	uint16 host_csid;
@@ -3007,7 +3006,6 @@ wl_cfgnan_build_execute_ioctl(struct net_device *ndev, struct bcm_cfg80211 *cfg,
 	wl_nan_iov_t *nan_iov_data = NULL;
 	uint8 resp_buf[NAN_IOCTL_BUF_SIZE];
 
-
 	nan_buf = MALLOCZ(cfg->osh, nan_buf_size);
 	if (!nan_buf) {
 		WL_ERR(("%s: memory allocation failed\n", __func__));
@@ -5038,8 +5036,10 @@ wl_cfgnan_terminate_all_obsolete_ranging_sessions(
 	for (i = 0; i < NAN_MAX_RANGING_INST; i++) {
 		ranging_inst = &cfg->nancfg->nan_ranging_info[i];
 		if (ranging_inst->in_use &&
-			ranging_inst->range_role == NAN_RANGING_ROLE_INITIATOR) {
-			wl_cfgnan_terminate_ranging_session(cfg, ranging_inst);
+			(ranging_inst->range_role == NAN_RANGING_ROLE_INITIATOR) &&
+			(ranging_inst->range_type == RTT_TYPE_NAN_GEOFENCE) &&
+			(ranging_inst->num_svc_ctx == 0)) {
+				wl_cfgnan_terminate_ranging_session(cfg, ranging_inst);
 		}
 	}
 
@@ -8674,7 +8674,6 @@ wl_cfgnan_handle_directed_rtt_report(struct bcm_cfg80211 *cfg,
 	int ret = BCME_OK;
 	uint32 status;
 	dhd_pub_t *dhd = (struct dhd_pub *)(cfg->pub);
-
 
 	ret = wl_cfgnan_cancel_ranging(bcmcfg_to_prmry_ndev(cfg), cfg,
 			&rng_inst->range_id, NAN_RNG_TERM_FLAG_IMMEDIATE, &status);

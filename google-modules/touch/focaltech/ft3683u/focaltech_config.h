@@ -202,6 +202,11 @@
 #define GOOGLE_REPORT_MODE                      1
 
 /*
+ * support frame timestamps
+ */
+#define GOOGLE_REPORT_TIMESTAMP_MODE            1
+
+/*
  * show debug log info for heatmap
  */
 #define FTS_DEBUG_EN                            1

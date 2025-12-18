@@ -556,7 +556,6 @@ wl_cfgp2p_ifchange(struct bcm_cfg80211 *cfg, struct ether_addr *mac, u8 if_type,
 	return err;
 }
 
-
 /* Get the index of a created P2P BSS.
  * Parameters:
  * @mac      : MAC address of the created BSS
@@ -1315,7 +1314,6 @@ exit:
 #define wl_cfgp2p_is_wfd_ie(ie, tlvs, len)	wl_cfgp2p_has_ie(ie, tlvs, len, \
 		(const uint8 *)WFA_OUI, WFA_OUI_LEN, WFA_OUI_TYPE_WFD)
 
-
 /* Is any of the tlvs the expected entry? If
  * not update the tlvs buffer pointer/length.
  */
@@ -1738,7 +1736,6 @@ wl_cfgp2p_discover_listen(struct bcm_cfg80211 *cfg, s32 channel, u32 duration_ms
 exit:
 	return ret;
 }
-
 
 s32
 wl_cfgp2p_discover_enable_search(struct bcm_cfg80211 *cfg, u8 enable)
@@ -2285,10 +2282,10 @@ wl_cfgp2p_set_p2p_ps(struct net_device *ndev, char* buf, int len)
 		}
 
 		if ((legacy_ps != -1) && ((legacy_ps == PM_MAX) || (legacy_ps == PM_OFF))) {
-			ret = wldev_ioctl_set(dev,
-				WLC_SET_PM, &legacy_ps, sizeof(legacy_ps));
-			if (unlikely(ret))
+			ret = wl_cfg80211_set_pm(dev, legacy_ps, PM_STATE_P2P_PS);
+			if (unlikely(ret)) {
 				CFGP2P_ERR(("error (%d)\n", ret));
+			}
 			wl_cfg80211_update_power_mode(dev);
 		}
 		else
@@ -3426,7 +3423,7 @@ s32 wl_cfgp2p_set_p2p_resp_ap_chn(struct net_device *net, s32 enable)
 		/* disable PM for p2p responding on infra AP channel */
 		s32 pm = PM_OFF;
 
-		ret = wldev_ioctl_set(net, WLC_SET_PM, &pm, sizeof(pm));
+		ret = wl_cfg80211_set_pm(net, pm, PM_STATE_P2P_LISTEN);
 	}
 
 	return ret;

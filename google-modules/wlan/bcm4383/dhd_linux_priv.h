@@ -93,6 +93,7 @@ typedef struct dhd_info {
 	struct mutex dhd_iovar_mutex;
 
 	struct semaphore proto_sem;
+	atomic_t proto_cnt;
 #ifdef PROP_TXSTATUS
 	spinlock_t	wlfc_spinlock;
 

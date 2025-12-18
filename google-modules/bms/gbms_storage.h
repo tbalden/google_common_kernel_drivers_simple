@@ -62,6 +62,7 @@
 typedef uint32_t gbms_tag_t;
 
 enum gbms_tags {
+	GBMS_TAG_AAWC = 0x41415743, /* AACC weights cycles */
 	GBMS_TAG_ACIM = 0x4143494d, /* Activation Impedance */
 	GBMS_TAG_AYMD = 0x41594d44,
 	GBMS_TAG_BCNT = 0x42434e54,

@@ -3091,7 +3091,6 @@ typedef struct wlc_ba_cnt {
 } wlc_ba_cnt_t;
 /* #endif  WLBA */
 
-
 /* ##### Power Stats section ##### */
 
 #define WL_PWRSTATS_VERSION	2
@@ -3137,7 +3136,6 @@ typedef BWL_PRE_PACKED_STRUCT struct wl_pwrstats {
 #define WLC_PMD_TX_PEND_WAR		0x400u   /* obsolete, can be reused */
 #define WLC_PMD_NAN_AWAKE		0x400u   /* Reusing for NAN */
 #define WLC_PMD_GPTIMER_STAY_AWAKE	0x800u
-
 
 #define WLC_PMD_PM2_RADIO_SOFF_PEND	0x2000u
 #define WLC_PMD_NON_PRIM_STA_UP		0x4000u
@@ -3579,7 +3577,6 @@ typedef struct wl_pwr_phy_stats {
 	uint32 tx_dur;	    /**< TX Active duration in us */
 	uint32 rx_dur;	    /**< RX Active duration in us */
 } wl_pwr_phy_stats_t;
-
 
 typedef struct wl_mimo_meas_metrics_v1 {
 	uint16 type;
@@ -5913,7 +5910,6 @@ typedef struct {
 	int16 deauth_rssi;                      /* deauth pkt rssi */
 } wl_event_based_statistics_v4_t;
 
-
 /* ##### SC/ Sc offload/ WBUS related ecounters */
 
 #define WL_SC_PERIODIC_COMPACT_CNTRS_VER_1 (1)
@@ -6119,7 +6115,6 @@ typedef struct event_ecounters_config_request_v2 {
 #define EVENT_ECOUNTERS_FLAGS_BUS_H2D	(1 << 6) /* Add configuration for the bus direction
 						  * 0 - D2H and 1 - H2D
 						  */
-
 
 #define EVENT_ECOUNTERS_FLAGS_DELAYED_FLUSH	(1 << 7) /* Flush only when half of the total size
 						   * of blocks gets filled. This is to avoid

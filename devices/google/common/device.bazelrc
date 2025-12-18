@@ -8,7 +8,7 @@ build --flag_alias=download_prebuilt_gki_fips140=//private/devices/google/common
 # Prebuilt GKI build number, used when --use_prebuilt_gki=true.
 # gki_prebuilts is for 4KB page kernel build, gki_prebuilts_aarch64_16k is for 16KB page kernel build
 # Notice! always set gki_prebuilts and gki_prebuilts_aarch64_16k to the same GKI build number
-build --action_env=KLEAF_DOWNLOAD_BUILD_NUMBER_MAP="gki_prebuilts=13748739,gki_prebuilts_aarch64_16k=13748739"
+build --action_env=KLEAF_DOWNLOAD_BUILD_NUMBER_MAP="gki_prebuilts=14219743,gki_prebuilts_aarch64_16k=14219743"
 
 # Use prebuilt GKI
 build --use_prebuilt_gki=true

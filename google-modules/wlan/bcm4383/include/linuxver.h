@@ -201,7 +201,6 @@ typedef irqreturn_t(*FN_ISR) (int irq, void *dev_id, struct pt_regs *ptregs);
 #endif
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 30) */
 
-
 #ifndef __exit
 #define __exit
 #endif
@@ -622,7 +621,6 @@ typedef struct {
 	spinlock_t	spinlock;
 	int		up_cnt;
 } tsk_ctl_t;
-
 
 /* ANDREY: new MACROs to start stop threads(OLD kthread API STYLE) */
 /* requires  tsk_ctl_t tsk  argument, the caller's priv data is passed in owner ptr */

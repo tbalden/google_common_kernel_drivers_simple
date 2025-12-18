@@ -167,7 +167,6 @@ uint32 g_rxlfrag_non_rxfrag_queued = 0;
 
 /** accessor functions required when ROMming this file, forced into RAM */
 
-
 pktpool_t *
 BCMPOSTTRAPRAMFN(get_pktpools_registry)(int id)
 {
@@ -747,7 +746,6 @@ BCMPOSTTRAPFASTPATH(pktpool_deq)(pktpool_t *pktp)
 	PKTSETQCALLER(p, pktp, CALL_SITE);
 	return p;
 }
-
 
 static void
 BCMPOSTTRAPFASTPATH(pktpool_enq)(pktpool_t *pktp, void *p)

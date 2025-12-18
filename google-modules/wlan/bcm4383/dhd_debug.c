@@ -153,7 +153,6 @@ struct event_log_table fw_verbose_level_map[] = {
 /* reference tab table */
 uint ref_tag_tbl[EVENT_LOG_TAG_MAX + 1] = {0};
 
-
 typedef struct dhddbg_loglist_item {
 	dll_t list;
 	prcd_event_log_hdr_t prcd_log_hdr;
@@ -2250,7 +2249,6 @@ dhd_dbg_start_pkt_monitor(dhd_pub_t *dhdp)
 		return -EINVAL;
 	}
 
-
 	tx_pkt_state = dhdp->dbg->pkt_mon.tx_pkt_state;
 	tx_status_state = dhdp->dbg->pkt_mon.tx_status_state;
 	rx_pkt_state = dhdp->dbg->pkt_mon.rx_pkt_state;
@@ -2899,7 +2897,6 @@ dhd_dbg_process_tx_status(dhd_pub_t *dhdp, void *pkt,
 		cnt = 0; \
 	} \
 }
-
 
 void print_roam_chan_list(char *prefix, uint chan_num, uint16 band_2g,
 	uint16 uni2a, uint8 uni3, uint8 *uni2c)

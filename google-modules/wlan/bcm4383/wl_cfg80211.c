@@ -196,7 +196,6 @@ u32 wl_log_level = WL_DBG_ERR | WL_DBG_P2P_ACTION | WL_DBG_INFO;
 #define OFF_CHAN_TIME_THRESHOLD_MS	200
 #define AF_RETRY_DELAY_TIME			40
 
-
 /* if sta is connected or connecting, sleep for a while before retry af tx or finding a peer */
 #define WL_AF_TX_KEEP_PRI_CONNECTION_VSDB(cfg)	\
 	do {	\
@@ -295,7 +294,6 @@ static const struct ieee80211_regdomain brcm_regdom = {
 (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
 _Pragma("GCC diagnostic pop")
 #endif
-
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0)) && \
 	(defined(WL_IFACE_COMB_NUM_CHANNELS) || \
@@ -1018,7 +1016,6 @@ extern int disable_proptx;
 #if defined(FORCE_DISABLE_SINGLECORE_SCAN)
 extern void dhd_force_disable_singlcore_scan(dhd_pub_t *dhd);
 #endif /* FORCE_DISABLE_SINGLECORE_SCAN */
-
 
 #if ((LINUX_VERSION_CODE >= KERNEL_VERSION (3, 5, 0)) && (LINUX_VERSION_CODE <= (3, 7, 0)))
 struct chan_info {
@@ -3306,7 +3303,6 @@ static s32 wl_cfg80211_set_wiphy_params(struct wiphy *wiphy, u32 changed)
 	return err;
 }
 
-
 void
 wl_cfg80211_ibss_vsie_set_buffer(struct net_device *dev, vndr_ie_setbuf_t *ibss_vsie,
 	int ibss_vsie_len)
@@ -3522,7 +3518,6 @@ wl_cfg80211_to_fw_iftype(wl_iftype_t iftype)
 			ret = WL_INTERFACE_TYPE_P2P_GC;
 			break;
 
-
 		default:
 			WL_ERR(("Unsupported type:%d \n", iftype));
 			ret = -EINVAL;
@@ -3623,7 +3618,6 @@ wl_cfg80211_interface_ops(struct bcm_cfg80211 *cfg,
 	return ret;
 }
 
-
 s32
 wl_cfg80211_add_del_bss(struct bcm_cfg80211 *cfg,
 	struct net_device *ndev, s32 bsscfg_idx,
@@ -3657,7 +3651,6 @@ wl_cfg80211_add_del_bss(struct bcm_cfg80211 *cfg,
 		WL_ERR((" add_del_bss NOT supported for IFACE type:0x%x", brcm_iftype));
 		return -EINVAL;
 	}
-
 
 	bss_setbuf.cfg = htod32(bsscfg_idx);
 	bss_setbuf.val = htod32(val);
@@ -3743,7 +3736,6 @@ wl_iftype_to_mode(wl_iftype_t iftype)
 			mode = WL_MODE_NAN;
 			break;
 
-
 		case WL_IF_TYPE_AIBSS:
 			/* Intentional fall through */
 		case WL_IF_TYPE_IBSS:
@@ -3812,7 +3804,6 @@ static s32
 wl_role_to_cfg80211_type(uint16 role, uint16 *wl_iftype, uint16 *mode)
 {
 	switch (role) {
-
 
 	case WLC_E_IF_ROLE_STA:
 		*wl_iftype = WL_IF_TYPE_STA;
@@ -4214,7 +4205,6 @@ wl_cfg80211_create_iface(struct wiphy *wiphy,
 	 * Intialize the firmware I/F.
 	 */
 
-
 	{
 		ret = wl_cfg80211_interface_ops(cfg, primary_ndev, bsscfg_idx,
 			wl_iftype, 0, addr);
@@ -4498,7 +4488,6 @@ wl_cfg80211_join_ibss(struct wiphy *wiphy, struct net_device *dev,
 		CFG80211_PUT_BSS(wiphy, bss);
 	}
 
-
 	if (chan) {
 		u32 bw_cap = 0;
 		err = wl_get_bandwidth_cap(dev, CHSPEC_BAND(cfg->channel), &bw_cap);
@@ -4689,7 +4678,6 @@ wl_set_wpa_version(struct net_device *dev, struct cfg80211_connect_params *sme)
 		WL_ERR(("unsupported wpa_versions (%d)\n", sme->crypto.wpa_versions));
 		val = WPA_AUTH_DISABLED;
 	}
-
 
 	if (is_wps_conn(sme))
 		val = WPA_AUTH_DISABLED;
@@ -5170,7 +5158,6 @@ wl_cfg80211_set_mfp(struct bcm_cfg80211 *cfg, struct net_device *dev,
 		if (err != BCME_UNSUPPORTED && err < 0) {
 			WL_ERR(("bip set error (%d)\n", err));
 
-
 				{
 					goto exit;
 				}
@@ -5582,7 +5569,6 @@ wl_set_multi_akm(struct net_device *dev, struct bcm_cfg80211 *cfg,
 			sme->crypto.akm_suites[j], j, multi_akm_auth));
 	}
 
-
 	/* Set multi akms except the best akm */
 	allowed_key_mgmts = multi_akm_auth & ~(selected_akm);
 	num_tuples += wl_find_multiakm_combo_tuples(multi_akm_auth);
@@ -5592,7 +5578,6 @@ wl_set_multi_akm(struct net_device *dev, struct bcm_cfg80211 *cfg,
 			multi_akm_auth, num_tuples, selected_akm, allowed_key_mgmts,
 			sme->crypto.ciphers_pairwise[0], sme->crypto.cipher_group,
 			sme->crypto.wpa_versions));
-
 
 	if (!num_tuples || (num_tuples > JOIN_PREF_MAX_WPA_TUPLES)) {
 		WL_ERR(("Unsupported MultiAKM combos\n"));
@@ -5698,7 +5683,6 @@ wl_set_key_mgmt(struct net_device *dev, struct cfg80211_connect_params *sme,
 			WPA2_AUTH_UNSPECIFIED)) {
 			switch (sme->crypto.akm_suites[0]) {
 #ifdef MFP
-
 
 #ifndef CUSTOMER_HW6
 			case WL_AKM_SUITE_SHA256_1X:
@@ -5970,8 +5954,8 @@ wl_fils_add_hlp_container(struct bcm_cfg80211 *cfg, struct net_device *dev,
 
 	if ((hlp_ie = (const bcm_tlv_ext_t*)bcm_parse_tlvs_dot11((const uint8 *)ie_buf, ie_len,
 		FILS_HLP_CONTAINER_EXT_ID, TRUE))) {
-		u16 hlp_len = hlp_ie->len;
-		u16 left_len = (ie_len - ((const uint8*)hlp_ie - ie_buf));
+		uint hlp_len = hlp_ie->len;
+		uint left_len = (ie_len - ((const uint8*)hlp_ie - ie_buf));
 		bcm_iov_buf_t *iov_buf = 0;
 		uint8* pxtlv;
 		int err;
@@ -5996,9 +5980,10 @@ wl_fils_add_hlp_container(struct bcm_cfg80211 *cfg, struct net_device *dev,
 
 		pxtlv = (uint8 *)&iov_buf->data[0];
 		((bcm_xtlv_t*)pxtlv)->id = WL_FILS_XTLV_HLP_IE;
-		((bcm_xtlv_t*)pxtlv)->len = hlp_len;
+		((bcm_xtlv_t *)pxtlv)->len = (uint16)hlp_len;
 
-		memcpy(((bcm_xtlv_t*)pxtlv)->data, hlp_ie, ((bcm_xtlv_t*)pxtlv)->len);
+		(void)memcpy_s(((bcm_xtlv_t *)pxtlv)->data, ((bcm_xtlv_t *)pxtlv)->len, hlp_ie,
+			((bcm_xtlv_t *)pxtlv)->len);
 
 		iov_buf->version = WL_FILS_IOV_VERSION_1_1;
 		iov_buf->id = WL_FILS_CMD_ADD_HLP_IE;
@@ -6141,7 +6126,6 @@ wl_cfg80211_get_netinfo(struct bcm_cfg80211 *cfg, u8 ifidx, u8 bsscfgidx)
 #endif /* WL_MLO */
 	return netinfo;
 }
-
 
 #ifdef WL_MLO
 s32
@@ -7051,7 +7035,6 @@ wl_do_preassoc_ops(struct bcm_cfg80211 *cfg,
 	cfg->block_gon_req_tx_count = 0;
 	cfg->block_gon_req_rx_count = 0;
 #endif /* WL_CFG80211_GON_COLLISION */
-
 
 #if defined(USE_DYNAMIC_MAXPKT_RXGLOM)
 	maxrxpktglom = 0;
@@ -11489,7 +11472,6 @@ wl_cfg80211_mgmt_tx(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
 	wl_mlo_link_t *linkinfo = NULL;
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)) || defined(WL_MLO_BKPORT) */
 
-
 	WL_DBG(("Enter \n"));
 
 	if (len > ACTION_FRAME_SIZE) {
@@ -11690,7 +11672,6 @@ exit:
 	return err;
 }
 
-
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0))
 static void
 wl_cfg80211_mgmt_frame_register(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
@@ -11705,7 +11686,6 @@ wl_cfg80211_mgmt_frame_register(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev,
 	return;
 }
 #endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0) */
-
 
 static s32
 wl_cfg80211_change_bss(struct wiphy *wiphy,
@@ -11905,7 +11885,6 @@ wl_cfg80211_macaddr_sync_reqd(struct net_device *dev)
 	}
 	return false;
 }
-
 
 #if defined(WL_SUPPORT_BACKPORTED_KPATCHES) || (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 2, 0))
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0))
@@ -12496,7 +12475,6 @@ wl_is_ccode_change_allowed(struct net_device *net)
 #endif /* WL_NAN */
 	return true;
 }
-
 
 static bool
 wl_is_ccode_change_required(struct net_device *net,
@@ -13532,7 +13510,6 @@ wl_bss_handle_sae_auth(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 }
 #endif /* WL_SAE */
 
-
 #if defined(DHD_ENABLE_BIGDATA_LOGGING)
 enum {
 	BIGDATA_ASSOC_REJECT_NO_ACK = 1,
@@ -14275,7 +14252,6 @@ wl_cache_assoc_resp_ies(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	}
 }
 
-
 char *
 wl_get_link_action_str(u16 link_action)
 {
@@ -15014,7 +14990,6 @@ wl_cfgvendor_advlog_auth_assoc(wl_assoc_status_t *as, uint32 rssi)
 	/* do not print to the kernel, only for framework (MACDBG_FULL) */
 	SUPP_ADVLOG((req_str, MAC2STRDBG_FULL((const u8*)(&e->addr)),
 			rssi, ntoh32(e->auth_type), status_str));
-
 
 	if (as->status == WLC_E_STATUS_SUCCESS ||
 			as->status == WLC_E_STATUS_FAIL) {
@@ -17223,7 +17198,6 @@ int wl_cfg80211_get_ioctl_version(void)
 	return ioctl_version;
 }
 
-
 #if defined(DHD_DSCP_POLICY)
 
 /*
@@ -17336,6 +17310,7 @@ wl_notify_rx_mgmt_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	freq = wl_channel_to_frequency(wf_chspec_ctlchan(chspec), CHSPEC_BAND(chspec));
 #endif
 	if (event == WLC_E_ACTION_FRAME_RX) {
+
 		{
 			u8 ioctl_buf[WLC_IOCTL_SMLEN];
 			err = wldev_iovar_getbuf_bsscfg(ndev, "cur_etheraddr",
@@ -17347,6 +17322,7 @@ wl_notify_rx_mgmt_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 			}
 			eacopy(ioctl_buf, da.octet);
 		}
+
 		{
 			err = wldev_ioctl_get(ndev, WLC_GET_BSSID, &bssid, ETHER_ADDR_LEN);
 			if ((err < 0) && (err != BCME_NOTASSOCIATED)) {
@@ -17523,7 +17499,6 @@ wl_notify_rx_mgmt_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 			goto exit;
 			}
 #endif /* WES_SUPPORT */
-
 
 			/* We need to check proper action frame is received */
 			if (cfg->next_af_subtype != WL_PUB_AF_STYPE_INVALID) {
@@ -19435,7 +19410,6 @@ s32 wl_cfg80211_apply_eventbuffer(
 		return -EINVAL;
 	}
 
-
 	mutex_lock(&cfg->event_sync);
 
 	eventmask_msg = (eventmsgs_ext_t *)event_buf;
@@ -19624,7 +19598,6 @@ static s32 wl_update_chan_param(struct net_device *dev, u32 cur_chspec, u32 chan
 
 	return err;
 }
-
 
 #ifdef WL_CAP_HE
 static void wl_update_if_type_data(void)
@@ -20160,7 +20133,6 @@ static s32 __wl_update_wiphybands(struct bcm_cfg80211 *cfg, bool notify)
 					}
 				}
 
-
 				/* Capabilities */
 				bands[index]->vht_cap.cap |=   IEEE80211_VHT_CAP_RX_ANTENNA_PATTERN
 				                             | IEEE80211_VHT_CAP_TX_ANTENNA_PATTERN;
@@ -20319,7 +20291,6 @@ static s32 wl_cfg80211_config_rav_mscs_params(struct bcm_cfg80211 *cfg,
 	rav_mscs_cfg.fc_type = DOT11_TCLAS_FC_4_IP_HIGHER;
 	rav_mscs_cfg.fc_mask = MSCS_CFG_DEF_TCLAS_MASK;
 	rav_mscs_cfg.req_type = DOT11_MSCS_REQ_TYPE_ADD;
-
 
 	*(wl_qos_rav_mscs_config_v1_t *) data = rav_mscs_cfg;
 	buflen -= sizeof(wl_qos_rav_mscs_config_v1_t);
@@ -21711,7 +21682,6 @@ wl_svc_resp_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	u8 *data_ptr = NULL;
 	u32 tot_len = 0;
 
-
 	WL_SD(("Enter event_type:%d status:%d\n", event, status));
 
 	if (!cfg->sdo) {
@@ -22324,7 +22294,6 @@ s32 wl_cfg80211_set_wps_p2p_ie(struct net_device *ndev, char *buf, int len,
 	s32 pktflag = 0;
 	struct wireless_dev *wdev = ndev->ieee80211_ptr;
 
-
 	cfg = wl_get_cfg(ndev);
 	if (wl_get_drv_status(cfg, AP_CREATING, ndev)) {
 		/* Vendor IEs should be set to FW
@@ -22623,7 +22592,6 @@ wl_cfg80211_set_if_band(struct net_device *ndev, int band)
 	}
 	return ret;
 }
-
 
 bool wl_cfg80211_is_concurrent_mode(struct net_device *dev)
 {
@@ -23831,7 +23799,6 @@ wl_cfg80211_set_dbg_verbose(struct net_device *ndev, u32 level)
 	return BCME_OK;
 }
 
-
 const u8 *
 wl_find_attribute(const u8 *buf, u16 len, u16 element_id)
 {
@@ -24415,7 +24382,6 @@ wl_wps_handle_m8_sent(struct net_device *ndev, u16 inst, const u8 *peer_mac)
 	return ret;
 }
 
-
 s32
 wl_wps_session_update(struct net_device *ndev, u16 state, const u8 *peer_mac)
 {
@@ -24578,7 +24544,6 @@ wl_handle_wps_states(struct net_device *ndev, u8 *pkt, u16 len, bool direction)
 
 	eapol_hdr = (eapol_header_t *)pkt;
 	eapol_type = eapol_hdr->type;
-
 
 	peer_mac = tx_packet ? eapol_hdr->eth.ether_dhost :
 			eapol_hdr->eth.ether_shost;
@@ -25122,7 +25087,6 @@ wl_print_verinfo(struct bcm_cfg80211 *cfg)
 	MFREE(cfg->osh, ver_ptr, alloc_len);
 }
 
-
 /* Get the concurrency mode */
 int wl_cfg80211_get_concurrency_mode(struct bcm_cfg80211 *cfg)
 {
@@ -25316,7 +25280,6 @@ wl_cfg80211_config_suspend_events(struct net_device *ndev, bool enable)
 		goto eventmsg_out;
 	}
 
-
 	bcopy(iovbuf, eventmask_msg, msglen);
 
 	/* Add set/clear of event mask under feature specific flags */
@@ -25350,7 +25313,6 @@ eventmsg_out:
 	mutex_unlock(&cfg->event_sync);
 	return err;
 }
-
 
 #ifdef WLFBT
 static int
@@ -26384,12 +26346,14 @@ wl_notify_start_auth(struct bcm_cfg80211 *cfg,
 	 */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) || defined(WL_EXT_AUTH_BKPORT)
 	if (cfg->mlo.supported) {
-		(void)memcpy_s(&ext_auth_param.mld_addr, ETHER_ADDR_LEN, e->addr.octet, ETHER_ADDR_LEN);
+		(void)memcpy_s(&ext_auth_param.mld_addr,
+				ETHER_ADDR_LEN, e->addr.octet, ETHER_ADDR_LEN);
 		(void)memcpy_s(&ext_auth_param.bssid,
 				ETHER_ADDR_LEN, evt_data->bssid.octet, ETHER_ADDR_LEN);
 	} else {
 		/* for 4383 with kernel version >= 6.3 */
-		(void)memcpy_s(&ext_auth_param.bssid, ETHER_ADDR_LEN, e->addr.octet, ETHER_ADDR_LEN);
+		(void)memcpy_s(&ext_auth_param.bssid,
+				ETHER_ADDR_LEN, e->addr.octet, ETHER_ADDR_LEN);
 	}
 #else
 	/* In non-ml aware kernels, use MLD address for auth ind for SAE PMK calc. */
@@ -26912,7 +26876,6 @@ wl_cfg80211_config_passphrase(struct bcm_cfg80211 *cfg,
 	data = data + pp_config->passphrase_len;
 	avail_size -= pp_config->passphrase_len;
 
-
 	/* Compare with earlier config and delete passphrase entry from firmware
 	 * if not matching and then add the new entry
 	*/
@@ -27373,7 +27336,6 @@ done:
 	return ret;
 }
 #endif /* CONFIG_SILENT_ROAM */
-
 
 #ifdef WL_CFGVENDOR_CUST_ADVLOG
 static void

@@ -108,7 +108,6 @@
 #define EWPF_NO_ABS		FALSE
 #define EWPF_NEED_ABS		TRUE
 
-
 #define EWPF_MAX_INFO_TYPE	5
 #define EWPF_INFO_VER		0
 #define EWPF_INFO_TYPE		1
@@ -190,7 +189,6 @@ static int evt_xtlv_idx_cb(void *ctx, const uint8 *data, uint16 type, uint16 len
 static int evt_xtlv_type_cb(void *ctx, const uint8 *data, uint16 type, uint16 len);
 static int filter_main_cb(void *ctx, const uint8 *data, uint16 type, uint16 len);
 static int evt_xtlv_roam_cb(void *ctx, const uint8 *data, uint16 type, uint16 len);
-
 
 /* ========= Event Handler functions and its callbacks: ============= */
 typedef struct _EWPF_tbl {
@@ -1164,7 +1162,6 @@ evt_xtlv_roam_cb(void *ctx, const uint8 *data, uint16 type, uint16 len)
 	return BCME_OK;
 }
 
-
 static int
 filter_main_cb(void *ctx, const uint8 *data, uint16 type, uint16 len)
 {
@@ -1262,6 +1259,7 @@ dhd_event_log_filter_event_handler(dhd_pub_t *dhdp, prcd_event_log_hdr_t *plog_h
 		DHD_FILTER_ERR(("FAIL TO UNPACK XTLV: err(%d)\n", err));
 	}
 }
+
 /* ========= Private Command(Serialize) ============= */
 /* REPORT MODULE will be done after discuss with customer */
 /* Current implementation is temporal to verify FILTER MODULE works */
@@ -2101,6 +2099,7 @@ ewpr_get_multi_offset(uint16 looking_version, ewpr_serial_info_t *info)
 	/* return first version if no version is found */
 	return info->v_info.opv[0].offset;
 }
+
 int
 ewpr_single_serial(ewpr_serial_info_t *info, char *buf, int buf_len, void *_ptr, char del)
 {

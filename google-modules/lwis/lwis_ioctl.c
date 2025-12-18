@@ -368,7 +368,7 @@ static int construct_io_entry(struct lwis_client *client, struct lwis_io_entry *
 		}
 	}
 
-	*io_entries = k_entries;
+	*io_entries = (struct lwis_io_entry __user *)k_entries;
 	return 0;
 
 error_free_buf:
@@ -1486,8 +1486,18 @@ static void populate_cmd_info_from_transaction(void *_cmd, struct lwis_transacti
 					       int error)
 {
 	struct lwis_cmd_transaction_info *cmd = _cmd;
+	struct lwis_io_entry *user_io_entries = cmd->info.io_entries;
+	size_t user_num_io_entries = cmd->info.num_io_entries;
 
 	cmd->info = k_transaction->info;
+
+	/*
+	 * Restore the original userspace pointers for io_entries to avoid
+	 * leaking the kernel-space pointer from k_transaction.
+	 */
+	cmd->info.io_entries = user_io_entries;
+	cmd->info.num_io_entries = user_num_io_entries;
+
 	if (error != 0)
 		cmd->info.id = LWIS_ID_INVALID;
 }

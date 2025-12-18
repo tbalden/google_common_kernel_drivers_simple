@@ -1052,11 +1052,15 @@ static int gxp_firmware_get_cfg_resource_v3(struct gxp_dev *gxp,
 
 	/* The MCU shared region covers both core_cfg and the VD cfg region. */
 	assign_resource(&tmp, img_cfg, MCU_SHARED_REGION_IDX);
-	if (tmp.size < CORE_CFG_REGION_SIZE + VD_CFG_REGION_SIZE) {
-		dev_err(gxp->dev, "Invalid shared region size, at least %#x, got %#lx",
+	/*
+	 * For compatibility with older firmwares, fine to map extra memory size. We already check
+	 * CORE_CFG_REGION_SIZE + VD_CFG_REGION_SIZE together should not exceed
+	 * GXP_SHARED_SLICE_SIZE. Older firmware has lesser size for VD_CFG and its fine to map more
+	 * size till we are not exceeding GXP_SHARED_SLICE_SIZE.
+	 */
+	if (tmp.size < CORE_CFG_REGION_SIZE + VD_CFG_REGION_SIZE)
+		dev_warn(gxp->dev, "Invalid shared region size, at least %#x, got %#lx",
 			CORE_CFG_REGION_SIZE + VD_CFG_REGION_SIZE, tmp.size);
-		return -EINVAL;
-	}
 	if (type == IMAGE_CONFIG_CORE_CFG_REGION) {
 		res->size = CORE_CFG_REGION_SIZE;
 		res->dma_addr = tmp.dma_addr;

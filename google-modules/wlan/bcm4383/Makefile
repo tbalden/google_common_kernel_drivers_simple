@@ -39,6 +39,7 @@ ifneq ($(KERNEL_SRC),)
   EXTRA_CFLAGS+="-Wno-missing-prototypes"
 endif
 
+
 # Define and "all" target, which isn't really needed but doesn't hurt.
 all: modules
 

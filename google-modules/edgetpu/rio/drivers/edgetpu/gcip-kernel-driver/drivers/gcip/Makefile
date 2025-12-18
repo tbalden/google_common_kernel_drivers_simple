@@ -13,7 +13,7 @@ gcip-objs		:= gcip-alloc-helper.o \
 			   gcip-devfreq.o \
 			   gcip-dma-fence.o \
 			   gcip-domain-pool.o \
-			   gcip-fault-injection.o \
+			   gcip-fault-inject.o \
 			   gcip-fence-array.o \
 			   gcip-fence.o \
 			   gcip-firmware.o \
@@ -26,6 +26,7 @@ gcip-objs		:= gcip-alloc-helper.o \
 			   gcip-pm.o \
 			   gcip-resource-accessor.o \
 			   gcip-slc.o \
+			   gcip-status-code.o \
 			   gcip-telemetry.o \
 			   gcip-thermal.o \
 			   gcip-usage-stats.o
@@ -40,9 +41,10 @@ gcip-objs		+= iif/iif-direct.o \
 
 CURRENT_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
+ccflags-y	+= -I$(CURRENT_DIR)/../../include
+
 # TODO(b/336717718): Remove path of embedded IIF
-ccflags-y	+= -I$(CURRENT_DIR)/../../include \
-		   -I$(CURRENT_DIR)/iif/include \
+ccflags-y	+= -I$(CURRENT_DIR)/iif/include
 
 # Set the path of google-modules sources if not defined.
 GMODULE_SRC_PATH ?= $(KERNEL_SRC)/../private/google-modules
