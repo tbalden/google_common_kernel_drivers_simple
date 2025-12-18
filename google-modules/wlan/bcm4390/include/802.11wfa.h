@@ -175,7 +175,6 @@ typedef struct wme_param_ie wme_param_ie_t;
 #define WMM_OUI_SUBTYPE_PARAMETER	1
 #define WMM_PARAMETER_IE_LEN		24
 
-
 #define SAE_PK_MOD_LEN		32u
 BWL_PRE_PACKED_STRUCT struct dot11_sae_pk_element {
 	uint8 id;			/* IE ID, 221, DOT11_MNG_PROPR_ID */

@@ -182,7 +182,7 @@ struct gcip_usage_stats_component_utilization {
  */
 enum gcip_usage_stats_counter_type {
 	/* Active TPU cycles. */
-	GCIP_USAGE_STATS_COUNTER_TPU_ACTIVIY_CYCLES,
+	GCIP_USAGE_STATS_COUNTER_TPU_ACTIVITY_CYCLES,
 	/* The number of stalls caused by throttling. */
 	GCIP_USAGE_STATS_COUNTER_TPU_THROTTLE_STALLS,
 	/* Number of TPU inferences / DSP workloads. */

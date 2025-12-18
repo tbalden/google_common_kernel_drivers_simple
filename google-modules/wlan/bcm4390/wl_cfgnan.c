@@ -1195,7 +1195,6 @@ fail:
 	return ret;
 }
 
-
 /* Based on each case of tlv type id, fill into tlv data */
 static int
 wl_cfgnan_set_vars_cbfn(void *ctx, const uint8 *data, uint16 type, uint16 len)
@@ -3181,7 +3180,6 @@ wl_cfgnan_build_execute_ioctl(struct net_device *ndev, struct bcm_cfg80211 *cfg,
 	bcm_iov_batch_subcmd_t *sub_cmd = NULL;
 	wl_nan_iov_t *nan_iov_data = NULL;
 	uint8 resp_buf[NAN_IOCTL_BUF_SIZE];
-
 
 	nan_buf = MALLOCZ(cfg->osh, nan_buf_size);
 	if (!nan_buf) {
@@ -6252,8 +6250,10 @@ wl_cfgnan_terminate_all_obsolete_ranging_sessions(
 	for (i = 0; i < NAN_MAX_RANGING_INST; i++) {
 		ranging_inst = &cfg->nancfg->nan_ranging_info[i];
 		if (ranging_inst->in_use &&
-			ranging_inst->range_role == NAN_RANGING_ROLE_INITIATOR) {
-			wl_cfgnan_terminate_ranging_session(cfg, ranging_inst);
+			(ranging_inst->range_role == NAN_RANGING_ROLE_INITIATOR) &&
+			(ranging_inst->range_type == RTT_TYPE_NAN_GEOFENCE) &&
+			(ranging_inst->num_svc_ctx == 0)) {
+				wl_cfgnan_terminate_ranging_session(cfg, ranging_inst);
 		}
 	}
 
@@ -10065,7 +10065,6 @@ wl_cfgnan_handle_directed_rtt_report(struct bcm_cfg80211 *cfg,
 	int ret = BCME_OK;
 	uint32 status;
 	dhd_pub_t *dhd = (struct dhd_pub *)(cfg->pub);
-
 
 	ret = wl_cfgnan_cancel_ranging(bcmcfg_to_prmry_ndev(cfg), cfg,
 			&rng_inst->range_id, NAN_RNG_TERM_FLAG_IMMEDIATE, &status);

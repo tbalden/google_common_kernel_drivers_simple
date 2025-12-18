@@ -270,11 +270,11 @@ static void dp_fill_host_caps(struct dp_device *dp)
 	dp->host.ssc = dp_ssc;
 }
 
-static bool dp_check_fec_caps(struct dp_device *dp, u8 fec_dpcd)
+static bool dp_fec_init(struct dp_device *dp)
 {
 	u8 fec_data;
 
-	if (!drm_dp_sink_supports_fec(fec_dpcd) || !dp->host.fec)
+	if (!dp_get_fec(dp))
 		return false;
 
 	fec_data = DP_FEC_DECODE_EN_DETECTED | DP_FEC_DECODE_DIS_DETECTED;
@@ -318,8 +318,9 @@ static void dp_fill_sink_caps(struct dp_device *dp, u8 dpcd[DP_RECEIVER_CAP_SIZE
 
 	/* Set FEC support */
 	if (drm_dp_dpcd_readb(&dp->dp_aux, DP_FEC_CAPABILITY, &fec_dpcd) == 1) {
-		dp->sink.fec = dp_check_fec_caps(dp, fec_dpcd);
+		dp->sink.fec = drm_dp_sink_supports_fec(fec_dpcd);
 	} else {
+		dp->sink.fec = false;
 		dp->stats.dpcd_read_failures++;
 		dp_warn(dp, "DP Sink: failed to read FEC support register\n");
 	}
@@ -329,6 +330,7 @@ static void dp_fill_sink_caps(struct dp_device *dp, u8 dpcd[DP_RECEIVER_CAP_SIZE
 			sizeof(dsc_dpcd)) {
 		dp->sink.dsc = !!dsc_dpcd[0];
 	} else {
+		dp->sink.dsc = false;
 		dp->stats.dpcd_read_failures++;
 		dp_warn(dp, "DP Sink: failed to read DSC support registers\n");
 	}
@@ -1097,6 +1099,10 @@ static int dp_link_up(struct dp_device *dp)
 	dp->link.ssc = dp_get_ssc(dp);
 	dp->link.support_tps = dp_get_supported_pattern(dp);
 	dp->link.fast_training = dp_get_fast_training(dp);
+
+	/* FEC init */
+	dp->link.fec = dp_fec_init(dp);
+
 	dp_info(dp, "DP Link: training start: Rate(%d Mbps) Lanes(%u) EF(%d) SSC(%d) FEC(%d)\n",
 		dp->link.link_rate / 100, dp->link.num_lanes, dp->link.enhanced_frame,
 		dp->link.ssc, dp->link.fec);

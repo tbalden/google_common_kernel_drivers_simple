@@ -1212,7 +1212,6 @@ wl_escan_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 			cfg->bss_list = wl_escan_get_buf(cfg, FALSE);
 #endif /* USE_CACHED_SCANRESULT_FOR_ABORT */
 
-
 			if (!scan_req_match(cfg)) {
 				WL_TRACE_HW4(("SCAN ABORTED: scanned AP count=%d\n",
 					cfg->bss_list->count));
@@ -1705,7 +1704,6 @@ wl_cfgscan_populate_scan_channels(struct bcm_cfg80211 *cfg,
 #ifdef P2P_SKIP_DFS
 	int is_printed = false;
 #endif /* P2P_SKIP_DFS */
-
 
 	if (!channels || !n_channels) {
 		/* Do full channel scan */
@@ -3161,7 +3159,6 @@ wl_notify_escan_complete(struct bcm_cfg80211 *cfg,
 	CLR_TS(cfg, scan_enq);
 	CLR_TS(cfg, scan_start);
 
-
 	if (!cfg->bss_list) {
 		/* bss_list could be null in pre-emption/abort cases */
 #ifdef USE_CACHED_SCANRESULT_FOR_ABORT
@@ -4214,7 +4211,6 @@ wl_cfgscan_sched_scan_stop_work(struct work_struct *work)
 	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	cfg = container_of(dw, struct bcm_cfg80211, sched_scan_stop_work);
 	GCC_DIAGNOSTIC_POP();
-
 
 	/* Hold rtnl_lock -> scan_sync lock to be in sync with cfg80211_ops path */
 	rtnl_lock();
@@ -6095,7 +6091,6 @@ wl_convert_freqlist_to_chspeclist(struct bcm_cfg80211 *cfg,
 	drv_acs_params_t safe_param = { 0 };
 	bool safe_success = FALSE;
 #endif /* WL_CELLULAR_CHAN_AVOID */
-
 
 	if (freq_list_len > MAX_ACS_FREQS) {
 		WL_ERR(("invalid len:%d\n", freq_list_len));

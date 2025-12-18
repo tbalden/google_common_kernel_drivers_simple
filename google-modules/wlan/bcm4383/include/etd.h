@@ -698,5 +698,4 @@ extern bool _etd_enab;
 
 #endif /* !LANGUAGE_ASSEMBLY */
 
-
 #endif /* _ETD_H_ */

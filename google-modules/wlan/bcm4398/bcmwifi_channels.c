@@ -23,7 +23,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 #include <typedefs.h>
 #include <bcmutils.h>
 #include <bcmdefs.h>
@@ -402,7 +401,6 @@ channel_6g_160mhz_to_id(uint ch)
 
 	return -1;
 }
-
 
 /* return index of the 6G 320MHz channel from channel number
  * return -1 on error
@@ -1695,7 +1693,6 @@ wf_valid_160MHz_center_chan(uint center_channel, chanspec_band_t band)
 
 	return FALSE;
 }
-
 
 /**
  * Verify that the center channel is a valid 320MHz center channel according to 802.11.
@@ -3040,7 +3037,6 @@ channel_bw_to_width(chanspec_t chspec)
 
 	return channel_width;
 }
-
 
 uint wf_chspec_first_20_sb(chanspec_t chspec)
 {

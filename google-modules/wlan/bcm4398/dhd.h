@@ -24,7 +24,6 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-
 /****************
  * Common types *
  */
@@ -1098,8 +1097,6 @@ typedef struct dhd_if_tx_status_latency {
 } dhd_if_tx_status_latency_t;
 #endif /* TX_STATUS_LATENCY_STATS */
 
-
-
 /* Bit in dhd_pub_t::gdb_proxy_stop_count set when firmware is stopped by GDB */
 #define GDB_PROXY_STOP_MASK 1
 
@@ -1854,7 +1851,6 @@ typedef struct dhd_pub {
 	int debug_dump_subcmd;
 	uint64 debug_dump_time_sec;
 	bool hscb_enable;
-
 
 	uint64 logset_prsrv_mask;
 #ifdef DHD_PKT_LOGGING
@@ -2745,10 +2741,11 @@ extern void dhd_os_dhdiovar_lock(dhd_pub_t *pub);
 extern void dhd_os_dhdiovar_unlock(dhd_pub_t *pub);
 void dhd_os_logdump_lock(dhd_pub_t *pub);
 void dhd_os_logdump_unlock(dhd_pub_t *pub);
-extern int dhd_os_proto_block(dhd_pub_t * pub);
-extern int dhd_os_proto_unblock(dhd_pub_t * pub);
-extern int dhd_os_ioctl_resp_wait(dhd_pub_t * pub, uint * condition);
-extern int dhd_os_ioctl_resp_wake(dhd_pub_t * pub);
+extern int dhd_os_proto_block(dhd_pub_t *pub);
+extern int dhd_os_proto_unblock(dhd_pub_t *pub);
+extern bool dhd_os_proto_is_blocked(dhd_pub_t *pub);
+extern int dhd_os_ioctl_resp_wait(dhd_pub_t *pub, uint *condition);
+extern int dhd_os_ioctl_resp_wake(dhd_pub_t *pub);
 extern unsigned int dhd_os_get_ioctl_resp_timeout(void);
 extern void dhd_os_set_ioctl_resp_timeout(unsigned int timeout_msec);
 extern void dhd_os_ioctl_resp_lock(dhd_pub_t * pub);
@@ -2862,7 +2859,6 @@ extern void dhd_set_cpucore(dhd_pub_t *dhd, int set);
 #ifdef DHD_DETECT_CONSECUTIVE_MFG_HANG
 #define MAX_CONSECUTIVE_MFG_HANG_COUNT 2
 #endif /* DHD_DETECT_CONSECUTIVE_MFG_HANG */
-
 
 #if defined(DHD_FW_COREDUMP)
 #if defined(linux) || defined(LINUX)
@@ -3971,7 +3967,6 @@ extern void dhd_os_general_spin_unlock(dhd_pub_t *pub, unsigned long flags);
 #define DHD_PKT_LOG_UNLOCK(lock, flags)   osl_spin_unlock(lock, (flags))
 #endif /* DHD_PKT_LOGGING */
 
-
 #if defined(__linux__)
 #define DHD_LINUX_GENERAL_LOCK(dhdp, flags)	DHD_GENERAL_LOCK(dhdp, flags)
 #define DHD_LINUX_GENERAL_UNLOCK(dhdp, flags)	DHD_GENERAL_UNLOCK(dhdp, flags)
@@ -4690,7 +4685,6 @@ typedef struct dhd_gdb_proxy_probe_data {
 }
 #endif /* GDB_PROXY */
 
-
 #ifdef DHD_EFI
 extern void dhd_insert_random_mac_addr(dhd_pub_t *dhd, char *nvram_mem, uint *len);
 #endif /* DHD_EFI */
@@ -4926,7 +4920,6 @@ static INLINE int dhd_check_shinfo_nrfrags(dhd_pub_t *dhdp, void *pktbuf, dmaadd
 int dhd_ether_to_8023_hdr(osl_t *osh, struct ether_header *eh, void *p);
 int dhd_8023_llc_to_ether_hdr(osl_t *osh, struct ether_header *eh8023, void *p);
 #endif
-
 
 #ifdef CUSTOMER_HW4_DEBUG
 bool dhd_validate_chipid(dhd_pub_t *dhdp);

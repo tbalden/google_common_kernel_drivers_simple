@@ -286,8 +286,10 @@ int gxp_pm_blk_on(struct gxp_dev *gxp)
 	dev_info(gxp->dev, "Powering on BLK ...\n");
 	mutex_lock(&gxp->power_mgr->pm_lock);
 	ret = gxp_pm_blkpwr_up(gxp);
-	if (ret)
+	if (ret) {
+		dev_err(gxp->dev, "Power on failed (ret=%d)\n", ret);
 		goto out;
+	}
 	gxp_pm_blk_set_state_acpm(gxp, AUR_INIT_DVFS_STATE);
 	gxp->power_mgr->curr_state = AUR_INIT_DVFS_STATE;
 	gxp_iommu_setup_shareability(gxp);
@@ -312,6 +314,7 @@ int gxp_pm_blk_off(struct gxp_dev *gxp)
 	 */
 	if (gxp->power_mgr->curr_state == AUR_OFF) {
 		mutex_unlock(&gxp->power_mgr->pm_lock);
+		dev_warn(gxp->dev, "BLK is already off\n");
 		return ret;
 	}
 	gxp_pm_no_busy(gxp->power_mgr);
@@ -326,6 +329,8 @@ int gxp_pm_blk_off(struct gxp_dev *gxp)
 	ret = gxp_pm_blkpwr_down(gxp);
 	if (!ret)
 		gxp->power_mgr->curr_state = AUR_OFF;
+	else
+		dev_err(gxp->dev, "Power off failed (ret=%d)\n", ret);
 	mutex_unlock(&gxp->power_mgr->pm_lock);
 	return ret;
 }
@@ -960,6 +965,8 @@ static int gxp_pm_power_up(void *data)
 	if (gxp->pm_after_blk_on) {
 		ret = gxp->pm_after_blk_on(gxp);
 		if (ret) {
+			dev_err(gxp->dev, "Post power-on sequence failed (ret=%d), powering off!\n",
+				ret);
 			gxp_pm_blk_off(gxp);
 			return ret;
 		}
@@ -981,8 +988,10 @@ static int gxp_pm_power_down(void *data)
 
 	if (gxp->pm_before_blk_off)
 		ret = gxp->pm_before_blk_off(gxp);
-	if (ret)
+	if (ret) {
+		dev_err(gxp->dev, "Pre power-off sequence failed (ret=%d)\n", ret);
 		return ret;
+	}
 	return gxp_pm_blk_off(gxp);
 }
 
@@ -1097,9 +1106,8 @@ int gxp_pm_init(struct gxp_dev *gxp)
 	gxp_pm_chip_init(gxp);
 
 	gxp->debugfs_wakelock_held = false;
-#if GXP_HAS_MCU
-	mutex_init(&mgr->freq_limits_lock);
-#endif /* GXP_HAS_MCU */
+	if (GXP_HAS_MCU)
+		mutex_init(&mgr->freq_limits_lock);
 	debugfs_create_file(DEBUGFS_WAKELOCK, 0200, gxp->d_entry, gxp, &debugfs_wakelock_fops);
 	debugfs_create_file(DEBUGFS_BLK_POWERSTATE, 0600, gxp->d_entry, gxp,
 			    &debugfs_blk_powerstate_fops);

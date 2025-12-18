@@ -148,7 +148,6 @@ static void *wlan_static_dhd_memdump_ram = NULL;
 static void *wlan_static_dhd_log_dump_buf = NULL;
 static void *wlan_static_dhd_log_dump_buf_ex = NULL;
 
-
 void dhd_exit_wlan_mem(void);
 
 void

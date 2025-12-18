@@ -207,15 +207,6 @@ struct ts_ic_info {
     struct ft_chip_id_t cid;
 };
 
-/* Firmware Grip suppression mode.
- * 0 - Disable fw grip suppression.
- * 1 - Enable fw grip suppression.
- */
-enum FW_GRIP_MODE {
-    FW_GRIP_DISABLE,
-    FW_GRIP_ENABLE,
-};
-
 /* Firmware Heatmap mode.
  * 0 - Disable fw heatmap.
  * 1 - Enable fw Diff heatmap.
@@ -227,15 +218,6 @@ enum FW_HEATMAP_MODE {
     FW_HEATMAP_MODE_DIFF,
     FW_HEATMAP_MODE_BASELINE,
     FW_HEATMAP_MODE_RAWDATA,
-};
-
-/* Firmware Palm rejection mode.
- * 0 - Disable fw palm rejection.
- * 1 - Enable fw palm rejection.
- */
-enum FW_PALM_MODE {
-    FW_PALM_DISABLE,
-    FW_PALM_ENABLE,
 };
 
 /*****************************************************************************

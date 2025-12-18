@@ -4727,7 +4727,7 @@ wls_parse_batching_cmd(struct net_device *dev, char *command, int total_len)
 			} else if (!strncmp(param, PNO_PARAM_CHANNEL, strlen(PNO_PARAM_CHANNEL))) {
 				i = 0;
 				pos2 = value;
-				tokens = sscanf(value, "<%s>", value);
+				tokens = sscanf(value, "<%48s>", value);
 				if (tokens != 1) {
 					err = BCME_ERROR;
 					DHD_ERROR(("wls_parse_batching_cmd: invalid format"

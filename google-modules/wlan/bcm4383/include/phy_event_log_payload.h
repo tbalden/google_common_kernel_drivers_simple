@@ -87,7 +87,6 @@ typedef struct {
 	uint32 rxbar;
 	uint32 rxbeaconbss;
 
-
 	uint32 txrts;
 	uint32	txucast;	/**< number of unicast tx expecting response other than cts/cwcts */
 	uint32	rxackucast;	/**< number of ucast ACKS received (good FCS) */
@@ -4999,7 +4998,6 @@ typedef struct phy_periodic_log_v29 {
 	/* Logs ucode counters and NAVs */
 	phy_periodic_counters_v12_t counters_peri_log;
 } phy_periodic_log_v29_t;
-
 
 /* ************************************************** */
 /* The version 255 for the logging data structures    */

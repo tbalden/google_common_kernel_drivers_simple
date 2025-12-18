@@ -223,7 +223,6 @@ extern void osl_pkt_orphan_partial(struct sk_buff *skb);
 #define	PKTCLRTOBR(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
 #define	PKTISTOBR(skb)			({BCM_REFERENCE(skb); FALSE;})
 
-
 #ifdef BCMFA
 #ifdef BCMFA_HW_HASH
 #define PKTSETFAHIDX(skb, idx)	(((struct sk_buff*)(skb))->napt_idx = idx)

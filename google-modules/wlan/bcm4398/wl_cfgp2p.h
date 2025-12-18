@@ -108,7 +108,6 @@ enum wl_cfgp2p_status {
 	WLP2P_STATUS_DISC_IN_PROGRESS
 };
 
-
 enum p2p_attr_id {
 	P2P_ATTR_STATUS = 0,
 	P2P_ATTR_MINOR_REASON_CODE = 1,
@@ -378,7 +377,6 @@ extern struct net_device *
 wl_cfgp2p_find_ndev(struct bcm_cfg80211 *cfg, s32 bssidx);
 extern s32
 wl_cfgp2p_find_type(struct bcm_cfg80211 *cfg, s32 bssidx, s32 *type);
-
 
 extern s32
 wl_cfgp2p_listen_complete(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,

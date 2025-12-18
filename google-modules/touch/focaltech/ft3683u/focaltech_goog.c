@@ -29,6 +29,10 @@ extern int int_test_has_interrupt;
 static irqreturn_t goog_fts_irq_handler(int irq, void *data)
 {
     int_test_has_interrupt++;
+
+    if (fts_data->log_level >= 2)
+      FTS_INFO("irq_handler gap: %lld", fts_data->isr_timestamp - fts_data->coords_timestamp);
+
     fts_data->coords_timestamp = fts_data->isr_timestamp;
     fts_irq_read_report();
 
@@ -133,6 +137,7 @@ exit:
 static int goog_fts_ts_suspend(struct device *dev)
 {
     int ret = 0;
+    int retry_count = 0;
     struct fts_ts_data *ts_data = fts_data;
 
     FTS_FUNC_ENTER();
@@ -146,31 +151,42 @@ static int goog_fts_ts_suspend(struct device *dev)
     /* Disable irq */
     fts_irq_disable();
 
-    FTS_INFO("Do reset on suspend");
-    fts_reset_proc(FTS_RESET_INTERVAL);
+    for (retry_count = 1; retry_count <= 3; retry_count++) {
+        FTS_INFO("Do reset on suspend, attempt: %d", retry_count);
+        fts_reset_proc(FTS_RESET_INTERVAL);
 
-    ret = fts_wait_tp_to_valid();
-    if (ret != 0) {
-        FTS_ERROR("Suspend has been cancelled by wake up timeout");
-        return ret;
+        ret = fts_wait_tp_to_valid();
+        if (ret != 0) {
+            FTS_ERROR("Suspend has been cancelled by wake up timeout, ret=%d", ret);
+            continue;
+        }
+
+        // Clear reset flag
+        fts_write_reg(FTS_REG_CLR_RESET, 0x01);
+
+        FTS_INFO("Device has been reset");
+
+        fts_set_irq_report_onoff(ENABLE);
+
+        FTS_DEBUG("make TP enter into sleep mode");
+        ret = goog_enter_deep_sleep_mode(ts_data);
+        ts_data->is_deepsleep = true;
+        if (ret < 0) {
+            FTS_ERROR("set TP to sleep mode fail, ret=%d", ret);
+            continue;
+        }
+
+        ret = fts_pinctrl_select_suspend(ts_data);
+        if (ret < 0)
+            FTS_ERROR("set pinctrl suspend fail, ret=%d", ret);
+
+        break;
     }
 
-    // Clear reset flag
-    fts_write_reg(FTS_REG_CLR_RESET, 0x01);
-
-    FTS_INFO("Device has been reset");
-
-    fts_set_irq_report_onoff(ENABLE);
-
-    FTS_DEBUG("make TP enter into sleep mode");
-    ret = goog_enter_deep_sleep_mode(ts_data);
-    ts_data->is_deepsleep = true;
-    if (ret < 0)
-      FTS_ERROR("set TP to sleep mode fail, ret=%d", ret);
-
-    ret = fts_pinctrl_select_suspend(ts_data);
-    if (ret < 0)
-      FTS_ERROR("set pinctrl suspend fail, ret=%d", ret);
+    if (retry_count > 3) {
+        FTS_ERROR("Failed to suspend after trying 3 times, %d", ret);
+        return ret;
+    }
 
     FTS_FUNC_EXIT();
     return 0;
@@ -216,24 +232,29 @@ static const struct dev_pm_ops goog_fts_dev_pm_ops = {
 };
 
 extern int fts_test_get_raw(int *raw, u8 tx, u8 rx);
+extern int fts_test_get_uniformity_data(int *raw, int *rawdata_linearity, u8 tx, u8 rx);
 extern int fts_test_get_short(int *short_data, u8 tx, u8 rx);
 extern int fts_test_get_short_ch_to_gnd(int *res, u8 *ab_ch, u8 tx, u8 rx);
 extern int fts_test_get_short_ch_to_ch(int *res, u8 *ab_ch, u8 tx, u8 rx);
 extern size_t goog_internal_sttw_setting_read(char *buf, size_t buf_size);
 
-// Reference: proc_test_raw_show
-static int goog_selfttest_test_raw(void)
+// Reference: proc_test_raw_show and proc_test_uniformity_show
+static int goog_selftest_test_rawdata_and_rawdata_uniformity(bool is_ical)
 {
     int ret = 0;
     int i = 0;
+    int j = 0;
     int node_num = 0;
     u8 tx = 0;
     u8 rx = 0;
-    int *raw = NULL;
     bool result = 0;
     char print_buf[512];
     int count = 0;
     struct mc_sc_threshold *thr = &fts_ftest->ic.mc_sc.thr;
+    int *raw = NULL;
+    int *uniformity = NULL;
+    int *uniformity_rx = NULL;
+
 
     ret = fts_proc_test_entry(goog_get_test_limit_name());
     if (ret < 0) {
@@ -265,7 +286,6 @@ static int goog_selfttest_test_raw(void)
         goto exit;
     }
 
-
     node_num = tx * rx;
     raw = fts_malloc(node_num * sizeof(int));
     if (!raw) {
@@ -276,10 +296,18 @@ static int goog_selfttest_test_raw(void)
 
     /* get raw data */
     fts_test_get_raw(raw, tx, rx);
-    result = compare_array(raw,
-                           thr->rawdata_h_min,
-                           thr->rawdata_h_max,
-                           false);
+
+    if (is_ical) {
+        result = compare_array(raw,
+            thr->rawdata_h_min_ical,
+            thr->rawdata_h_max_ical,
+            false);
+    } else {
+        result = compare_array(raw,
+            thr->rawdata_h_min,
+            thr->rawdata_h_max,
+            false);
+    }
 
     /* output raw data */
     count += scnprintf(print_buf + count, 512 - count, "     ");
@@ -303,14 +331,219 @@ static int goog_selfttest_test_raw(void)
     FTS_INFO("Rawdata Test %s\n", result? "PASS" : "NG");
 
     if (!result)
-      ret = -1;
+        goto exit;
+
+    uniformity = fts_malloc(node_num * 2 * sizeof(int));
+    if (!uniformity) {
+        FTS_ERROR("malloc memory for raw fails");
+        ret = -ENOMEM;
+        goto exit;
+    }
+
+    fts_test_get_uniformity_data(raw, uniformity, tx, rx);
+
+    /* Output rawdata_uniformity tx data */
+    FTS_INFO("Rawdata Uniformity TX:");
+    for (i = 0; i < tx; i++) {
+        for (j = 0; j < rx; j++) {
+            count += scnprintf(print_buf + count, sizeof(print_buf) - count, "%5d,",
+                               uniformity[i*rx + j]);
+        }
+        FTS_INFO("%s\n", print_buf);
+        count = 0;
+    }
+
+    if (is_ical) {
+        result = compare_array(uniformity,
+            thr->tx_linearity_min_ical,
+            thr->tx_linearity_max_ical,
+            false);
+    } else {
+        result = compare_array(uniformity,
+            thr->tx_linearity_min,
+            thr->tx_linearity_max,
+            false);
+    }
+
+    /* Output rawdata_uniformity rx data */
+    FTS_INFO("Rawdata Uniformity RX:");
+    uniformity_rx = &uniformity[node_num];
+    for (i = 0; i < tx; i++) {
+        for (j = 0; j < rx; j++) {
+            count += scnprintf(print_buf + count, sizeof(print_buf) - count, "%5d,",
+                                uniformity_rx[i*rx + j]);
+        }
+        FTS_INFO("%s\n", print_buf);
+        count = 0;
+    }
+
+    if (result) {
+        FTS_INFO("Rawdata Uniformity TX PASS");
+    }
+    else {
+        FTS_ERROR("Rawdata Uniformity TX NG");
+        goto exit;
+    }
+
+    if (is_ical) {
+        result = compare_array(uniformity + node_num,
+            thr->rx_linearity_min_ical,
+            thr->rx_linearity_max_ical,
+            false);
+    } else {
+        result = compare_array(uniformity + node_num,
+            thr->rx_linearity_min,
+            thr->rx_linearity_max,
+            false);
+    }
+
+    if (result)
+        FTS_INFO("Rawdata Uniformity RX PASS");
+    else
+        FTS_ERROR("Rawdata Uniformity RX NG");
 
 exit:
-    if (raw)
-        fts_free(raw);
+    if (!result)
+        ret = -1;
+
+    fts_free(raw);
+    fts_free(uniformity);
 
     fts_proc_test_exit();
     enter_work_mode();
+
+    return ret;
+}
+
+// Reference: proc_test_sraw_show
+extern int fts_test_get_scap_raw(int *scap_raw, u8 tx, u8 rx, int *fwcheck);
+static int goog_selftest_test_scap_raw(bool is_ical)
+{
+    int ret = 0;
+    int i = 0;
+    int node_num = 0;
+    int offset = 0;
+    int *sraw = NULL;
+    int fwcheck = 0;
+    u8 tx = 0;
+    u8 rx = 0;
+    bool result = true;
+    struct mc_sc_threshold *thr = &fts_ftest->ic.mc_sc.thr;
+    struct fts_test *tdata = fts_ftest;
+    ktime_t start_time = ktime_get();
+
+    ret = fts_proc_test_entry(goog_get_test_limit_name());
+    if (ret < 0) {
+        FTS_TEST_ERROR("fts_test_main_init fail");
+        goto exit;
+    }
+
+    ret = enter_factory_mode();
+    if (ret < 0) {
+        FTS_ERROR("enter factory mode fails");
+        goto exit;
+    }
+
+    ret = fts_read_reg(FACTORY_REG_CHX_NUM, &tx);
+    if (ret < 0) {
+        FTS_ERROR("read tx fails");
+        goto exit;
+    }
+
+    ret = fts_read_reg(FACTORY_REG_CHY_NUM, &rx);
+    if (ret < 0) {
+        FTS_ERROR("read rx fails");
+        goto exit;
+    }
+
+    node_num = tx + rx;
+    sraw = fts_malloc(node_num * 3 * sizeof(int));
+    if (!sraw) {
+        FTS_ERROR("malloc memory for sraw fails");
+        ret = -ENOMEM;
+        goto exit;
+    }
+
+    /* get raw data */
+    fts_test_get_scap_raw(sraw, tx, rx, &fwcheck);
+
+    /* output raw data */
+    if ((fwcheck & 0x01) || (fwcheck & 0x02)) {
+
+        result = true;
+        for (i = 0; i < tdata->sc_node.node_num; i++) {
+            if (0 == tdata->node_valid_sc[i])
+                continue;
+
+            if (((fwcheck & 0x01) && (i < tdata->sc_node.rx_num)) ||
+                ((fwcheck & 0x02) && (i >= tdata->sc_node.rx_num))) {
+
+                if (is_ical) {
+                    if ((sraw[i + offset] < thr->scap_rawdata_off_min_ical[i]) ||
+                        (sraw[i + offset] > thr->scap_rawdata_off_max_ical[i])) {
+                        FTS_ERROR("test fail,CH%d=%5d,range=(%5d,%5d)\n",
+                                            i + 1, sraw[i],
+                                            thr->scap_rawdata_off_min_ical[i],
+                                            thr->scap_rawdata_off_max_ical[i]);
+                        result = false;
+                    }
+                } else if ((sraw[i + offset] < thr->scap_rawdata_off_min[i]) ||
+                    (sraw[i + offset] > thr->scap_rawdata_off_max[i])) {
+                    FTS_ERROR("test fail,CH%d=%5d,range=(%5d,%5d)\n",
+                                        i + 1, sraw[i],
+                                        thr->scap_rawdata_off_min[i],
+                                        thr->scap_rawdata_off_max[i]);
+                    result = false;
+                }
+            }
+        }
+        FTS_INFO("Scap raw(proof on) %s\n", result? "PASS" : "NG");
+        offset += node_num;
+    }
+
+    if ((fwcheck & 0x04) || (fwcheck & 0x08)) {
+
+        result = true;
+        for (i = 0; i < tdata->sc_node.node_num; i++) {
+            if (0 == tdata->node_valid_sc[i])
+                continue;
+
+            if (((fwcheck & 0x04) && (i < tdata->sc_node.rx_num)) ||
+                ((fwcheck & 0x08) && (i >= tdata->sc_node.rx_num))) {
+
+                if (is_ical) {
+                    if ((sraw[i + offset] < thr->scap_rawdata_on_min_ical[i]) ||
+                        (sraw[i + offset] > thr->scap_rawdata_on_max_ical[i])) {
+                        FTS_ERROR("test fail,CH%d=%5d,range=(%5d,%5d)\n",
+                                            i + 1, sraw[i],
+                                            thr->scap_rawdata_off_min_ical[i],
+                                            thr->scap_rawdata_off_max_ical[i]);
+                        result = false;
+                    }
+                } else if ((sraw[i + offset] < thr->scap_rawdata_on_min[i]) ||
+                    (sraw[i + offset] > thr->scap_rawdata_on_max[i])) {
+                    FTS_ERROR("test fail,CH%d=%5d,range=(%5d,%5d)\n",
+                                        i + 1, sraw[i],
+                                        thr->scap_rawdata_off_min[i],
+                                        thr->scap_rawdata_off_max[i]);
+                    result = false;
+                }
+            }
+        }
+        FTS_INFO("Scap raw(proof off) %s\n", result? "PASS" : "NG");
+        offset += node_num;
+    }
+
+    if (!result)
+        ret = -1;
+
+exit:
+    fts_free(sraw);
+
+    fts_proc_test_exit();
+    enter_work_mode();
+
+    FTS_INFO("Scap raw Test %lldms taken",ktime_ms_delta(ktime_get(), start_time));
 
     return ret;
 }
@@ -530,9 +763,15 @@ static int gti_selftest(void *private_data, struct gti_selftest_cmd *cmd)
     int ret = 0;
     cmd->result = GTI_SELFTEST_RESULT_FAIL;
 
-    ret = goog_selfttest_test_raw();
+    ret = goog_selftest_test_rawdata_and_rawdata_uniformity(cmd->is_ical);
     if (ret < 0) {
-        FTS_ERROR("goog_selfttest_test_raw failed,ret=%d\n", ret);
+        FTS_ERROR("goog_selftest_test_rawdata_and_rawdata_uniformity failed,ret=%d\n", ret);
+        return ret;
+    }
+
+    ret = goog_selftest_test_scap_raw(cmd->is_ical);
+    if (ret < 0) {
+        FTS_ERROR("goog_selftest_test_scap_raw failed,ret=%d\n", ret);
         return ret;
     }
 
@@ -705,10 +944,17 @@ exit:
 // Reference: proc_grip_read
 static int gti_get_grip_mode(void *private_data, struct gti_grip_cmd *cmd)
 {
-    struct fts_ts_data *ts_data = private_data;
+    int ret = 0;
+    u8 grip_mode = 0;
 
-    cmd->setting = (ts_data->enable_fw_grip % 2) ?
-        GTI_GRIP_ENABLE : GTI_GRIP_DISABLE;
+    ret = fts_read_reg(FTS_REG_EDGE_MODE_EN, &grip_mode);
+    if (ret < 0) {
+        FTS_ERROR("read FTS_REG_EDGE_MODE_EN(0x%x) fails", FTS_REG_EDGE_MODE_EN);
+        return ret;
+    }
+
+    FTS_DEBUG("fw_grip = %d", grip_mode);
+    cmd->setting = grip_mode == 0x00 ? GTI_GRIP_ENABLE : GTI_GRIP_DISABLE;
 
     return 0;
 }
@@ -737,12 +983,7 @@ static int gti_set_grip_mode(void *private_data, struct gti_grip_cmd *cmd)
     ret = gti_set_fw_shape_algo_mode(
         cmd->setting == GTI_GRIP_ENABLE ? ENABLE : DISABLE);
 
-    ts_data->enable_fw_grip = (cmd->setting == GTI_GRIP_ENABLE) ?
-        FW_GRIP_ENABLE : FW_GRIP_DISABLE;
-
-    FTS_INFO("switch fw_grip to %u\n", ts_data->enable_fw_grip);
-
-    ret = fts_set_grip_mode(ts_data, ts_data->enable_fw_grip);
+    ret = fts_set_grip_mode(ts_data, cmd->setting == GTI_GRIP_ENABLE);
     if (ret < 0)
         return ret;
 
@@ -843,6 +1084,8 @@ static int gti_get_mutual_or_self_sensor_data(void *private_data, struct gti_sen
 
     fts_set_irq_report_onoff(DISABLE);
     msleep(10);
+
+    fts_release_all_finger();
 
     base_raw = fts_malloc(base_raw_size);
     if (!base_raw) {
@@ -995,6 +1238,312 @@ static int gti_set_coord_filter_enabled(void *private_data, struct gti_coord_fil
     return ret;
 }
 
+static uint16_t endian_swap(uint16_t value) {
+  return (value << 8) | (value >> 8);
+}
+
+static void check_gesture_config_change(struct gti_gesture_config_cmd *cmd,
+                                        bool *is_sttw_changed,
+                                        bool *is_lptw_part1_changed,
+                                        bool *is_lptw_part2_and3_changed,
+                                        bool *is_gesture_type_changed) {
+  int i = 0;
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_STTW_MIN_X:
+      case GTI_STTW_MAX_X:
+      case GTI_STTW_MIN_Y:
+      case GTI_STTW_MAX_Y:
+      case GTI_STTW_MIN_FRAME:
+      case GTI_STTW_MAX_FRAME:
+      case GTI_STTW_JITTER:
+      case GTI_STTW_MAX_TOUCH_SIZE:
+        *is_sttw_changed = true;
+        break;
+      case GTI_LPTW_MIN_X:
+      case GTI_LPTW_MAX_X:
+      case GTI_LPTW_MIN_Y:
+      case GTI_LPTW_MAX_Y:
+      case GTI_LPTW_MIN_FRAME:
+      case GTI_LPTW_JITTER:
+      case GTI_LPTW_MAX_TOUCH_SIZE:
+        *is_lptw_part1_changed = true;
+        break;
+      case GTI_LPTW_MARGINAL_MIN_X:
+      case GTI_LPTW_MARGINAL_MAX_X:
+      case GTI_LPTW_MARGINAL_MIN_Y:
+      case GTI_LPTW_MARGINAL_MAX_Y:
+      case GTI_LPTW_MONITOR_CH_MIN_TX:
+      case GTI_LPTW_MONITOR_CH_MAX_TX:
+      case GTI_LPTW_MONITOR_CH_MIN_RX:
+      case GTI_LPTW_MONITOR_CH_MAX_RX:
+      case GTI_LPTW_NODE_COUNT_MIN:
+      case GTI_LPTW_MOTION_BOUNDARY:
+        *is_lptw_part2_and3_changed = true;
+        break;
+      case GTI_GESTURE_TYPE:
+        *is_gesture_type_changed = true;
+    }
+  }
+}
+
+static int update_sttw_config(struct gti_gesture_config_cmd *cmd) {
+  int i = 0;
+  int ret = 0;
+  struct STTWParams sttw_params = {};
+  sttw_params.reg_addr = FTS_STTW_REG_SET_E5;
+  ret = fts_read(&sttw_params.reg_addr, 1, (u8 *)&sttw_params + 1,
+                 FTS_STTW_E5_BUF_LEN - 1);
+  if (ret < 0) {
+    FTS_ERROR("Failed to read STTW reg: %02X, ret: %d", sttw_params.reg_addr,
+              ret);
+    return ret;
+  }
+
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_STTW_MIN_X:
+        sttw_params.min_x = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_STTW_MAX_X:
+        sttw_params.max_x = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_STTW_MIN_Y:
+        sttw_params.min_y = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_STTW_MAX_Y:
+        sttw_params.max_y = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_STTW_MIN_FRAME:
+        sttw_params.min_frame_count = cmd->params[i];
+        break;
+      case GTI_STTW_MAX_FRAME:
+        sttw_params.max_frame_count = endian_swap(cmd->params[i]);
+        break;
+      case GTI_STTW_JITTER:
+        sttw_params.jitter = cmd->params[i];
+        break;
+      case GTI_STTW_MAX_TOUCH_SIZE:
+        sttw_params.max_touch_size = cmd->params[i];
+        break;
+    }
+  }
+
+  ret = fts_write((u8 *)&sttw_params, sizeof(struct STTWParams));
+  if (ret < 0) {
+    FTS_ERROR("Failed to write STTW config, %d", ret);
+  } else {
+    FTS_DEBUG("Updated STTW config successfully");
+  }
+  return ret;
+}
+
+static int update_lptw_part1_config(struct gti_gesture_config_cmd *cmd) {
+  int i = 0;
+  int ret = 0;
+  struct LPTWParamsPart1 lptw_params_part1 = {};
+  lptw_params_part1.reg_addr = FTS_LPTW_REG_SET_E3;
+  ret = fts_read(&lptw_params_part1.reg_addr, 1, (u8 *)&lptw_params_part1 + 1,
+                 FTS_LPTW_E3_BUF_LEN - 1);
+  if (ret < 0) {
+    FTS_ERROR("Failed to read LPTW part 1 reg: %02X, ret: %d",
+              lptw_params_part1.reg_addr, ret);
+    return ret;
+  }
+
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_LPTW_MIN_X:
+        lptw_params_part1.min_x = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MAX_X:
+        lptw_params_part1.max_x = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MIN_Y:
+        lptw_params_part1.min_y = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MAX_Y:
+        lptw_params_part1.max_y = endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MIN_FRAME:
+        lptw_params_part1.min_frame_count = cmd->params[i];
+        break;
+      case GTI_LPTW_JITTER:
+        lptw_params_part1.jitter = cmd->params[i];
+        break;
+      case GTI_LPTW_MAX_TOUCH_SIZE:
+        lptw_params_part1.max_touch_size = cmd->params[i];
+        break;
+    }
+  }
+
+  ret = fts_write((u8 *)&lptw_params_part1, sizeof(struct LPTWParamsPart1));
+  if (ret < 0) {
+    FTS_ERROR("Failed to write LPTW part 1 config, %d", ret);
+  } else {
+    FTS_DEBUG("Updated LPTW part 1 config successfully");
+  }
+  return ret;
+}
+
+static int update_lptw_part2_and3_config(struct gti_gesture_config_cmd *cmd) {
+  int i = 0;
+  int ret = 0;
+  struct LPTWParamsPart2And3 lptw_params_part2_and_3 = {};
+  lptw_params_part2_and_3.reg_addr = FTS_LPTW_REG_SET_E4;
+  ret = fts_read(&lptw_params_part2_and_3.reg_addr, 1,
+                 (u8 *)&lptw_params_part2_and_3 + 1, FTS_LPTW_E4_BUF_LEN - 1);
+  if (ret < 0) {
+    FTS_ERROR("Failed to read LPTW part 2 and 3 reg: %02X, ret: %d",
+              lptw_params_part2_and_3.reg_addr, ret);
+    return ret;
+  }
+
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_LPTW_MARGINAL_MIN_X:
+        lptw_params_part2_and_3.marginal_min_x =
+            endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MARGINAL_MAX_X:
+        lptw_params_part2_and_3.marginal_max_x =
+            endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MARGINAL_MIN_Y:
+        lptw_params_part2_and_3.marginal_min_y =
+            endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MARGINAL_MAX_Y:
+        lptw_params_part2_and_3.marginal_max_y =
+            endian_swap(cmd->params[i] * 16 / 10);
+        break;
+      case GTI_LPTW_MONITOR_CH_MIN_TX:
+        lptw_params_part2_and_3.monitor_channel_min_tx = cmd->params[i];
+        break;
+      case GTI_LPTW_MONITOR_CH_MAX_TX:
+        lptw_params_part2_and_3.monitor_channel_max_tx = cmd->params[i];
+        break;
+      case GTI_LPTW_MONITOR_CH_MIN_RX:
+        lptw_params_part2_and_3.monitor_channel_min_rx = cmd->params[i];
+        break;
+      case GTI_LPTW_MONITOR_CH_MAX_RX:
+        lptw_params_part2_and_3.monitor_channel_max_rx = cmd->params[i];
+        break;
+      case GTI_LPTW_NODE_COUNT_MIN:
+        lptw_params_part2_and_3.min_node_count = cmd->params[i];
+        break;
+      case GTI_LPTW_MOTION_BOUNDARY:
+        lptw_params_part2_and_3.motion_boundary =
+            endian_swap(cmd->params[i] / 10);
+        break;
+    }
+  }
+
+  ret = fts_write((u8 *)&lptw_params_part2_and_3,
+                  sizeof(struct LPTWParamsPart2And3));
+  if (ret < 0) {
+    FTS_ERROR("Failed to write LPTW part 2 and 3 config, %d", ret);
+  } else {
+    FTS_DEBUG("Updated LPTW part 2 and 3 config successfully");
+  }
+  return ret;
+}
+
+static int update_gesture_type(void *private_data,
+                               struct gti_gesture_config_cmd *cmd) {
+  int i = 0;
+  int ret = 0;
+  struct fts_ts_data *ts_data = private_data;
+  int gesture_mode = 0;
+  int gesture_en = 0;
+
+  for (i = 0; i < GTI_GESTURE_PARAMS_MAX; i++) {
+    if (!cmd->updating_params[i]) continue;
+
+    switch (i) {
+      case GTI_GESTURE_TYPE:
+        switch (cmd->params[i]) {
+          case GTI_GESTURE_DISABLE:
+            gesture_mode = 0;
+            gesture_en = 0;
+            break;
+          case GTI_GESTURE_STTW:
+            gesture_mode = 1;
+            gesture_en = 1;
+            break;
+          case GTI_GESTURE_LPTW:
+            gesture_mode = 2;
+            gesture_en = 1;
+            break;
+          case GTI_GESTURE_STTW_AND_LPTW:
+            gesture_mode = 3;
+            gesture_en = 1;
+            break;
+        }
+    }
+  }
+
+  ret = fts_write_reg_safe(FTS_REG_GESTURE_SWITCH, gesture_mode);
+  if (ret < 0) {
+    FTS_ERROR("Failed to switch gesture mode to %d, %d", gesture_mode, ret);
+    return ret;
+  }
+  ret = fts_write_reg_safe(FTS_REG_GESTURE_EN, gesture_en);
+  if (ret < 0) {
+    FTS_ERROR("Failed to enable gesture mode to %d, %d", gesture_en, ret);
+    return ret;
+  }
+
+  if (gesture_en) {
+    ts_data->gesture_mode = ENABLE;
+    FTS_DEBUG("Gesture enabled");
+  } else {
+    ts_data->gesture_mode = DISABLE;
+    FTS_DEBUG("Gesture disabled");
+  }
+
+  return ret;
+}
+
+static int gti_set_gesture_config(void *private_data,
+                                  struct gti_gesture_config_cmd *cmd) {
+  int ret = 0;
+  bool is_sttw_changed = false;
+  bool is_lptw1_changed = false;
+  bool is_lptw2_and_3_changed = false;
+  bool is_gesture_type_changed = false;
+
+  check_gesture_config_change(cmd, &is_sttw_changed, &is_lptw1_changed,
+                              &is_lptw2_and_3_changed,
+                              &is_gesture_type_changed);
+  if (is_sttw_changed) {
+    ret = update_sttw_config(cmd);
+    if (ret < 0) return ret;
+  }
+  if (is_lptw1_changed) {
+    ret = update_lptw_part1_config(cmd);
+    if (ret < 0) return ret;
+  }
+  if (is_lptw2_and_3_changed) {
+    ret = update_lptw_part2_and3_config(cmd);
+    if (ret < 0) return ret;
+  }
+  if (is_gesture_type_changed) {
+    ret = update_gesture_type(private_data, cmd);
+    if (ret < 0) return ret;
+  }
+
+  return ret;
+}
+
 static void goog_register_options(struct gti_optional_configuration *options,
     struct fts_ts_data *ts)
 {
@@ -1016,7 +1565,7 @@ static void goog_register_options(struct gti_optional_configuration *options,
     options->selftest = gti_selftest;
     options->set_continuous_report = gti_set_continuous_report;
     options->set_coord_filter_enabled = gti_set_coord_filter_enabled;
-    //options->set_gesture_config = syna_set_gesture_config;
+    options->set_gesture_config = gti_set_gesture_config;
     options->set_grip_mode = gti_set_grip_mode;
     options->set_irq_mode = gti_set_irq_mode;
     options->set_palm_mode = gti_set_palm_mode;
@@ -1057,6 +1606,18 @@ void goog_fts_input_report_b(struct fts_ts_data *data)
     struct input_dev *input_dev = data->input_dev;
 
     goog_input_lock(gti);
+
+#if GOOGLE_REPORT_TIMESTAMP_MODE
+    data->timestamp_sensing += (u64) (data->timestamp - data->raw_timestamp_sensing) * 1940;
+
+    if (data->log_level >= 2) {
+      FTS_INFO("timestamp: %llu", data->timestamp_sensing);
+      FTS_INFO("timestamp gap: %llu", (u64) (data->timestamp - data->raw_timestamp_sensing) * 1940);
+    }
+
+    data->raw_timestamp_sensing = data->timestamp;
+    goog_input_set_sensing_timestamp(gti, input_dev, data->timestamp_sensing);
+#endif // GOOGLE_REPORT_TIMESTAMP_MODE
 
     goog_input_set_timestamp(gti, input_dev, data->coords_timestamp);
 

@@ -27,6 +27,7 @@
 #include "zuma-comet-wcharger-evt.dtsi"
 #include "zuma/max777xx-fwupdate.dtsi"
 #include "zumapro-comet-evt1_1-battery.dtsi"
+#include "zumapro-comet-cp-features.dtsi"
 
 / {
 	board_id = <0x60604>;

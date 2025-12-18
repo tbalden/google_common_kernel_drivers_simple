@@ -688,7 +688,6 @@ do {										\
 		}								\
 } while (0)
 
-
 #ifdef WL_SCAN
 #undef WL_SCAN
 #endif
@@ -975,6 +974,23 @@ entry = container_of((ptr), type, member); \
 
 #endif /* STRICT_GCC_WARNINGS */
 
+typedef enum wl_pm_state {
+    PM_STATE_INIT,
+    PM_STATE_CONNECT,
+    PM_STATE_RTT_START,
+    PM_STATE_RTT_STOP,
+    PM_STATE_PRIV_CMD,
+    PM_STATE_HOST_SET,
+    PM_STATE_CONN_NOTIFIER,
+    PM_STATE_CONN_NOTIFIER2,
+    PM_STATE_CONN_DONE,
+    PM_STATE_WORK_HDLR,
+    PM_STATE_BTCOEX,
+    PM_STATE_P2P_PS,
+    PM_STATE_P2P_LISTEN,
+    PM_STATE_AP_START
+} wl_pm_state_t;
+
 /* DPP Public Action Frame types */
 enum wl_dpp_ftype {
     DPP_AUTH_REQ			= 0,
@@ -1099,7 +1115,6 @@ typedef enum wl_iftype {
 	WL_IF_TYPE_STA = 0,
 	WL_IF_TYPE_AP = 1,
 
-
 	WL_IF_TYPE_NAN_NMI = 3,
 	WL_IF_TYPE_NAN = 4,
 	WL_IF_TYPE_P2P_GO = 5,
@@ -1130,7 +1145,6 @@ enum wl_mode {
 	WL_MODE_BSS = 0,
 	WL_MODE_IBSS = 1,
 	WL_MODE_AP = 2,
-
 
 	WL_MODE_NAN = 4,
 	WL_MODE_MAX
@@ -1456,6 +1470,8 @@ struct net_info {
 
 	bool ps_managed;
 	uint32 ps_managed_start_ts;
+	wl_pm_state_t ps_managed_state;
+	bool ps_usr_managed;
 	/* used to comapre with incoming config
 	* Delete config from firmware if both are not matching
 	* If matching, skip configuring iovar again
@@ -2401,6 +2417,7 @@ struct bcm_cfg80211 {
 	bool randomized_gas_tx;
 	u8 country[WLC_CNTRY_BUF_SZ];
 	u8 latency_mode;
+	u64 latency_mode_start_ts;
 #ifdef WL_MBO_HOST
 	void *btmreq;
 	uint16 btmreq_len;
@@ -3197,7 +3214,6 @@ wl_iftype_to_str(int wl_iftype)
 		case (WL_IF_TYPE_AP):
 			return "WL_IF_TYPE_AP";
 
-
 		case (WL_IF_TYPE_NAN_NMI):
 			return "WL_IF_TYPE_NAN_NMI";
 		case (WL_IF_TYPE_NAN):
@@ -3881,13 +3897,13 @@ extern s32 wl_update_prof(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 extern s32 wl_handle_auth_event(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	const wl_event_msg_t *e, void *data);
 #endif /* WL_CLIENT_SAE */
+
 #ifdef WL_CFGVENDOR_SEND_ALERT_EVENT
 extern int wl_cfg80211_alert(struct net_device *dev);
 #endif /* WL_CFGVENDOR_SEND_ALERT_EVENT */
 extern void
 wl_cfg80211_set_okc_pmkinfo(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	wsec_pmk_t *pmk, bool validate_sec);
-
 
 #ifdef AUTH_ASSOC_STATUS_EXT
 typedef enum auth_assoc_status_ext {
@@ -4045,4 +4061,8 @@ extern s32 wl_cfg80211_flush_pmksa(struct wiphy *wiphy, struct net_device *dev);
 extern s32 wl_cfg80211_set_wsec_info_algos(struct net_device *dev, uint32 algos, uint32 mask);
 #endif /* WL_GCMP */
 extern u32 wl_rsn_cipher_wsec_key_algo_lookup(uint32 cipher);
+extern s32 wl_cfg80211_set_pm(struct net_device *dev, u32 pm_enable, wl_pm_state_t state);
+extern s32 wl_validate_bss_length(uint32 version, uint32 tot_len, uint32 ie_length);
+bool wl_cfg80211_verify_bss(struct bcm_cfg80211 *cfg, struct net_device *ndev,
+		struct cfg80211_bss **bss);
 #endif /* _wl_cfg80211_h_ */

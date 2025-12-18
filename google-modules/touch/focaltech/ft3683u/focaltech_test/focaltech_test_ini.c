@@ -1,5 +1,5 @@
 /************************************************************************
-* Copyright (c) 2012-2020, Focaltech Systems (R)£¬All Rights Reserved.
+* Copyright (c) 2012-2020, Focaltech Systems (R)ï¿½ï¿½All Rights Reserved.
 *
 * File Name: focaltech_test_ini.c
 *
@@ -902,6 +902,8 @@ static int get_test_threshold_mc_sc(void)
     /* init buffer */
     fts_init_buffer(thr->rawdata_h_min, thr->basic.rawdata_h_min, node_num, false, 0, 0);
     fts_init_buffer(thr->rawdata_h_max, thr->basic.rawdata_h_max, node_num, false, 0, 0);
+    fts_init_buffer(thr->rawdata_h_min_ical, 0, node_num, false, 0, 0);
+    fts_init_buffer(thr->rawdata_h_max_ical, 0, node_num, false, 0, 0);
     if (tdata->func->rawdata2_support) {
         fts_init_buffer(thr->rawdata_l_min, thr->basic.rawdata_l_min, node_num, false, 0, 0);
         fts_init_buffer(thr->rawdata_l_max, thr->basic.rawdata_l_max, node_num, false, 0, 0);
@@ -910,6 +912,10 @@ static int get_test_threshold_mc_sc(void)
     fts_init_buffer(thr->tx_linearity_min, 0, node_num, false, 0, 0);
     fts_init_buffer(thr->rx_linearity_max, thr->basic.uniformity_rx_hole, node_num, false, 0, 0);
     fts_init_buffer(thr->rx_linearity_min, 0, node_num, false, 0, 0);
+    fts_init_buffer(thr->tx_linearity_max_ical, thr->basic.uniformity_tx_hole, node_num, false, 0, 0);
+    fts_init_buffer(thr->tx_linearity_min_ical, 0, node_num, false, 0, 0);
+    fts_init_buffer(thr->rx_linearity_max_ical, thr->basic.uniformity_rx_hole, node_num, false, 0, 0);
+    fts_init_buffer(thr->rx_linearity_min_ical, 0, node_num, false, 0, 0);
     fts_init_buffer(thr->scap_cb_off_min, thr->basic.scap_cb_off_min, sc_num, false, 0, 0);
     fts_init_buffer(thr->scap_cb_off_max, thr->basic.scap_cb_off_max, sc_num, false, 0, 0);
     fts_init_buffer(thr->scap_cb_on_min, thr->basic.scap_cb_on_min, sc_num, false, 0, 0);
@@ -922,6 +928,10 @@ static int get_test_threshold_mc_sc(void)
     fts_init_buffer(thr->scap_rawdata_off_max, thr->basic.scap_rawdata_off_max, sc_num, false, 0, 0);
     fts_init_buffer(thr->scap_rawdata_on_min, thr->basic.scap_rawdata_on_min, sc_num, false, 0, 0);
     fts_init_buffer(thr->scap_rawdata_on_max, thr->basic.scap_rawdata_on_max, sc_num, false, 0, 0);
+    fts_init_buffer(thr->scap_rawdata_off_min_ical, thr->basic.scap_rawdata_off_min_ical, sc_num, false, 0, 0);
+    fts_init_buffer(thr->scap_rawdata_off_max_ical, thr->basic.scap_rawdata_off_max_ical, sc_num, false, 0, 0);
+    fts_init_buffer(thr->scap_rawdata_on_min_ical, thr->basic.scap_rawdata_on_min_ical, sc_num, false, 0, 0);
+    fts_init_buffer(thr->scap_rawdata_on_max_ical, thr->basic.scap_rawdata_on_max_ical, sc_num, false, 0, 0);
     fts_init_buffer(thr->scap_rawdata_hi_min, thr->basic.scap_rawdata_hi_min, sc_num, false, 0, 0);
     fts_init_buffer(thr->scap_rawdata_hi_max, thr->basic.scap_rawdata_hi_max, sc_num, false, 0, 0);
     fts_init_buffer(thr->scap_rawdata_hov_min, thr->basic.scap_rawdata_hov_min, sc_num, false, 0, 0);
@@ -963,12 +973,16 @@ static int get_test_threshold_mc_sc(void)
     /* detail threshold */
     get_detail_threshold("RawData_Min_High_Tx", true, thr->rawdata_h_min, node_num);
     get_detail_threshold("RawData_Max_High_Tx", true, thr->rawdata_h_max, node_num);
+    get_detail_threshold("RawData_Min_High_Ical_Tx", true, thr->rawdata_h_min_ical, node_num);
+    get_detail_threshold("RawData_Max_High_Ical_Tx", true, thr->rawdata_h_max_ical, node_num);
     if (tdata->func->rawdata2_support) {
         get_detail_threshold("RawData_Min_Low_Tx", true, thr->rawdata_l_min, node_num);
         get_detail_threshold("RawData_Max_Low_Tx", true, thr->rawdata_l_max, node_num);
     }
     get_detail_threshold("Tx_Linearity_Max_Tx", true, thr->tx_linearity_max, node_num);
     get_detail_threshold("Rx_Linearity_Max_Tx", true, thr->rx_linearity_max, node_num);
+    get_detail_threshold("Tx_Linearity_Max_Ical_Tx", true, thr->tx_linearity_max_ical, node_num);
+    get_detail_threshold("Rx_Linearity_Max_Ical_Tx", true, thr->rx_linearity_max_ical, node_num);
     get_detail_threshold("ScapCB_OFF_Min_", true, thr->scap_cb_off_min, sc_num);
     get_detail_threshold("ScapCB_OFF_Max_", true, thr->scap_cb_off_max, sc_num);
     get_detail_threshold("ScapCB_ON_Min_", true, thr->scap_cb_on_min, sc_num);
@@ -981,6 +995,10 @@ static int get_test_threshold_mc_sc(void)
     get_detail_threshold("ScapRawData_OFF_Max_", true, thr->scap_rawdata_off_max, sc_num);
     get_detail_threshold("ScapRawData_ON_Min_", true, thr->scap_rawdata_on_min, sc_num);
     get_detail_threshold("ScapRawData_ON_Max_", true, thr->scap_rawdata_on_max, sc_num);
+    get_detail_threshold("ScapRawData_OFF_Ical_Min_", true, thr->scap_rawdata_off_min_ical, sc_num);
+    get_detail_threshold("ScapRawData_OFF_Ical_Max_", true, thr->scap_rawdata_off_max_ical, sc_num);
+    get_detail_threshold("ScapRawData_ON_Ical_Min_", true, thr->scap_rawdata_on_min_ical, sc_num);
+    get_detail_threshold("ScapRawData_ON_Ical_Max_", true, thr->scap_rawdata_on_max_ical, sc_num);
     get_detail_threshold("ScapRawData_High_Min_", true, thr->scap_rawdata_hi_min, sc_num);
     get_detail_threshold("ScapRawData_High_Max_", true, thr->scap_rawdata_hi_max, sc_num);
     get_detail_threshold("ScapRawData_Hov_Min_", true, thr->scap_rawdata_hov_min, sc_num);

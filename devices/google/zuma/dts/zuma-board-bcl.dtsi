@@ -37,11 +37,15 @@
 				mid_mpmm_settings = <0x1AA>;
 				big_mpmm_settings = <0x6>;
 				mpmm_en = <0x1f0>;
-				tpu_con_heavy = <0xfff041c3>;
-				tpu_con_light = <0xfff041c1>;
+				tpu_con_heavy = <0xfff041c1>;
+				tpu_con_light = <0xfff041c3>;
 				tpu_clkdivstep = <0x1>;
-				gpu_con_heavy = <0xfff04385>;
-				gpu_con_light = <0xfff041c1>;
+				gpu_con_heavy = <0xfff04381>;
+				gpu_con_light = <0xfff041c3>;
+				cpu2_con_heavy = <0xfff041c0>;
+				cpu2_con_light = <0xfff041c3>;
+				cpu1_con_heavy = <0xfff041c0>;
+				cpu1_con_light = <0xfff041c3>;
 				gpu_clkdivstep = <0x1>;
 				cpu2_clkdivstep = <0x1>;
 				cpu1_clkdivstep = <0x1>;
@@ -61,6 +65,10 @@
 				cpu0_cluster = <0>;
 				cpu1_cluster = <4>;
 				cpu2_cluster = <8>;
+				uvlo1_det = <0x0>;   /* 0us */
+				uvlo2_det = <0x0>;   /* 0us */
+				batoilo_det = <0x1>;   /* 30us */
+				non_monitored_module_ids = <AUDIO_MITIGATION_ID HAPTICS_MITIGATION_ID>;
 
 				irq_config {
 					irq,uvlo1;
@@ -108,34 +116,155 @@
 					ch11 { setting = <166>; };
 					ch12 { setting = <166>; };
 				};
+				main_mitigation {
+					ch1 {
+						module_id = <MIF_MITIGATION_ID>;
+						threshold = <291200>; /* ODPM LPF RAW */
+					};
+					ch2 {
+						module_id = <CPU_BIG_MITIGATION_ID>;
+						threshold = <145600>;
+					};
+					ch3 {
+						module_id = <CPU_MID_MITIGATION_ID>;
+						threshold = <97067>;
+					};
+					ch4 {
+						module_id = <CPU_LITTLE_MITIGATION_ID>;
+						threshold = <145600>;
+					};
+					ch5 {
+						module_id = <INT_MITIGATION_ID>;
+						threshold = <97067>;
+					};
+					ch6 {
+						module_id = <LDO_MITIGATION_ID>;
+						threshold = <291200>;
+					};
+					ch7 {
+						module_id = <TPU_MITIGATION_ID>;
+						threshold = <97067>;
+					};
+					ch8 {
+						module_id = <LDO_MITIGATION_ID>;
+						threshold = <291200>;
+					};
+					ch9 {
+						module_id = <DISPLAY_MITIGATION_ID>;
+						threshold = <1456000>;
+					};
+					ch10 {
+						module_id = <CPU_LITTLE_MITIGATION_ID>;
+						threshold = <291200>;
+					};
+					ch11 {
+						module_id = <MODEM_MITIGATION_ID>;
+						threshold = <71670>;
+					};
+					ch12 {
+						module_id = <CELLULAR_MITIGATION_ID>;
+						threshold = <71670>;
+					};
+				};
+				sub_mitigation {
+					ch1 {
+						module_id = <CAMERA_MITIGATION_ID>;
+						threshold = <145600>; /* ODPM LPF RAW */
+					};
+					ch2 {
+						module_id = <GPU_MITIGATION_ID>;
+						threshold = <145600>;
+					};
+					ch3 {
+						module_id = <DDR_MITIGATION_ID>;
+						threshold = <291200>;
+					};
+					ch4 {
+						module_id = <DDR_MITIGATION_ID>;
+						threshold = <291200>;
+					};
+					ch5 {
+						module_id = <GPU_MITIGATION_ID>;
+						threshold = <291200>;
+					};
+					ch6 {
+						module_id = <AOC_MITIGATION_ID>;
+						threshold = <291200>;
+					};
+					ch7 {
+						module_id = <UFS_MITIGATION_ID>;
+						threshold = <1092000>;
+					};
+					ch8 {
+						module_id = <GNSS_MITIGATION_ID>;
+						threshold = <291200>;
+					};
+					ch9 {
+						module_id = <DDR_MITIGATION_ID>;
+						threshold = <819000>;
+					};
+					ch10 {
+						module_id = <DISPLAY_MITIGATION_ID>;
+						threshold = <143340>;
+					};
+					ch11 {
+						module_id = <WLAN_MITIGATION_ID>;
+						threshold = <143340>;
+					};
+					ch12 {
+						module_id = <CELLULAR_MITIGATION_ID>;
+						threshold = <143340>;
+					};
+				};
 				freq_qos {
 					batoilo {
-						cpucl0 = <1704000>;
-						cpucl1 = <1945000>;
-						cpucl2 = <2294000>;
+						cpucl0 = <975000>;
+						cpucl1 = <1221000>;
+						cpucl2 = <1557000>;
 						gpu = <723000>;
 						tpu = <845000>;
 					};
 					vdroop1 {
 						cpucl0 = <1704000>;
-						cpucl1 = <1945000>;
+						cpucl1 = <1836000>;
 						cpucl2 = <2294000>;
 						gpu = <890000>;
 						tpu = <845000>;
 					};
 					vdroop2 {
 						cpucl0 = <1704000>;
-						cpucl1 = <1945000>;
+						cpucl1 = <1836000>;
 						cpucl2 = <2294000>;
 						gpu = <649000>;
 						tpu = <627000>;
 					};
 					smpl_gm {
 						cpucl0 = <1704000>;
-						cpucl1 = <1945000>;
+						cpucl1 = <1836000>;
 						cpucl2 = <2294000>;
 						gpu = <649000>;
 						tpu = <627000>;
+					};
+					ramp_lvl_1 {
+						cpucl0 = <1844000>;
+						cpucl1 = <1999000>;
+						cpucl2 = <2409000>;
+						gpu = <890000>;
+						tpu = <845000>;
+					};
+					ramp_lvl_2 {
+						cpucl0 = <2024000>;
+						cpucl1 = <2130000>;
+						cpucl2 = <2687000>;
+						gpu = <890000>;
+						tpu = <845000>;
+					};
+					ramp_lvl_3 {
+						cpucl0 = <2098000>;
+						cpucl1 = <2352000>;
+						cpucl2 = <2914000>;
+						gpu = <890000>;
+						tpu = <845000>;
 					};
 				};
 			};

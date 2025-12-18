@@ -698,7 +698,6 @@ update_sock_qos_maxfl(struct dhd_info *dev, const char *buf, size_t count)
 	return count;
 }
 
-
 static ssize_t
 show_sock_qos_stats(struct dhd_info *dev, char *buf)
 {
@@ -2737,7 +2736,6 @@ set_wl_debug_level(struct dhd_info *dhd, const char *buf, size_t count)
 			       "SUBMODULE:LEVEL (%d tokens)\n",
 			       tbuf, token, tokens));
 
-
 	}
 	DHD_INFO(("changed wl_dbg_level %d \n", wl_dbg_level));
 	return count;
@@ -3351,7 +3349,6 @@ write_cpumask_set8(struct dhd_info *dev, const char *buf, size_t count)
 
 static struct dhd_attr dhd_cpumask_set8 =
 __ATTR(cpumask_set8, 0660, read_cpumask_set8, write_cpumask_set8);
-
 
 static ssize_t
 read_cpumask_set4(struct dhd_info *dev, char *buf)

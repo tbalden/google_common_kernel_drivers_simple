@@ -46,7 +46,6 @@
 #include <dhd_pcie.h>
 #endif /* DHD_USE_CISINFO_FROM_OTP */
 
-
 #ifdef DHD_USE_CISINFO_FROM_OTP
 typedef struct cis_tuple_addrs {
 	uint chipid;
@@ -669,7 +668,6 @@ naming_info_t bcm4389_naming_table[] = {
 	{ {"usi_es21"}, {"_ES21"}, {""} },
 	{ {"usi_es31"}, {"_ES31"}, {""} },
 };
-
 
 /* select the NVRAM/FW tag naming table */
 naming_info_t *

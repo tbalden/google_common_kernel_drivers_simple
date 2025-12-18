@@ -352,7 +352,6 @@ dhd_bus_dump_console_buffer(dhd_bus_t *bus)
 			line[n] = ch;
 		}
 
-
 		if (n > 0) {
 			if (line[n - 1] == '\r')
 				n--;
@@ -962,7 +961,6 @@ dhd_dump_intr_registers(dhd_pub_t *dhd, struct bcmstrbuf *strbuf)
 		d2h_mb_data, dhd->bus->def_intmask);
 }
 
-
 void
 dhd_bus_dump_flowring(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf)
 {
@@ -1314,7 +1312,6 @@ dhd_bus_dump(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf)
 
 	dhd_bus_dump_flowring(dhdp, strbuf);
 
-
 	dhd_dump_dpc_histos(dhdp, strbuf);
 	dhd_prot_print_traces(dhdp, strbuf);
 }
@@ -1555,7 +1552,6 @@ dhd_pcie_dump_core_regs(dhd_pub_t * pub, uint32 index, uint32 first_addr, uint32
 	uint32	coreoffset = index << 12;
 	uint32	core_addr = SI_ENUM_BASE(bus->sih) + coreoffset;
 	uint32 value;
-
 
 	while (first_addr <= last_addr) {
 		core_addr = SI_ENUM_BASE(bus->sih) + coreoffset + first_addr;
@@ -1803,7 +1799,6 @@ dhd_pcie_get_wrapper_regs(dhd_pub_t *dhd)
 
 	struct bcmstrbuf b;
 	struct bcmstrbuf *strbuf = &b;
-
 
 	/* The procedure to read wrapper for SOCI_NCI is different compared to SOCI_AI */
 	if (CHIPTYPE(bus->sih->socitype) == SOCI_NCI) {
@@ -2468,7 +2463,6 @@ dhdpcie_get_cbaon_coredumps(struct dhd_bus *bus)
 		DHD_ERROR(("%s: dhdpcie_get_cbcore_dmps failed !\n", __FUNCTION__));
 		return ret;
 	}
-
 
 	/* read GCI chipid using config space indirect backplane addressing,
 	 * if successful, dump AON core regs

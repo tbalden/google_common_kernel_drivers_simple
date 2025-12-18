@@ -1830,6 +1830,7 @@ typedef struct dhd_pub {
 	bool rx_cpl_lat_capable; /* FW supports latency posting in Rx cpl ring */
 	rx_cpl_lat_info_t rxcpl_lat_info; /* Rx Cpl latency information */
 	tx_cpl_info_t txcpl_info; /* TX completion timestamp info */
+
 #ifdef SUPPORT_OTA_UPDATE
 	ota_update_info_t ota_update_info;
 #endif /* SUPPORT_OTA_UPDATE */

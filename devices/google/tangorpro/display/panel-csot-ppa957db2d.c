@@ -238,7 +238,7 @@ static int ppa957db2d_prepare(struct drm_panel *panel)
 	return 0;
 }
 
-static void ts110f5mlg0_set_cabc_mode(struct exynos_panel *ctx,
+static void ppa957db2d_set_cabc_mode(struct exynos_panel *ctx,
 					enum exynos_cabc_mode cabc_mode)
 {
 	u8 mode;
@@ -621,7 +621,7 @@ static const struct exynos_panel_funcs ppa957db2d_exynos_funcs = {
 	.panel_reset = ppa957db2d_reset,
 	.set_dimming_on = ppa957db2d_set_dimming_on,
 	.set_brightness = exynos_panel_set_brightness,
-	.set_cabc_mode = ts110f5mlg0_set_cabc_mode,
+	.set_cabc_mode = ppa957db2d_set_cabc_mode,
 	.get_panel_rev = ppa957db2d_get_panel_rev,
 	.parse_regulators = ppa957db2d_parse_regualtors,
 	.set_power = ppa957db2d_set_power,

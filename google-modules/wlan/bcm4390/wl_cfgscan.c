@@ -1212,7 +1212,6 @@ wl_escan_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 			cfg->bss_list = wl_escan_get_buf(cfg, FALSE);
 #endif /* USE_CACHED_SCANRESULT_FOR_ABORT */
 
-
 			if (!scan_req_match(cfg)) {
 				WL_TRACE_HW4(("SCAN ABORTED: scanned AP count=%d\n",
 					cfg->bss_list->count));
@@ -1296,7 +1295,9 @@ s32 wl_cfgscan_pfn_handler(struct bcm_cfg80211 *cfg, wl_pfn_scanresult_v3_1_t *p
 
 	/* Each of the ie_length or ie_offset can have higher limit u32 value */
 	bss_info_len = total_event_len - sizeof(wl_pfn_scanresult_v3_1_t);
-	if ((bss_info_len < bi->ie_length) || ((bss_info_len - bi->ie_length) < bi->ie_offset)) {
+	if ((bss_info_len < bi->ie_length) || ((bss_info_len - bi->ie_length) < bi->ie_offset) ||
+		(wl_validate_bss_length(bi->version, dtoh32(bi->length),
+			bi->ie_length) != BCME_OK)) {
 		WL_ERR(("Invalid pfn scan result event data length %d ie_offset %d ie_length %d\n",
 			total_event_len, bi->ie_offset, bi->ie_length));
 		return -EINVAL;
@@ -1707,7 +1708,6 @@ wl_cfgscan_populate_scan_channels(struct bcm_cfg80211 *cfg,
 #ifdef P2P_SKIP_DFS
 	int is_printed = false;
 #endif /* P2P_SKIP_DFS */
-
 
 	if (!channels || !n_channels) {
 		/* Do full channel scan */
@@ -3161,7 +3161,6 @@ wl_notify_escan_complete(struct bcm_cfg80211 *cfg,
 	CLR_TS(cfg, scan_enq);
 	CLR_TS(cfg, scan_start);
 
-
 	if (!cfg->bss_list) {
 		/* bss_list could be null in pre-emption/abort cases */
 #ifdef USE_CACHED_SCANRESULT_FOR_ABORT
@@ -4219,7 +4218,6 @@ wl_cfgscan_sched_scan_stop_work(struct work_struct *work)
 	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	cfg = container_of(dw, struct bcm_cfg80211, sched_scan_stop_work);
 	GCC_DIAGNOSTIC_POP();
-
 
 	/* Hold rtnl_lock -> scan_sync lock to be in sync with cfg80211_ops path */
 	rtnl_lock();
@@ -6103,7 +6101,6 @@ wl_convert_freqlist_to_chspeclist(struct bcm_cfg80211 *cfg,
 	drv_acs_params_t safe_param = { 0 };
 	bool safe_success = FALSE;
 #endif /* WL_CELLULAR_CHAN_AVOID */
-
 
 	if (freq_list_len > MAX_ACS_FREQS) {
 		WL_ERR(("invalid len:%d\n", freq_list_len));

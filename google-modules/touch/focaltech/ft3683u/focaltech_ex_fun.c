@@ -1685,102 +1685,13 @@ int gti_set_palm_mode(void *private_data, struct gti_palm_cmd *cmd)
     int ret = 0;
     struct fts_ts_data *ts_data = fts_data;
 
-    ts_data->enable_fw_palm = (cmd->setting == GTI_GRIP_ENABLE) ?
-        FW_GRIP_ENABLE : FW_GRIP_DISABLE;
-
-    FTS_INFO("switch fw_palm to %u\n", ts_data->enable_fw_palm);
-
-    ret = fts_set_palm_mode(ts_data, ts_data->enable_fw_palm);
+    ret = fts_set_palm_mode(ts_data, cmd->setting == GTI_PALM_ENABLE);
     if (ret < 0)
         return ret;
 
     return 0;
 }
 #endif /* IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE) */
-
-/* grip */
-static ssize_t proc_grip_read(struct file *filp, char __user *buff,
-    size_t count, loff_t *ppos)
-{
-    int cnt = 0;
-    struct fts_ts_data *ts_data = fts_data;
-    char tmpbuf[PROC_BUF_SIZE] = { 0 };
-    loff_t pos = *ppos;
-
-    if (pos)
-        return 0;
-
-    FTS_DEBUG("fw_grip = %u", ts_data->enable_fw_grip);
-    cnt += snprintf(tmpbuf + cnt, PROC_BUF_SIZE - cnt,
-        "%u\n", ts_data->enable_fw_grip);
-
-    if (copy_to_user(buff, tmpbuf, cnt)) {
-        FTS_ERROR("copy to user error");
-        return -EFAULT;
-    }
-
-    *ppos = pos + cnt;
-    return cnt;
-}
-
-/* Set Grip suppression mode.
- * 0 - Disable fw grip suppression.
- * 1 - Enable fw grip suppression.
- * 2 - Force disable fw grip suppression.
- * 3 - Force enable fw grip suppression.
- */
-static ssize_t proc_grip_write(struct file *filp, const char __user *buff,
-    size_t count, loff_t *ppos)
-{
-    int ret = 0;
-    struct fts_ts_data *ts_data = fts_data;
-    char tmpbuf[PROC_BUF_SIZE] = { 0 };
-    int grip_mode = 0xFF;
-    int buflen = count;
-
-    if (buflen >= PROC_BUF_SIZE) {
-        FTS_ERROR("proc write length(%d) fails", buflen);
-        return -EINVAL;
-    }
-
-    if (copy_from_user(tmpbuf, buff, buflen)) {
-        FTS_ERROR("copy from user error");
-        return -EFAULT;
-    }
-
-    ret = sscanf(tmpbuf, "%d", &grip_mode);
-    if (ret != 1) {
-        FTS_ERROR("get mode fails,ret=%d", ret);
-        return -EINVAL;
-    }
-    if (grip_mode < 0 || grip_mode > 3) {
-        FTS_ERROR("get mode fails, grip_mode should be in [0,1,2,3].");
-        return -EINVAL;
-    }
-
-    ts_data->enable_fw_grip = grip_mode;
-    FTS_INFO("switch fw_grip to %u\n", ts_data->enable_fw_grip);
-
-    ret = fts_set_grip_mode(ts_data, grip_mode);
-    if (ret < 0) {
-        return ret;
-    }
-
-    return count;
-}
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0))
-static const struct proc_ops proc_grip_fops = {
-    .proc_read   = proc_grip_read,
-    .proc_write  = proc_grip_write,
-};
-#else
-static const struct file_operations proc_grip_fops = {
-    .owner  = THIS_MODULE,
-    .read   = proc_grip_read,
-    .write  = proc_grip_write,
-};
-#endif
 
 enum FTS_COORDINATE_FILTER {
     COORDINATE_FILTER_MAPPING,
@@ -2614,7 +2525,6 @@ static const struct file_operations proc_continuous_report_fops = {
 struct proc_dir_entry *proc_fw_update;
 struct proc_dir_entry *proc_scan_modes;
 struct proc_dir_entry *proc_lpwg;
-struct proc_dir_entry *proc_grip;
 struct proc_dir_entry *proc_coordinate_filter;
 struct proc_dir_entry *proc_sense_onoff;
 struct proc_dir_entry *proc_irq_onoff;
@@ -2648,14 +2558,6 @@ static int fts_create_ctrl_procs(struct fts_ts_data *ts_data)
         ts_data->proc_touch_entry, &proc_lpwg_fops, ts_data);
     if (!proc_lpwg) {
         FTS_ERROR("create proc_lpwg entry fail");
-        ret = -ENOMEM;
-        return ret;
-    }
-
-    proc_grip = proc_create_data("fw_grip", S_IRUSR|S_IWUSR,
-        ts_data->proc_touch_entry, &proc_grip_fops, ts_data);
-    if (!proc_grip) {
-        FTS_ERROR("create proc_grip entry fail");
         ret = -ENOMEM;
         return ret;
     }
@@ -2739,9 +2641,6 @@ static void fts_free_ctrl_procs(void)
 
     if (proc_lpwg)
         proc_remove(proc_lpwg);
-
-    if (proc_grip)
-        proc_remove(proc_grip);
 
     if (proc_coordinate_filter)
         proc_remove(proc_coordinate_filter);

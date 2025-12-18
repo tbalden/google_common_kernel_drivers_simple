@@ -491,7 +491,6 @@ typedef union {
 	wl_roam_prof_band_v4_t v4;
 } wl_roamprof_band_t;
 
-
 #ifdef WLWFDS
 #define CMD_ADD_WFDS_HASH	"ADD_WFDS_HASH"
 #define CMD_DEL_WFDS_HASH	"DEL_WFDS_HASH"
@@ -2610,7 +2609,6 @@ wl_android_set_roam_scan_freqs(struct net_device *dev, char *command)
 	return error;
 }
 
-
 int
 wl_android_add_roam_scan_freqs(struct net_device *dev, char *command, uint cmdlen)
 {
@@ -3461,7 +3459,6 @@ wl_android_legacy_check_command(struct net_device *dev, char *command)
 {
 	int cnt = 0;
 
-
 	while (strlen(legacy_cmdlist[cnt]) > 0) {
 		if (strnicmp(command, legacy_cmdlist[cnt], strlen(legacy_cmdlist[cnt])) == 0) {
 			char cmd[WL_PRIV_CMD_LEN + 1];
@@ -4305,7 +4302,6 @@ wl_android_get_fcc_pwr_limit_2g(struct net_device *dev, char *command, int total
 	return bytes_written;
 }
 #endif /* FCC_PWR_LIMIT_2G */
-
 
 /* Additional format of sta_info
  * tx_pkts, tx_failures, tx_rate(kbps), rssi(main), rssi(aux), tx_pkts_retried,
@@ -8005,7 +8001,6 @@ wl_android_get_roam_vsie_enab(struct net_device *dev, char *cmd, u32 cmd_len)
 	return bytes_written;
 }
 
-
 static int
 wl_android_set_bcn_rpt_vsie_enab(struct net_device *dev, const char *cmd, u32 cmd_len)
 {
@@ -9321,7 +9316,6 @@ static int wl_android_get_ibss_peer_info(struct net_device *dev, char *command,
 
 		peer_info = (bss_peer_info_t *) ((char *)buf + BSS_PEER_LIST_INFO_FIXED_LEN);
 
-
 		for (i = 0; i < peer_list_info.count; i++) {
 
 			WL_DBG(("index:%d rssi:%d, tx:%u, rx:%u\n", i, peer_info->rssi,
@@ -9428,7 +9422,6 @@ int wl_android_set_ibss_routetable(struct net_device *dev, char *command)
 			goto exit;
 		}
 
-
 		str = bcmstrtok(&pcmd, " ", NULL);
 		if (!str || !bcm_ether_atoe(str, &ea)) {
 			WL_ERR(("Invalid ethernet string %s\n", str));
@@ -9459,7 +9452,6 @@ exit:
 	return err;
 
 }
-
 
 int
 wl_android_set_ibss_ampdu(struct net_device *dev, char *command, int total_len)
@@ -10964,7 +10956,7 @@ static int wl_android_set_powersave_mode(
 	}
 #endif /* DHD_PM_OVERRIDE */
 
-	err =  wldev_ioctl_set(dev, WLC_SET_PM, &pm, sizeof(pm));
+	err = wl_cfg80211_set_pm(dev, pm, PM_STATE_PRIV_CMD);
 
 #ifdef DHD_PM_OVERRIDE
 	if (pm == PM_OFF) {
@@ -11537,7 +11529,6 @@ _wl_android_bcnrecv_start(struct bcm_cfg80211 *cfg, struct net_device *ndev, boo
 		goto exit;
 	}
 
-
 	/* Triggering an sendup_bcn iovar */
 	err = wldev_iovar_setint_no_wl(pdev, "sendup_bcn", 1);
 	if (unlikely(err)) {
@@ -11815,7 +11806,6 @@ wl_android_get_latency_crt_data(struct net_device *dev, char *command, int total
 	return bytes_written;
 }
 #endif	/* SUPPORT_LATENCY_CRITICAL_DATA */
-
 
 #ifdef WL_LATENCY_CONFIG
 static int
@@ -12271,7 +12261,6 @@ wl_android_get_nan_status(struct net_device *dev, char *command, int total_len)
 	return bytes_written;
 }
 #endif /* WL_NAN */
-
 
 #ifdef SUPPORT_NAN_RANGING_TEST_BW
 enum {
@@ -13562,7 +13551,6 @@ wl_android_get_bss_sta_info(struct net_device *dev, char *command,
 				sta_list_info.count);
 
 		sta_info = (bss_sta_info_t *) ((char *)buf + BSS_STA_LIST_INFO_FIXED_LEN);
-
 
 		for (i = 0; i < sta_list_info.count; i++) {
 			WL_DBG(("index:%d rssi:%d, tx:%u, rx:%u\n", i, sta_info->rssi,
@@ -14878,7 +14866,6 @@ wl_genl_send_msg(
 		goto out;
 	}
 
-
 	if (attr_type == BCM_GENL_ATTR_STRING) {
 		/* Add a BCM_GENL_MSG attribute. Since it is specified as a string.
 		 * make sure it is null terminated
@@ -15005,7 +14992,6 @@ wl_genl_handle_msg(
 	return 0;
 }
 #endif /* WL_GENL */
-
 
 int wl_fatal_error(void * wl, int rc)
 {

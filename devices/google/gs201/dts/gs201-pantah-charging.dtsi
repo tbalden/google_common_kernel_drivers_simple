@@ -60,7 +60,6 @@
 				google,bd-recharge-soc = <79>;
 				/* Enable TEMP-DEFEND */
 				google,bd-temp-enable;
-				google,bd-temp-dry-run;
 
 				google,chg-termination-5v;
 			};
@@ -117,8 +116,6 @@
 
 		interrupt-parent = <&gpa9>;
 		pca9468,irq-gpio = <&gpa9 0 GPIO_ACTIVE_LOW>; /* PLC_INT_L */
-
-		pca9468,float-voltage = <4300000>; /* 4.3V */
 
 		pca9468,input-itopoff = <500000>; /* 500mA */
 		pca9468,switching-frequency = <3>; /* 980KHz */

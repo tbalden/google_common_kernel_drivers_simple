@@ -40,7 +40,6 @@ static int edgetpu_platform_setup_fw_region(struct edgetpu_mobile_platform_dev *
 	struct resource r;
 	struct device_node *np;
 	int ret;
-	size_t region_map_size = EDGETPU_MAX_FW_LIMIT;
 
 	np = of_parse_phandle(dev->of_node, "memory-region", 0);
 	if (!np) {
@@ -55,15 +54,15 @@ static int edgetpu_platform_setup_fw_region(struct edgetpu_mobile_platform_dev *
 		return ret;
 	}
 
-	if (resource_size(&r) < region_map_size) {
-		dev_err(dev, "Memory region for firmware too small (%zu bytes needed, got %llu)",
-			region_map_size, resource_size(&r));
+	if (resource_size(&r) < EDGETPU_MAX_FW_LIMIT) {
+		dev_err(dev, "Memory region for firmware too small (%#x bytes needed, got %#llx)",
+			EDGETPU_MAX_FW_LIMIT, resource_size(&r));
 		return -ENOSPC;
 	}
 
-	ret = edgetpu_firmware_setup_fw_region(etdev, r.start);
+	ret = edgetpu_firmware_setup_fw_carveout(etdev, r.start, resource_size(&r));
 	if (ret)
-		dev_err(dev, "setup firmware region failed: %d", ret);
+		dev_err(dev, "setup firmware carveout failed: %d", ret);
 	return ret;
 }
 
@@ -71,48 +70,7 @@ static void edgetpu_platform_cleanup_fw_region(struct edgetpu_mobile_platform_de
 {
 	struct edgetpu_dev *etdev = &etmdev->edgetpu_dev;
 
-	edgetpu_firmware_cleanup_fw_region(etdev);
-}
-
-/* Handle mailbox response doorbell IRQ for mobile platform devices. */
-static irqreturn_t edgetpu_platform_handle_mailbox_doorbell(struct edgetpu_dev *etdev, int irq)
-{
-	struct edgetpu_mailbox *mailbox;
-	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
-	struct edgetpu_mailbox_manager *mgr = etdev->mailbox_manager;
-	unsigned long flags;
-	uint i;
-
-	if (!mgr)
-		return IRQ_NONE;
-	for (i = 0; i < etmdev->n_mailbox_irq; i++)
-		if (etmdev->mailbox_irq[i] == irq)
-			break;
-	if (i == etmdev->n_mailbox_irq)
-		return IRQ_NONE;
-	read_lock_irqsave(&mgr->mailboxes_lock, flags);
-	mailbox = mgr->mailboxes[i];
-	if (!mailbox)
-		goto out;
-	if (!EDGETPU_MAILBOX_RESP_QUEUE_READ(mailbox, doorbell_status))
-		goto out;
-	EDGETPU_MAILBOX_RESP_QUEUE_WRITE(mailbox, doorbell_clear, 1);
-	etdev_dbg(mgr->etdev, "mbox %u resp doorbell irq tail=%u\n", i,
-		  EDGETPU_MAILBOX_RESP_QUEUE_READ(mailbox, tail));
-	if (mailbox->handle_irq)
-		mailbox->handle_irq(mailbox);
-out:
-	read_unlock_irqrestore(&mgr->mailboxes_lock, flags);
-	return IRQ_HANDLED;
-}
-
-/* Handle a mailbox response doorbell interrupt. */
-irqreturn_t edgetpu_mailbox_irq_handler(int irq, void *arg)
-{
-	struct edgetpu_dev *etdev = arg;
-
-	edgetpu_telemetry_irq_handler(etdev);
-	return edgetpu_platform_handle_mailbox_doorbell(etdev, irq);
+	edgetpu_firmware_cleanup_fw_carveout(etdev);
 }
 
 static inline const char *get_driver_commit(void)
@@ -139,6 +97,8 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 		{ .name = NULL },
 		/* Common name for embedded SoC devices */
 		{ .name = "edgetpu-soc" },
+		/* Limited interface for map/unmap only */
+		{ .name = "edgetpu-limited", .limited = true },
 	};
 
 	/* Ensure any drivers relied upon have already probed. */
@@ -156,9 +116,7 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 	etdev->num_cores = EDGETPU_NUM_CORES;
 	etdev->num_telemetry_buffers = EDGETPU_NUM_CORES;
 	etdev->log_buffer_size = EDGETPU_TELEMETRY_LOG_BUFFER_SIZE;
-#if IS_ENABLED(CONFIG_EDGETPU_TELEMETRY_TRACE)
 	etdev->trace_buffer_size = EDGETPU_TELEMETRY_TRACE_BUFFER_SIZE;
-#endif
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (IS_ERR_OR_NULL(r)) {
 		dev_err(dev, "failed to get memory resource");
@@ -188,8 +146,6 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	mutex_init(&etdev->vii_format_uninitialized_lock);
-	etdev->vii_format = EDGETPU_VII_FORMAT_UNKNOWN;
 	ret = edgetpu_device_add(etdev, &regs, iface_params, ARRAY_SIZE(iface_params));
 	if (ret) {
 		dev_err(dev, "edgetpu device add failed: %d", ret);

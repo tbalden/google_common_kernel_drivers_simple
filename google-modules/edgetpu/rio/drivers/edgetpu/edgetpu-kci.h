@@ -16,7 +16,7 @@
 #include <linux/types.h>
 #include <linux/wait.h>
 
-#include <gcip/gcip-fault-injection.h>
+#include <gcip/gcip-fault-inject.h>
 #include <gcip/gcip-kci.h>
 #include <gcip/gcip-memory.h>
 
@@ -115,7 +115,7 @@ struct edgetpu_kci_release_vmbox_detail {
 };
 
 /* BCL mitigation config shared definition with firmware. */
-#define BCL_MITIGATION_CONFIG_VERSION 0
+#define BCL_MITIGATION_CONFIG_VERSION 1
 struct edgetpu_kci_bcl_mitigation_config {
 	u32 version;			/* BCL_MITIGATION_CONFIG_VERSION */
 	/* Value 0xdeadfeed for any of the following means the value is not set here. */
@@ -124,6 +124,9 @@ struct edgetpu_kci_bcl_mitigation_config {
 	u32 mitigation_response_hyst;
 	u32 div_2_ratio;
 	u32 div_4_ratio;
+	/* Following 2 fields added in version 1. */
+	u32 mitigation_fll_step_down_mux;
+	u32 thermal_heavy_mitigation_div_ratio;
 };
 
 /*
@@ -315,12 +318,12 @@ static inline void edgetpu_kci_update_usage_async(struct edgetpu_kci *etkci)
 }
 
 /**
- * edgetpu_kci_fault_injection() - Sends the fault injection KCI command to the firmware.
+ * edgetpu_kci_fault_inject() - Sends the fault injection KCI command to the firmware.
  * @injection: The container of fault injection data.
  *
  * Return: 0 if the command is sent successfully.
  */
-int edgetpu_kci_fault_injection(struct gcip_fault_inject *injection);
+int edgetpu_kci_fault_inject(struct gcip_fault_inject *injection);
 
 /**
  * Send BCL mitigation config via KCI to firmware.

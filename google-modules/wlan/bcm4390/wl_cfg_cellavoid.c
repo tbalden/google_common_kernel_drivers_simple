@@ -893,7 +893,6 @@ wl_cellavoid_verify_avail_chan_list(struct bcm_cfg80211 *cfg, wl_cellavoid_info_
 	char chanspec_str[CHANSPEC_STR_LEN];
 	uint32 restrict_chan, chaninfo;
 
-
 	/* Get chan_info_list or chanspec from FW */
 #define LOCAL_BUF_LEN 4096
 	dngl_chan_list = MALLOCZ(cfg->osh, LOCAL_BUF_LEN);
@@ -1311,7 +1310,6 @@ exit:
 
 	return ret;
 }
-
 
 static wl_cellavoid_chan_info_t *
 wl_cellavoid_find_chinfo_fromband(wl_cellavoid_info_t *cellavoid_info, int band)

@@ -246,7 +246,6 @@ typedef enum nan_range_role {
 	NAN_RANGING_ROLE_RESPONDER = 2
 } nan_range_role_t;
 
-
 typedef struct nan_svc_inst {
 	uint8  inst_id;      /* publisher/subscriber id */
 	uint8  inst_type;    /* publisher/subscriber */
@@ -696,7 +695,6 @@ typedef struct wl_nan_iov {
 	uint16 nan_iov_len;
 	uint8 *nan_iov_buf;
 } wl_nan_iov_t;
-
 
 #ifdef WL_NAN_DISC_CACHE
 

@@ -204,7 +204,6 @@ extern uint wl_msg_level;
 #endif
 #endif /* WL_WLC_SHIM */
 
-
 #ifdef DHD_DEBUG
 #include <sdiovar.h>
 #endif /* DHD_DEBUG */
@@ -508,6 +507,7 @@ enum {
 	IOV_BT_UPLOAD,
 #endif	/* SNAPSHOT_UPLOAD */
 	IOV_TPUT_TEST,
+
 	IOV_DEBUG_BUF_DEST_STAT,
 
 
@@ -707,6 +707,7 @@ const bcm_iovar_t dhd_iovars[] = {
 #if defined(DHD_SSSR_DUMP)
 	{"fis_trigger_and_dump", IOV_FIS_TRIGGER_DUMP, 0, 0, IOVT_UINT32, 0},
 #endif
+
 #ifdef DHD_DEBUG
 	{"induce_error", IOV_INDUCE_ERROR, (0), 0, IOVT_UINT16, 0 },
 #endif /* DHD_DEBUG */
@@ -763,7 +764,6 @@ const bcm_iovar_t dhd_iovars[] = {
 };
 
 #define DHD_IOVAR_BUF_SIZE	128
-
 
 #if defined(LINUX) || defined(linux) || defined(DHD_EFI)
 fw_download_status_t
@@ -1025,7 +1025,6 @@ int dhd_coredump_fill_section(uint8 **dst_buf, int dst_rlen, char *src_buf, int 
 
 	return BCME_OK;
 }
-
 
 /* reconstruct dump memory with socram and sssr dump as TLV format */
 int dhd_collect_coredump(dhd_pub_t *dhdp, dhd_dump_t *dump, bool collect_sssr)
@@ -2930,7 +2929,6 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 		bcopy(&int_val, arg, val_size);
 		break;
 
-
 	case IOV_SVAL(IOV_CHANGEMTU):
 		int_val &= 0xffff;
 		bcmerror = dhd_change_mtu(dhd_pub, int_val, 0);
@@ -3659,6 +3657,7 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 			}
 			break;
 		}
+
 	case IOV_GVAL(IOV_DEBUG_BUF_DEST_STAT):
 		{
 			if (dhd_pub->debug_buf_dest_support) {
@@ -3908,7 +3907,6 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 		dhd_pub->check_trap_rot = *(bool *)arg;
 		break;
 	}
-
 
 #if defined(DHD_MESH)
 	case IOV_SVAL(IOV_MESH):
@@ -4389,7 +4387,6 @@ unlock_exit:
 
 #ifdef SHOW_EVENTS
 
-
 static void
 wl_show_roam_event(dhd_pub_t *dhd_pub, uint status, uint datalen,
 	const char *event_name, char *eabuf, void *event_data)
@@ -4691,7 +4688,6 @@ wl_get_event_status_name(uint32 event_type, uint32 status)
 
 	return def_status_str;
 }
-
 
 static void
 wl_show_host_bcn_mute_miti_event(wl_event_msg_t *event, char *data)
@@ -5132,8 +5128,6 @@ wl_show_host_event(dhd_pub_t *dhd_pub, wl_event_msg_t *event, void *event_data,
 	case WLC_E_P2PO_DEL_DEVICE:
 		DHD_EVENT(("MACEVENT: %s, MAC %s\n", event_name, eabuf));
 		break;
-
-
 
 	case WLC_E_CCA_CHAN_QUAL:
 		if (datalen >= sizeof(cca_chan_qual_event_t)) {
@@ -6078,7 +6072,6 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 #endif /* LIMIT_BORROW */
 #endif /* PROP_TXSTATUS */
 
-
 	case WLC_E_ULP:
 		break;
 	case WLC_E_TDLS_PEER_EVENT:
@@ -6196,6 +6189,7 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 #if defined(RTT_SUPPORT)
 	case WLC_E_PROXD:
 #ifndef WL_CFG80211
+
 #endif /* WL_CFG80211 */
 		break;
 #endif /* RTT_SUPPORT */
@@ -7987,7 +7981,6 @@ static int traffic_mgmt_add_dwm_filter(dhd_pub_t *dhd,
 	uint32              dscp = 0;
 	uint16              dwm_filter_enabled = 0;
 
-
 	/* Check parameter length is adequate */
 	if (len < (OFFSETOF(trf_mgmt_filter_list_t, filter) +
 		trf_mgmt_filter_list->num_filters * sizeof(trf_mgmt_filter_t))) {
@@ -8346,7 +8339,6 @@ exit:
 	return err;
 }
 
-
 #if defined(CACHE_FW_IMAGES)
 int
 dhd_download_blob_cached(dhd_pub_t *dhd, char *file_path,
@@ -8431,7 +8423,6 @@ dhd_apply_default_txcap(dhd_pub_t  *dhd, char *path)
 	}
 	return ret;
 }
-
 
 int
 dhd_apply_default_clm(dhd_pub_t *dhd, char *clm_path)
@@ -8712,7 +8703,6 @@ dhd_apply_default_clm(dhd_pub_t *dhd, char *clm_path)
 		clm_blob_path = VENDOR_PATH CONFIG_BCMDHD_CLM_PATH;
 #endif
 	}
-
 
 	/* If CLM blob file is found on the filesystem, download the file.
 	 * After CLM file download or If the blob file is not present,
@@ -9908,7 +9898,6 @@ int dhd_parse_map_file(osl_t *osh, void *file, uint32 *ramstart, uint32 *rodata_
 		}
 	}
 
-
 fail:
 	if (raw_fmts) {
 		MFREE(osh, raw_fmts, read_size + 1);
@@ -10410,7 +10399,6 @@ dhd_tput_test_rx(dhd_pub_t *dhd, void *pkt)
 	}
 }
 
-
 #ifdef DUMP_IOCTL_IOV_LIST
 void
 dhd_iov_li_append(dhd_pub_t *dhd, dll_t *list_head, dll_t *node)
@@ -10643,7 +10631,6 @@ exit:
 	return ret;
 }
 #endif /* LINUX || DHD_EFI */
-
 
 #ifdef WL_CFGVENDOR_SEND_HANG_EVENT
 
@@ -11532,7 +11519,6 @@ BCMFASTPATH(dhd_8023_llc_to_ether_hdr)(osl_t *osh, struct ether_header *eh8023, 
 	return BCME_OK;
 }
 #endif /* HOST_SFH_LLC */
-
 
 int
 dhd_iovar(dhd_pub_t *pub, int ifidx, char *name, char *param_buf, uint param_len, char *res_buf,

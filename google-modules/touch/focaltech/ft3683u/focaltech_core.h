@@ -259,6 +259,47 @@ enum SS_TYPE {
     SS_WATER,
 };
 
+struct STTWParams {
+  uint8_t reg_addr;
+  uint16_t min_x;
+  uint16_t min_y;
+  uint16_t max_x;
+  uint16_t max_y;
+  uint16_t max_frame_count;
+  uint8_t min_frame_count;
+  uint8_t jitter;
+  uint8_t max_touch_size;
+} __attribute__((packed));
+
+struct LPTWParamsPart1 {
+  uint8_t reg_addr;
+  uint16_t min_x;
+  uint16_t min_y;
+  uint16_t max_x;
+  uint16_t max_y;
+  uint8_t min_frame_count;
+  uint8_t jitter;
+  uint8_t max_touch_size;
+} __attribute__((packed));
+
+struct LPTWParamsPart2And3 {
+  uint8_t reg_addr;
+  uint16_t motion_boundary;
+  uint16_t int2_deassert_min_x;
+  uint16_t int2_deassert_min_y;
+  uint16_t int2_deassert_max_x;
+  uint16_t int2_deassert_max_y;
+  uint16_t marginal_min_x;
+  uint16_t marginal_min_y;
+  uint16_t marginal_max_x;
+  uint16_t marginal_max_y;
+  uint8_t monitor_channel_min_tx;
+  uint8_t monitor_channel_max_tx;
+  uint8_t monitor_channel_min_rx;
+  uint8_t monitor_channel_max_rx;
+  uint8_t min_node_count;
+} __attribute__((packed));
+
 struct fts_ts_data {
     struct i2c_client *client;
     struct spi_device *spi;
@@ -325,8 +366,6 @@ struct fts_ts_data {
 
     u8 work_mode;
 
-    u8 enable_fw_grip;
-    u8 enable_fw_palm;
     ktime_t isr_timestamp; /* Time that the event was first received from the
                         * touch IC, acquired during hard interrupt, in
                         * CLOCK_MONOTONIC */
@@ -349,6 +388,11 @@ struct fts_ts_data {
     u8 *mutual_data;
     uint16_t *self_water_data;
     uint16_t *self_normal_data;
+#if GOOGLE_REPORT_TIMESTAMP_MODE
+    u32 timestamp;
+    u32 raw_timestamp_sensing;
+    u64 timestamp_sensing;
+#endif // GOOGLE_REPORT_TIMESTAMP_MODE
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
     struct goog_touch_interface *gti;
 #endif // IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
@@ -398,8 +442,8 @@ int fts_gesture_readdata(struct fts_ts_data *ts_data);
 
 int fts_write_reg_safe(u8 reg, u8 write_val);
 int fts_set_heatmap_mode(struct fts_ts_data *ts_data, u8 heatmap_mode);
-int fts_set_grip_mode(struct fts_ts_data *ts_datam, u8 grip_mode);
-int fts_set_palm_mode(struct fts_ts_data *ts_data, u8 palm_mode);
+int fts_set_grip_mode(struct fts_ts_data *ts_datam, bool en);
+int fts_set_palm_mode(struct fts_ts_data *ts_data, bool en);
 int fts_set_glove_mode(struct fts_ts_data *ts_data, bool en);
 int fts_set_continuous_mode(u8 mode);
 

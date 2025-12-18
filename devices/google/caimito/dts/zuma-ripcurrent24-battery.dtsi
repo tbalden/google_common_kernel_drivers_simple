@@ -18,13 +18,11 @@
 		google,batt-id = <10>;
 		google,chg-battery-capacity = <5138>;
 		google,chg-cv-limits = <4200000 4300000 4350000 4480000>;
-		google,pullback-current;
 	};
 
 	google,batt-fake {
 		google,batt-id = <255>;
 		google,chg-battery-capacity = <5138>;
 		google,chg-cv-limits = <4200000 4300000 4350000 4480000>;
-		google,pullback-current;
 	};
 };
