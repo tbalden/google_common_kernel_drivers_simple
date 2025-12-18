@@ -667,7 +667,7 @@ static int ioctl_device_disable(struct lwis_client *lwis_client)
 	lwis_client->is_enabled = false;
 	lwis_dev->is_suspended = false;
 
-	ret = lwis_dev_power_down_locked(lwis_dev);
+	ret = lwis_dev_power_down_locked(lwis_dev, /* error_handling= */ false);
 	if (ret < 0) {
 		dev_err(lwis_dev->dev, "Failed to power down device\n");
 		goto exit_locked;
