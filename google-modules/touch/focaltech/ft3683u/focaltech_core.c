@@ -851,12 +851,10 @@ static void fts_update_abnormal_reset(struct fts_ts_data *data,
           break;
         case 6:
           FTS_ERROR("Touch ic reset: 6");
-          fts_update_feature_setting(data);
-          break;
+          return;
         case 7:
           FTS_ERROR("Touch ic reset: 7");
-          fts_update_feature_setting(data);
-          break;
+          return;
         default:
           return;
     }

@@ -28,6 +28,8 @@ struct g2d_plane {
 	struct device *dev;
 	dma_addr_t dma_addr[MAX_NUM_PLANES];
 	const struct g2d_plane_funcs *funcs;
+
+	struct drm_property *hw_caps_prop;
 };
 
 struct g2d_plane *g2d_plane_init(struct g2d_device *gdevice, unsigned int possible_crtcs);

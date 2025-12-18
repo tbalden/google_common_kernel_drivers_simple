@@ -4533,14 +4533,6 @@ void RGXCheckFirmwareCCB(PVRSRV_RGXDEV_INFO *psDevInfo)
 #endif
 				break;
 			}
-#if defined(SUPPORT_FW_CORE_CLK_RATE_CHANGE_NOTIFY)
-			case RGXFWIF_FWCCB_CMD_CORE_CLK_RATE_CHANGE:
-			{
-				RGX_PROCESS_CORE_CLK_RATE_CHANGE(psDevInfo,
-											  psFwCCBCmd->uCmdData.sCmdCoreClkRateChange.ui32CoreClkRate);
-				break;
-			}
-#endif
 			case RGXFWIF_FWCCB_CMD_REQUEST_GPU_RESTART:
 			{
 				RGXFwSharedMemCacheOpPtr(psDevInfo->psRGXFWIfFwSysData, INVALIDATE);

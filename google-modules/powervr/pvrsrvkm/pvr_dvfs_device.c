@@ -1429,9 +1429,7 @@ void DeinitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
 	IMG_DVFS_DEVICE	*psDVFSDevice = NULL;
-#if defined(SUPPORT_PVR_DVFS_GOVERNOR)
 	int err;
-#endif
 
 	/* Check the device is registered */
 	if (!psDeviceNode)
@@ -1446,7 +1444,7 @@ PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		return PVRSRV_OK;
 	}
 	psDVFSDevice->eState = PVR_DVFS_STATE_OFF;
-#if defined(SUPPORT_PVR_DVFS_GOVERNOR)
+
 	/* Communicate power suspend to devfreq framework */
 	err = devfreq_suspend_device(psDVFSDevice->psDevFreq);
 	if (err < 0)
@@ -1454,7 +1452,6 @@ PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		PVR_DPF((PVR_DBG_WARNING, "Failed to suspend DVFS (%d)", err));
 		return PVRSRV_ERROR_INVALID_DEVICE;
 	}
-#endif
 
 	return PVRSRV_OK;
 }
@@ -1462,9 +1459,7 @@ PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 PVRSRV_ERROR ResumeDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
 	IMG_DVFS_DEVICE	*psDVFSDevice = NULL;
-#if defined(SUPPORT_PVR_DVFS_GOVERNOR)
 	int err;
-#endif
 
 	/* Check the device is registered */
 	if (!psDeviceNode)
@@ -1476,7 +1471,7 @@ PVRSRV_ERROR ResumeDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 
 	/* Not supported in GuestOS drivers */
 	psDVFSDevice->eState = PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode) ? PVR_DVFS_STATE_NONE : PVR_DVFS_STATE_READY;
-#if defined(SUPPORT_PVR_DVFS_GOVERNOR)
+
 	if (!PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode))
 	{
 		/* Communicate power resume to devfreq framework */
@@ -1487,7 +1482,6 @@ PVRSRV_ERROR ResumeDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 			return PVRSRV_ERROR_INVALID_DEVICE;
 		}
 	}
-#endif
 
 	return PVRSRV_OK;
 }

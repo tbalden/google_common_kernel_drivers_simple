@@ -97,9 +97,6 @@ int gs_panel_get_te2_freq(struct gs_panel *ctx)
 {
 	int freq;
 
-	if (!gs_panel_has_func(ctx, get_te2_freq))
-		return -EOPNOTSUPP;
-
 	/**
 	 * Still allow the read if the panel is inactive at this moment since we may change
 	 * the rate during the transition to active.
@@ -108,7 +105,22 @@ int gs_panel_get_te2_freq(struct gs_panel *ctx)
 		dev_warn(ctx->dev, "%s: panel is not enabled, may show previous freq\n", __func__);
 
 	mutex_lock(&ctx->mode_lock);
-	freq = ctx->desc->gs_panel_func->get_te2_freq(ctx);
+	if (gs_panel_has_func(ctx, get_te2_freq)) {
+		freq = ctx->desc->gs_panel_func->get_te2_freq(ctx);
+	} else {
+		/**
+		 * For the device which doesn't specify the function of getting TE2 frequency,
+		 * changeable TE2 is used by default, so either idle_vrefresh (VRR) or vrefresh
+		 * indicates the current TE2 frequency (refresh rate).
+		 */
+		const struct gs_panel_mode *pmode = ctx->current_mode;
+
+		if (!pmode)
+			return -EINVAL;
+
+		freq = gs_is_vrr_mode(pmode) ? ctx->sw_status.idle_vrefresh :
+					       drm_mode_vrefresh(&pmode->mode);
+	}
 	mutex_unlock(&ctx->mode_lock);
 
 	return freq;

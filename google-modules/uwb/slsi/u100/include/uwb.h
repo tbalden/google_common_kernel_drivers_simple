@@ -59,11 +59,8 @@ enum {
 };
 
 struct uwb_irq {
-	spinlock_t lock;
 	unsigned int num;
-	char name[MAX_NAME_LEN];
 	unsigned long flags;
-	bool active;
 	bool registered;
 	struct irq_desc *u100_irq;
 };
@@ -98,6 +95,7 @@ struct u100_ctx {
 	atomic_t num_spi_slow_txs;
 
 	struct mutex ioctl_mutex;
+	struct mutex tx_mutex;
 
 	struct gpio_desc *gpio_u100_power;
 	struct gpio_desc *gpio_u100_reset;
@@ -105,10 +103,10 @@ struct u100_ctx {
 
 	wait_queue_head_t wq;
 	struct sk_buff_head sk_rx_q;
-	struct sk_buff_head sk_tx_q;
+	struct sk_buff *sk_tx;
+	int tx_status;
 	struct completion tx_done_cmpl;
 	struct completion atr_done_cmpl;
-	struct completion irq_done_cmpl;
 	struct completion process_done_cmpl;
 	struct mutex atr_lock;
 
@@ -121,7 +119,6 @@ struct u100_ctx {
 	atomic_t waiting_atr;
 	int wait_atr_err;
 	struct firmware_info fw_info;
-	bool misc_registered;
 	unsigned long flags;
 	bool is_download_mode;
 	bool is_atr_right;
@@ -130,13 +127,16 @@ struct u100_ctx {
 	struct uwb_sysnode uwb_node;
 
 	void (*recv_package)(struct u100_ctx *u100_ctx, struct sk_buff *skb);
-	void (*register_device)(struct u100_ctx *u100_ctx);
 
 	struct uwb_coredump *coredump;
 };
 
 int init_controller_layer(struct u100_ctx *u100_ctx);
+
+irqreturn_t uwb2ap_irq_handler(int irq, void *data);
+
 int link_send_package(struct u100_ctx *u100_ctx, char *buff, unsigned int size);
+
 irqreturn_t rx_tsk_work(int irq, void *data);
 void handle_fw_ap_send(struct u100_ctx *u100_ctx);
 
@@ -183,12 +183,19 @@ void uwbs_reset(struct u100_ctx *u100_ctx);
 void uwbs_reset_vbat(struct u100_ctx *u100_ctx);
 
 /**
- * @brief SyncReset. Need to wait for firmware ATR message.
- * @return If 0 is returned, reset times out; otherwise, success.
+ * uwbs_sync_reset() - Rest UWBS and get ATR.
+ * @u100_ctx: U100 context.
+ *
+ * GPIO reset, waiting for the ATR from UWBS and switch to level-triggered interrupts.
+ * The ATR should indicate UWBS's state, UCI transmission can be handled in FW state but not
+ * in BL0, BL1 or any error states.
+ * Free the IRQ if U100 is in an error state.
+ *
+ * Return: 0 on success (UWBS boots successfully and AP gets ATR with FW state), else is failed.
  */
 int uwbs_sync_reset(struct u100_ctx *u100_ctx);
 
-void uwbs_start_download(struct u100_ctx *u100_ctx);
+int uwbs_start_download(struct u100_ctx *u100_ctx);
 
 bool uwbs_sync_start_download(struct u100_ctx *u100_ctx);
 

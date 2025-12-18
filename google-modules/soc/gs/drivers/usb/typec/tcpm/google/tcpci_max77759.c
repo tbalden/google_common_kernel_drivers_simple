@@ -244,11 +244,11 @@ static ssize_t registers_show(struct device *dev, struct device_attribute *attr,
 	struct max77759_plat *chip = max777x9_get_drvdata(dev);
 	struct regmap *regmap = chip->data.regmap;
 	int ret, offset = 0, addr;
-	u8 tmp;
+	u32 tmp;
 
 	for (addr = 0; addr < MAX77759_REG_COUNT; addr++) {
 		/* regmap_bulk_read is incompatible with SPMI, moving to individual reads */
-		ret = max77759_read8(regmap, addr, &tmp);
+		ret = regmap_read(regmap, addr, &tmp);
 		if (ret < 0)
 			continue;
 
@@ -2805,9 +2805,14 @@ static int max77759_usb_set_role(struct usb_role_switch *sw, enum usb_role role)
 		}
 	}
 
-	/* Renable BC1.2 */
+	/*
+	 * Renable BC1.2 upon disconnect if disabled. Needed for sink-only mode
+	 * such as fastbootd/Recovery. As this is on a data role change event,
+	 * BC1.2 state shall be cleared to prepare for the next detection.
+	 */
 	if (chip->attached && !attached && !bc12_get_status(chip->bc12))
 		bc12_enable(chip->bc12, true);
+
 	/*
 	 * To prevent data stack enumeration failure, previously there
 	 * was a 300msec delay here
@@ -2818,13 +2823,6 @@ static int max77759_usb_set_role(struct usb_role_switch *sw, enum usb_role role)
 	enable_data_path_locked(chip);
 	mutex_unlock(&chip->data_path_lock);
 	usb_psy_set_attached_state(chip->usb_psy_data, chip->attached);
-
-	/*
-	 * Renable BC1.2 upon disconnect if disabled. Needed for sink-only mode such as
-	 * fastbootd/Recovery.
-	 */
-	if (chip->attached && !attached && !bc12_get_status(chip->bc12))
-		bc12_enable(chip->bc12, true);
 
 	/*
 	 * Clear COMPLIANCE_WARNING_INPUT_POWER_LIMITED which tracks AICL_ACTIVE only upon

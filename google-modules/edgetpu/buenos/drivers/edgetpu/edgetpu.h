@@ -11,13 +11,19 @@
 #include <linux/ioctl.h>
 #include <linux/types.h>
 
-/* mmap offsets for mailbox CSRs, command queue, and response queue */
+/*
+ * Legacy Platforms Only: mmap offsets for mailbox CSRs, command queue, and response queue.
+ *
+ * If a platform supports in-kernel VII, any attempt to mmap these offsets will fail with an errno
+ * of EINVAL
+ */
 #define EDGETPU_MMAP_EXT_CSR_OFFSET 0x1500000
 #define EDGETPU_MMAP_EXT_CMD_QUEUE_OFFSET 0x1600000
 #define EDGETPU_MMAP_EXT_RESP_QUEUE_OFFSET 0x1700000
 #define EDGETPU_MMAP_CSR_OFFSET 0x1800000
 #define EDGETPU_MMAP_CMD_QUEUE_OFFSET 0x1900000
 #define EDGETPU_MMAP_RESP_QUEUE_OFFSET 0x1A00000
+
 /* mmap offsets for logging and tracing buffers */
 #define EDGETPU_MMAP_LOG_BUFFER_OFFSET 0x1B00000
 #define EDGETPU_MMAP_TRACE_BUFFER_OFFSET 0x1C00000
@@ -27,12 +33,6 @@
 #define EDGETPU_MMAP_TRACE2_BUFFER_OFFSET 0x2000000
 #define EDGETPU_MMAP_LOG3_BUFFER_OFFSET 0x2100000
 #define EDGETPU_MMAP_TRACE3_BUFFER_OFFSET 0x2200000
-
-/* Temporary for runtime not converted to above */
-#define EDGETPU_MMAP_DIVE_LOG_BUFFER_OFFSET 0x1F00000
-#define EDGETPU_MMAP_DIVE_TRACE_BUFFER_OFFSET 0x2000000
-#define EDGETPU_MMAP_DIVE_LOG1_BUFFER_OFFSET 0x2100000
-#define EDGETPU_MMAP_DIVE_TRACE1_BUFFER_OFFSET 0x2200000
 
 /* EdgeTPU map flag macros */
 
@@ -58,6 +58,8 @@ typedef __u32 edgetpu_map_flag_t;
 #define EDGETPU_MAP_ATTR_PBHA_MASK	0xf
 /* Create coherent mapping of the buffer */
 #define EDGETPU_MAP_COHERENT		(1u << 9)
+/* Map buffer "trimmable" on request from Pixel trim subsystem */
+#define EDGETPU_MAP_TRIMMABLE		(1u << 10)
 
 /* External mailbox types */
 #define EDGETPU_EXT_MAILBOX_TYPE_TZ		1
@@ -871,6 +873,28 @@ struct edgetpu_vii_litebuf_response_ioctl {
 #define EDGETPU_GET_VII_CREDITS_PER_CLIENT _IOR(EDGETPU_IOCTL_BASE, 39, __u64)
 
 /*
+ * A "limited" interface to the TPU driver is one which only supports a subset of the IOCTL
+ * commands exposed by the driver. This allows mechanisms like access control to specify which
+ * user-space clients can access the full driver, while still allowing other clients the minimum
+ * set of IOCTLs to enable full functionality.
+ *
+ * The set of IOCTLs supported by the limited interface includes:
+ * - EDGETPU_MAP_BUFFER
+ * - EDGETPU_UNMAP_BUFFER
+ *
+ * To create a limited interface, a file descriptor must be obtained by calling open() on the
+ * limited interface's device node (e.g. /dev/edgetpu-limited). The limited interface FD must then
+ * be passed to the EDGETPU_ADD_LIMITED_INTERFACE IOCTL, called on an existing full interface FD.
+ * Once the limited FD has been added to a client, any process with permission to call ioctl() on
+ * the limited interface device can use the supported ioctls on the limited FD as if it were the
+ * full FD it was linked to.
+ *
+ * Only one limited interface can be paired to any full interface, and the full interface must have
+ * created a device group with EDGETPU_CREATE_GROUP before pairing.
+ */
+#define EDGETPU_ADD_LIMITED_INTERFACE _IOWR(EDGETPU_IOCTL_BASE, 40, __s32)
+
+/*
  * DEPRECATED
  *
  * This constant, with the minimum value among all platforms, is present only for backwards
@@ -878,5 +902,13 @@ struct edgetpu_vii_litebuf_response_ioctl {
  * the maximum number of credits available on the device a client is running on.
  */
 #define EDGETPU_NUM_VII_CREDITS 8
+
+/*
+ * Remap all buffers previously trimmed for this client.
+ *
+ * If a non-zero error code is returned then remapping failed unexpectedly, and the client still
+ * cannot run the associated models until another call to remap buffers returns successfully.
+ */
+#define EDGETPU_REMAP_BUFFERS	_IO(EDGETPU_IOCTL_BASE, 41)
 
 #endif /* __EDGETPU_H__ */

@@ -369,7 +369,8 @@ static int max77779_i2cm_xfer(struct i2c_adapter *adap,
 		err = -EAGAIN;
 
 	if (err) {
-		dev_err(info->dev, "I2CM status Error (%#04x).\n", status_err);
+		dev_err(info->dev, "addr=0x%02x: I2CM status Error (%#04x).\n",
+				(msgs && num_msgs > 0 ? msgs[0].addr : 0xff), status_err);
 		goto xfer_done;
 	}
 
@@ -419,7 +420,8 @@ xfer_done:
 		max77779_i2cm_reset(info);
 		fallthrough; /* for error return */
 	default:
-		dev_err(info->dev, "Xfer Error (%d)\n", err);
+		dev_err(info->dev, "addr=0x%02x: Xfer Error (%d)\n",
+				(msgs && num_msgs > 0 ? msgs[0].addr : 0xff), err);
 	}
 	mutex_unlock(&info->io_lock);
 

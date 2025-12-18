@@ -9,6 +9,7 @@
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/mutex.h>
+#include <linux/seq_file.h>
 #include <drm/vs_drm.h>
 #include <drm/display/drm_dsc.h>
 
@@ -30,7 +31,7 @@
 #define __vsFIELDALIGN(data, reg_field) (((u32)(data)) << __vsFIELDSTART(reg_field))
 
 #define __vsFIELDMASK(reg_field) \
-	((u32)((__vsFIELDSIZE(reg_field) == 32) ? ~0 : (~(~0 << __vsFIELDSIZE(reg_field)))))
+	((u32)((__vsFIELDSIZE(reg_field) == 32) ? ~0U : ((1U << __vsFIELDSIZE(reg_field)) - 1)))
 
 /**************************************************************************
  **
@@ -515,7 +516,6 @@ struct dc_hw_scale {
 	u32 dst_h;
 	u32 factor_x;
 	u32 factor_y;
-	bool stretch_mode;
 	bool coefficients_enable;
 	bool enable;
 	bool coefficients_dirty;
@@ -753,13 +753,19 @@ enum dc_hw_hist_state {
 
 /*
  * histogram buffer stage
- *  ACTIVE: points to next frame histogram data
- *  READY: points to last frame histogram data
+ *  CONFIG: configuration stage
+ *  RUNNING: points to currently processing frame
+ *  DONE: points to ready histogram data
  *  USER: points to histogram data accessed by user
+ *
+ * Finite state machine:
+ *  CONFIG ======> RUNNING ======> DONE =================> USER
+ *           SoF            SoF          ioctl get buffer
  */
 enum dc_hw_hist_stage {
-	VS_HIST_STAGE_ACTIVE,
-	VS_HIST_STAGE_READY,
+	VS_HIST_STAGE_CONFIG,
+	VS_HIST_STAGE_RUNNING,
+	VS_HIST_STAGE_DONE,
 	VS_HIST_STAGE_USER,
 	VS_HIST_STAGE_COUNT
 };
@@ -815,6 +821,23 @@ struct dc_hw_interrupt_status {
 	DECLARE_BITMAP(be_bus_errors, DC_HW_BE_BUS_ERROR_COUNT);
 };
 
+struct dc_hw_display;
+struct dc_hw_plane;
+struct dc_hw_wb;
+
+struct dc_hw_display_funcs {
+	void (*print_state)(struct seq_file *s, const struct dc_hw_display *display,
+			    const u8 indent);
+};
+
+struct dc_hw_plane_funcs {
+	void (*print_state)(struct seq_file *s, const struct dc_hw_plane *plane, const u8 indent);
+};
+
+struct dc_hw_wb_funcs {
+	void (*print_state)(struct seq_file *s, const struct dc_hw_wb *wb, const u8 indent);
+};
+
 struct dc_hw_display {
 	const struct vs_display_info *info;
 	struct dc_hw_display_mode mode;
@@ -857,6 +880,7 @@ struct dc_hw_display {
 	bool wb_split_dirty;
 	bool config_status;
 	u32 vblank_count;
+	struct dc_hw_display_funcs func;
 	/* TBD */
 };
 
@@ -876,6 +900,7 @@ struct dc_hw_plane {
 	struct vs_dc_property_state_group states;
 	struct dc_hw_sram_pool sram;
 	bool config_status;
+	struct dc_hw_plane_funcs func;
 };
 
 struct dc_hw_wb {
@@ -884,6 +909,7 @@ struct dc_hw_wb {
 	struct dc_hw_r2y r2y;
 	struct vs_dc_property_state_group states;
 	bool config_status;
+	struct dc_hw_wb_funcs func;
 	/* TBD */
 };
 
@@ -942,6 +968,8 @@ struct dc_hw {
 	u32 reg_dump_offset;
 	u32 reg_dump_size;
 	u32 reg_size;
+	/** @reg_base_phys: phys addr of memory begin, for coredump metadata */
+	u64 reg_base_phys;
 	struct dc_hw_display display[DC_DISPLAY_NUM];
 	struct dc_hw_plane plane[DC_PLANE_NUM];
 	struct dc_hw_wb wb[DC_WB_NUM];
@@ -1040,6 +1068,7 @@ void dc_hw_config_plane_status(struct dc_hw *hw, u8 id, bool config);
 void dc_hw_config_load_filter(struct dc_hw *hw, u8 hw_id, const u32 *coef_v, const u32 *coef_h);
 void dc_hw_config_display_status(struct dc_hw *hw, u8 id, bool config);
 void dc_hw_config_wb_status(struct dc_hw *hw, u8 id, bool config);
+void dc_hw_enable_clock_domain_iso(struct dc_hw *hw, bool enable);
 void dc_hw_enable_frame_irqs(struct dc_hw *hw, u8 id, bool enable);
 void dc_hw_enable_vblank_irqs(struct dc_hw *hw, u8 id, bool enable);
 int dc_hw_reset_all_be_interrupts(struct dc_hw *hw);
@@ -1058,8 +1087,12 @@ void dc_hw_set_display_pattern(struct dc_hw *hw, u8 hw_id, struct dc_hw_pattern 
 void dc_hw_set_display_crc(struct dc_hw *hw, u8 hw_id, struct dc_hw_disp_crc *crc);
 void dc_hw_get_display_crc(struct dc_hw *hw, u8 hw_id, struct dc_hw_disp_crc *crc);
 void dc_hw_get_display_crc_config(struct dc_hw *hw, u8 id, struct dc_hw_disp_crc *crc);
-int dc_hw_reg_dump(struct dc_hw *hw, struct drm_printer *p, enum dc_hw_reg_bank_type reg_type);
 #endif /* CONFIG_DEBUG_FS */
+int dc_hw_reg_dump_custom(struct dc_hw *hw, struct drm_printer *p, const char *desc, u32 offset,
+			  u32 size);
+int dc_hw_reg_dump(struct dc_hw *hw, struct drm_printer *p, enum dc_hw_reg_bank_type reg_type);
+void dc_hw_collect_reg_dump(struct device *dev, enum dc_hw_reg_dump_options option,
+			    enum dc_hw_reg_bank_type reg_type);
 void dc_hw_do_fe0_reset(struct dc_hw *hw);
 void dc_hw_do_fe1_reset(struct dc_hw *hw);
 void dc_hw_do_be_reset(struct dc_hw *hw);

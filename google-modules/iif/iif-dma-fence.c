@@ -28,11 +28,16 @@ static void iif_dma_fence_release(struct kref *kref)
 static void iif_dma_fence_on_release(struct iif_fence *iif)
 {
 	struct iif_dma_fence *iif_dma_fence = iif_to_iif_dma_fence(iif);
+	struct dma_fence *dma_fence = iif_dma_fence->base_fence;
 
-	if (iif_dma_fence->base_fence)
-		dma_fence_put(iif_dma_fence->base_fence);
+	if (dma_fence) {
+		dma_fence_remove_callback(dma_fence, &iif_dma_fence->poll_cb.dma_cb);
+		dma_fence_put(dma_fence);
+	}
+
 	if (iif_dma_fence->task)
 		put_task_struct(iif_dma_fence->task);
+
 	iif_dma_fence_put(iif_dma_fence);
 }
 
@@ -40,6 +45,22 @@ static void iif_dma_fence_on_release(struct iif_fence *iif)
 static const struct iif_fence_ops iif_dma_fence_ops = {
 	.on_release = iif_dma_fence_on_release,
 };
+
+static void iif_dma_fence_poll_cb(struct dma_fence *fence, struct dma_fence_cb *cb)
+{
+	struct iif_dma_fence *iif_dma_fence =
+		container_of(cb, struct iif_dma_fence, poll_cb.dma_cb);
+	struct iif_fence *iif_fence = &iif_dma_fence->bridged_fence.iif_fence;
+	int status = dma_fence_get_status_locked(fence);
+
+	/* Theoretically, this function must be called only when @dma_fence has been signaled. */
+	if (!status) {
+		iif_warn(iif_fence, "dma_fence has not been signaled yet. Skip signaling IIF.");
+		return;
+	}
+
+	iif_fence_signal_with_status_async(iif_fence, status < 0 ? status : 0);
+}
 
 static const char *dma_iif_fence_get_driver_name(struct dma_fence *fence)
 {
@@ -135,39 +156,48 @@ static void dma_iif_fence_poll_cb(struct iif_fence *fence, struct iif_fence_poll
 static int iif_dma_fence_thread_func(void *data)
 {
 	struct iif_dma_fence *iif_dma_fence = data;
+	struct iif_fence *iif_fence = &iif_dma_fence->bridged_fence.iif_fence;
+	struct dma_fence *dma_fence = iif_dma_fence->base_fence;
 	signed long wait_status;
-	int fence_status;
-	int status = 0;
 
-	wait_status = dma_fence_wait_timeout(iif_dma_fence->base_fence, true,
-					     iif_dma_fence->timeout_jiffies);
+	wait_status = iif_fence_wait_timeout(iif_fence, true, iif_dma_fence->timeout_jiffies);
 
-	/* @wait_status == 0 means the fence has never been signaled until the timeout elapses. */
+	/*
+	 * This thread is designed to signal @iif_fence with an error if @wait_status is non-zero.
+	 * In that case, as the fence still can be signaled when @dma_fence is signaled after the
+	 * function above returns by the race condition, prevents @iif_fence from being signaled.
+	 */
+	dma_fence_remove_callback(dma_fence, &iif_dma_fence->poll_cb.dma_cb);
+
+	/* If @iif_fence is already signaled, don't need to do anything. */
+	if (iif_fence_is_signaled(iif_fence))
+		goto out;
+
+	/*
+	 * If code reaches here, it is guaranteed that @iif_fence is not and will never be signaled,
+	 * but also @wait_status must be either 0 (timeout) or -ERESTARTSYS. If @wait_status > 0,
+	 * `iif_fence_is_signaled()` must have returned true above. We should signal the fence with
+	 * an error regardless of the status of @dma_fence here.
+	 */
 	if (!wait_status)
 		wait_status = -ETIMEDOUT;
 
-	/*
-	 * If @wait_status < 0, an error occurred before @dma_fence is signaled such as interrupt
-	 * and timeout. Otherwise, we should check the signal status of the fence.
-	 *
-	 * Theoretically, if @wait_status is not negative errno (i.e., @dma_fence is signaled),
-	 * @fence_status must be 1 (signaled without any error) or a negative errno (signaled with
-	 * an error). Handle the zero case as timeout just in case.
-	 */
-	fence_status = dma_fence_get_status(iif_dma_fence->base_fence);
-
-	if (wait_status < 0)
-		status = wait_status;
-	else if (fence_status < 0)
-		status = fence_status;
-	else if (unlikely(!fence_status))
-		status = -ETIMEDOUT;
-
 	/* Propagates @wait_status to @iif_fence. */
-	iif_fence_signal_with_status(&iif_dma_fence->bridged_fence.iif_fence, status);
-	iif_fence_put(&iif_dma_fence->bridged_fence.iif_fence);
+	iif_fence_signal_with_status(iif_fence, wait_status);
+	iif_fence_signaler_completed(iif_fence);
+out:
+	iif_fence_put(iif_fence);
 
 	return 0;
+}
+
+static void iif_dma_fence_stop_work(struct work_struct *work)
+{
+	struct iif_dma_fence *iif_dma_fence = container_of(work, struct iif_dma_fence, stop_work);
+	struct iif_fence *iif_fence = &iif_dma_fence->bridged_fence.iif_fence;
+
+	iif_dma_fence_stop(iif_fence);
+	iif_fence_put(iif_fence);
 }
 
 struct iif_dma_fence *iif_dma_fence_get(struct iif_dma_fence *iif_dma_fence)
@@ -185,37 +215,17 @@ void iif_dma_fence_put(struct iif_dma_fence *iif_dma_fence)
 struct iif_fence *iif_dma_fence_wait_timeout(struct iif_manager *mgr, struct dma_fence *dma_fence,
 					     signed long timeout_jiffies)
 {
-	struct iif_dma_fence *iif_dma_fence = kzalloc(sizeof(*iif_dma_fence), GFP_KERNEL);
+	struct iif_dma_fence *iif_dma_fence;
 	struct iif_fence *iif_fence;
 	int ret;
 
-	if (!iif_dma_fence)
-		return ERR_PTR(-ENOMEM);
+	iif_fence = iif_dma_fence_bridge(mgr, dma_fence);
+	if (IS_ERR(iif_fence))
+		return iif_fence;
 
-	iif_fence = &iif_dma_fence->bridged_fence.iif_fence;
-
-	ret = iif_fence_init(mgr, iif_fence, &iif_dma_fence_ops, IIF_IP_AP, 1);
-	if (ret) {
-		kfree(iif_dma_fence);
-		return ERR_PTR(ret);
-	}
-
-	/* From now on, resources will be released when the refcount of @iif_fence becomes 0. */
-
-	iif_dma_fence->base_fence = dma_fence_get(dma_fence);
+	iif_dma_fence = iif_to_iif_dma_fence(iif_fence);
 	iif_dma_fence->timeout_jiffies = timeout_jiffies;
-	kref_init(&iif_dma_fence->kref);
-
-	/*
-	 * Set `IIF_FLAGS_RETIRE_ON_RELEASE` flag to let the IIF retire only on release. Otherwise,
-	 * if @fence is signaled before any waiter starts waiting on @iif_fence, the IIF can retire
-	 * and the waiter will access an invalid IIF.
-	 */
-	iif_fence_set_flags(iif_fence, IIF_FLAGS_RETIRE_ON_RELEASE, false);
-
-	ret = iif_fence_submit_signaler(iif_fence);
-	if (ret)
-		goto err_put_iif_init;
+	INIT_WORK(&iif_dma_fence->stop_work, iif_dma_fence_stop_work);
 
 	/* The kthread should hold the refcount of @iif_fence to avoid UAF bug. */
 	iif_fence_get(iif_fence);
@@ -251,7 +261,8 @@ err_put_iif_kthread:
 	 * usage of IIF, signal IIF here.
 	 */
 	iif_fence_signal_with_status(iif_fence, ret);
-err_put_iif_init:
+	iif_fence_signaler_completed(iif_fence);
+
 	/* Releases the refcount which was set when the IIF was initilaized. */
 	iif_fence_put(iif_fence);
 
@@ -290,10 +301,71 @@ void iif_dma_fence_stop(struct iif_fence *iif_fence)
 	 */
 	if (!iif_fence_get_signal_status(iif_fence)) {
 		iif_fence_signal_with_status(iif_fence, -ERESTARTSYS);
+		iif_fence_signaler_completed(iif_fence);
 		iif_fence_put(iif_fence);
 	}
 }
 EXPORT_SYMBOL_GPL(iif_dma_fence_stop);
+
+void iif_dma_fence_stop_and_put_async(struct iif_fence *iif_fence)
+{
+	struct iif_dma_fence *iif_dma_fence = iif_to_iif_dma_fence(iif_fence);
+
+	schedule_work(&iif_dma_fence->stop_work);
+}
+EXPORT_SYMBOL_GPL(iif_dma_fence_stop_and_put_async);
+
+struct iif_fence *iif_dma_fence_bridge(struct iif_manager *mgr, struct dma_fence *dma_fence)
+{
+	struct iif_dma_fence *iif_dma_fence = kzalloc(sizeof(*iif_dma_fence), GFP_KERNEL);
+	struct iif_fence *iif_fence;
+	int ret;
+
+	if (!iif_dma_fence)
+		return ERR_PTR(-ENOMEM);
+
+	iif_fence = &iif_dma_fence->bridged_fence.iif_fence;
+
+	ret = iif_fence_init(mgr, iif_fence, &iif_dma_fence_ops, IIF_IP_AP, 1);
+	if (ret) {
+		kfree(iif_dma_fence);
+		return ERR_PTR(ret);
+	}
+
+	/* From now on, resources will be released when the refcount of @iif_fence becomes 0. */
+
+	kref_init(&iif_dma_fence->kref);
+	iif_dma_fence->base_fence = dma_fence_get(dma_fence);
+
+	/*
+	 * Set `IIF_FLAGS_RETIRE_ON_RELEASE` flag to let the IIF retire only on release. Otherwise,
+	 * if @fence is signaled before any waiter starts waiting on @iif_fence, the IIF can retire
+	 * and the waiter will access an invalid IIF.
+	 */
+	iif_fence_set_flags(iif_fence, IIF_FLAGS_RETIRE_ON_RELEASE, false);
+
+	/*
+	 * Add a signaler to @iif_fence. The fence will be signaled when the poll callback which
+	 * will be registered below is invoked.
+	 */
+	iif_fence_submit_signaler(iif_fence);
+
+	ret = dma_fence_add_callback(dma_fence, &iif_dma_fence->poll_cb.dma_cb,
+				     iif_dma_fence_poll_cb);
+	if (ret)
+		iif_dma_fence_poll_cb(dma_fence, &iif_dma_fence->poll_cb.dma_cb);
+
+	return iif_fence;
+}
+EXPORT_SYMBOL_GPL(iif_dma_fence_bridge);
+
+struct dma_fence *iif_dma_fence_get_base(struct iif_fence *iif_fence)
+{
+	if (iif_fence->ops != &iif_dma_fence_ops)
+		return NULL;
+	return iif_to_iif_dma_fence(iif_fence)->base_fence;
+}
+EXPORT_SYMBOL_GPL(iif_dma_fence_get_base);
 
 struct dma_fence *dma_iif_fence_bridge(struct iif_fence *iif_fence)
 {

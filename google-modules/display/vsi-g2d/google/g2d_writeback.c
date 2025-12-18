@@ -89,7 +89,20 @@ static enum drm_mode_status g2d_wb_connector_mode_valid(struct drm_connector *co
 static int g2d_wb_connector_atomic_check(struct drm_connector *connector,
 					 struct drm_atomic_state *state)
 {
-	return 0;
+	struct drm_connector_state *connector_state;
+	struct drm_writeback_connector *wb_connector;
+	struct g2d_writeback_connector *g2d_wb_connector;
+	struct drm_framebuffer *fb;
+
+	connector_state = drm_atomic_get_new_connector_state(state, connector);
+	wb_connector = drm_connector_to_writeback(connector);
+	g2d_wb_connector = to_g2d_writeback_connector(wb_connector);
+
+	if (!connector_state->writeback_job)
+		return 0;
+
+	fb = connector_state->writeback_job->fb;
+	return g2d_wb_connector->funcs->check(state->dev, fb);
 }
 
 static int g2d_wb_connector_atomic_prepare(struct drm_writeback_connector *connector,
@@ -140,7 +153,7 @@ static void g2d_wb_connector_atomic_commit(struct drm_connector *connector,
 
 	drm_writeback_queue_job(wb_connector, connector_state);
 
-	g2d_wb_connector->funcs->config(g2d_wb_connector, fb);
+	g2d_wb_connector->funcs->commit(g2d_wb_connector, fb);
 	dev_dbg(drm->dev, "%s: hardware config complete", __func__);
 
 	g2d_wb_connector->armed++;

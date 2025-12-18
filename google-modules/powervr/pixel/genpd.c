@@ -2,6 +2,9 @@
 
 #include "genpd.h"
 
+#include <pvrsrvkm/rgxpower.h>
+#include <pvrsrvkm/volcanic/rgxdevice.h>
+
 #include <misc/sbbm.h>
 
 #include <linux/notifier.h>
@@ -633,6 +636,58 @@ static const struct attribute_group power_state_attr_group = {
 	.attrs = power_state_attrs,
 };
 
+// Valid APM latency values are in the range [-1, 2^32). An APM latency of -1
+// means that APM is turned off.
+static ssize_t apm_latency_ms_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct pixel_gpu_device *pixel_dev = device_to_pixel(dev);
+	RGX_TIMING_INFORMATION *timing_info =
+		((RGX_DATA *)pixel_dev->dev_config->hDevData)->psRGXTimingInfo;
+
+	if (timing_info->bEnableActivePM)
+		return sysfs_emit(buf, "%u\n",
+				    timing_info->ui32ActivePMLatencyms);
+
+	return sysfs_emit(buf, "-1\n");
+}
+
+static ssize_t apm_latency_ms_store(struct device *dev, struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	struct pixel_gpu_device *pixel_dev = device_to_pixel(dev);
+	RGX_TIMING_INFORMATION *timing_info =
+		((RGX_DATA *)pixel_dev->dev_config->hDevData)->psRGXTimingInfo;
+	long long apm_latency_ms;
+	PVRSRV_ERROR err;
+
+	if (kstrtoll(buf, 0, &apm_latency_ms))
+		return -EINVAL;
+
+	if ((apm_latency_ms < 0) || (__UINT32_MAX__ < apm_latency_ms))
+		return -EINVAL;
+
+	if (timing_info->ui32ActivePMLatencyms == apm_latency_ms)
+		return count;
+
+	dev_dbg(pixel_dev->dev, "%s: changing APM latency from %u to %lld",
+		__func__, timing_info->ui32ActivePMLatencyms, apm_latency_ms);
+
+	err = RGXAPMLatencyChange(pixel_dev->dev_config->psDevNode,
+				  apm_latency_ms,
+				  /* bActivePMLatencyPersistant= */ true);
+
+	if (err == PVRSRV_OK) {
+		timing_info->ui32ActivePMLatencyms = apm_latency_ms;
+	} else {
+		dev_err(pixel_dev->dev, "%s: could not change APM latency: %s",
+			__func__, PVRSRVGetErrorString(err));
+		return -EIO;
+	}
+
+	return count;
+}
+static DEVICE_ATTR_RW(apm_latency_ms);
+
 static int init_genpd_sysfs(struct pixel_gpu_device *pixel_dev)
 {
 	int result = 0; /* return first error or success */
@@ -641,6 +696,13 @@ static int init_genpd_sysfs(struct pixel_gpu_device *pixel_dev)
 	ret = sysfs_create_group(&pixel_dev->dev->kobj, &power_state_attr_group);
 	if (ret != 0) {
 		dev_warn(pixel_dev->dev, "failed to create power_state sysfs group: %d", ret);
+		if (result == 0)
+			result = ret;
+	}
+
+	ret = sysfs_create_file(&pixel_dev->dev->kobj, &dev_attr_apm_latency_ms.attr);
+	if (ret != 0) {
+		dev_warn(pixel_dev->dev, "failed to create apm sysfs file: %d", ret);
 		if (result == 0)
 			result = ret;
 	}

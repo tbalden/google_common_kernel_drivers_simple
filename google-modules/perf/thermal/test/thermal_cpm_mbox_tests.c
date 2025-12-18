@@ -264,6 +264,14 @@ static void thermal_cpm_mbox_rx_callback_test(struct kunit *test)
 	KUNIT_EXPECT_TRUE(test, verify_cpm_rx_payload(cpm_msg));
 	__thermal_cpm_mbox_unregister_notification(mock_drv_data, HW_CDEV_BIG, &test_rx_notifier);
 
+	// Check if it is throttle type.
+	req->type = THERMAL_REQUEST_THROTTLE;
+	req->tzid = HW_CDEV_BIG;
+	KUNIT_EXPECT_TRUE(test, is_thermal_cpm_throttle_message(cpm_msg.payload));
+
+	req->type = THERMAL_STATE_NOTIFICATION;
+	KUNIT_EXPECT_FALSE(test, is_thermal_cpm_throttle_message(cpm_msg.payload));
+
 	// Register NTC notifier
 	KUNIT_EXPECT_EQ(test,
 			__thermal_cpm_mbox_register_notification(mock_drv_data, HW_RX_CB_NTC,
@@ -285,6 +293,30 @@ static void thermal_cpm_mbox_rx_callback_test(struct kunit *test)
 	cpm_msg.payload[2] = 0;
 
 	KUNIT_EXPECT_TRUE(test, verify_cpm_rx_payload(cpm_msg));
+	__thermal_cpm_mbox_unregister_notification(mock_drv_data, HW_RX_CB_NTC, &test_rx_notifier);
+
+	// Register trip state notification
+	KUNIT_EXPECT_EQ(test,
+			__thermal_cpm_mbox_register_notification(mock_drv_data, HW_CDEV_BIG,
+								 &test_rx_notifier),
+			0);
+
+	// trigger cpm_mbox_rx_callback to check if notifier been called
+	cpm_msg.payload[0] = 0;
+	cpm_msg.payload[1] = 0;
+	cpm_msg.payload[2] = 0;
+	req->type = THERMAL_STATE_NOTIFICATION;
+	req->tzid = 0;
+	req->req_rsvd0 = THERMAL_CPM_TRIP_DFS;
+	req->req_rsvd1 = 1;
+	req->req_rsvd2 = 100;
+	req->req_rsvd3 = 1;
+	cpm_mbox_rx_callback(0, &cpm_msg, mock_drv_data);
+
+	flush_work(&mock_drv_data->rx_work[HW_CDEV_BIG].work);
+
+	KUNIT_EXPECT_TRUE(test, verify_cpm_rx_payload(cpm_msg));
+	__thermal_cpm_mbox_unregister_notification(mock_drv_data, HW_CDEV_BIG, &test_rx_notifier);
 }
 
 static void get_tz_name_test(struct kunit *test)

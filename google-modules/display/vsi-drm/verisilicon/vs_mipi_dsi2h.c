@@ -187,6 +187,7 @@ static int dw_mipi_dsi2h_of_parse_pdata(struct device *dev, struct dw_mipi_dsi2h
 
 	pdata->in_emulation = of_property_read_bool(np, "in_emulation");
 	pdata->auto_calc_off = of_property_read_bool(np, "auto_calc_off");
+	pdata->dynamic_hs_clk_en = of_property_read_bool(np, "dynamic_hs_clk_en");
 
 	return 0;
 }

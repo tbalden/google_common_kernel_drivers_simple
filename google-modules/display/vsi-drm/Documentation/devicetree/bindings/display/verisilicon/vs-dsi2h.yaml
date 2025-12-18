@@ -126,6 +126,9 @@ properties:
         $ref: /schemas/graph.yaml#/properties/port
         description: DSI output node to panel.
 
+  dynamic_hs_clk_en:
+    description: enable dynamic hs_clk (datarate) switch.
+
 required:
   - compatible
   - reg

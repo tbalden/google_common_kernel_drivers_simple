@@ -178,6 +178,27 @@ static INLINE PVRSRV_ERROR DevmemFwAllocate(PVRSRV_RGXDEV_INFO *psDevInfo,
 	RGXFwSharedMemCPUCacheMode(psDevInfo->psDeviceNode,
 	                           &uiFlags);
 
+	/* b/418681834
+	 *
+	 * FW allocations of 64 bytes on a 128 byte alignment are leaving many unaligned
+	 * unallocated 64 byte holes. The subsequent allocation needs to search through these
+	 * holes (many hundreds of them) typically failing to find an aligned one. Varying
+	 * execution times of up to 400us are being observed running through these holes.
+	 *
+	 * Increase the allocation size of smaller allocations (<128 bytes) to the minimum
+	 * alignment size to avoid creating holes. Restricting this to smaller sizes limits
+	 * the impact to memory footprint.
+	 *
+	 * Set the size limit to the SLC Cache line size (128 bytes). This is an arbitrary
+	 * choice as holes observed due to partial SLC allocations. However, further
+	 * analysis must be done to identify any other cases.
+	 */
+	const IMG_UINT32 uiMaxSizeToAlign = GET_ROGUE_CACHE_LINE_SIZE(
+		RGX_GET_FEATURE_VALUE(psDevInfo, SLC_CACHE_LINE_SIZE_BITS));
+	if (uiSize < uiMaxSizeToAlign && uiSize < uiAlign) {
+		uiSize = uiAlign;
+	}
+
 	eError = DevmemAllocateAndMap(psFwHeap,
 				uiSize,
 				uiAlign,

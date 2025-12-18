@@ -256,6 +256,12 @@ struct max1720x_chip {
 	int ml_cnt;
 	/* total number of model loading failures since boot */
 	int ml_fails;
+
+	/* information for PROP_NEED_CHARGE_TO_FULL */
+	struct maxfg_bypss_charglimt bypass_chargelimit;
+
+	bool present;
+	ktime_t not_present_start_time;
 };
 
 #define MAX1720_EMPTY_VOLTAGE(profile, temp, cycle) \
@@ -1039,6 +1045,89 @@ static ssize_t aafv_config_show(struct device *dev,
 
 static DEVICE_ATTR_RW(aafv_config);
 
+static ssize_t bypass_chargelimit_fcn_delta_store(struct device *dev, struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct max1720x_chip *chip = power_supply_get_drvdata(psy);
+	int val, ret;
+
+	ret = kstrtoint(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+
+	chip->bypass_chargelimit.threshold_fcn_delta = val;
+
+	return count;
+}
+
+static ssize_t bypass_chargelimit_fcn_delta_show(struct device *dev, struct device_attribute *attr,
+					       char *buf)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct max1720x_chip *chip = power_supply_get_drvdata(psy);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", chip->bypass_chargelimit.threshold_fcn_delta);
+}
+
+static DEVICE_ATTR_RW(bypass_chargelimit_fcn_delta);
+
+
+static ssize_t bypass_chargelimit_cycle_delta_store(struct device *dev,
+						    struct device_attribute *attr, const char *buf,
+						    size_t count)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct max1720x_chip *chip = power_supply_get_drvdata(psy);
+	int val, ret;
+
+	ret = kstrtoint(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+
+	chip->bypass_chargelimit.threshold_cycle_delta = val;
+
+	return count;
+}
+
+static ssize_t bypass_chargelimit_cycle_delta_show(struct device *dev,
+						   struct device_attribute *attr, char *buf)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct max1720x_chip *chip = power_supply_get_drvdata(psy);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", chip->bypass_chargelimit.threshold_cycle_delta);
+}
+
+static DEVICE_ATTR_RW(bypass_chargelimit_cycle_delta);
+
+static ssize_t bypass_chargelimit_mode_store(struct device *dev, struct device_attribute *attr,
+					     const char *buf, size_t count)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct max1720x_chip *chip = power_supply_get_drvdata(psy);
+	int val, ret;
+
+	ret = kstrtoint(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+
+	chip->bypass_chargelimit.mode = val;
+
+	return count;
+}
+
+static ssize_t bypass_chargelimit_mode_show(struct device *dev, struct device_attribute *attr,
+					    char *buf)
+{
+	struct power_supply *psy = container_of(dev, struct power_supply, dev);
+	struct max1720x_chip *chip = power_supply_get_drvdata(psy);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", chip->bypass_chargelimit.mode);
+}
+
+static DEVICE_ATTR_RW(bypass_chargelimit_mode);
+
 /* lsb 1/256, race with max1720x_model_work()  */
 static int max1720x_get_capacity_raw(struct max1720x_chip *chip, u16 *data)
 {
@@ -1202,7 +1291,8 @@ static int max1720x_get_battery_status(struct max1720x_chip *chip)
 							     MAX_M5_AAFV_RESTORE_FUS);
 				if (err == 0) {
 					chip->aafv_modified_fus = false;
-					logbuffer_log(chip->ce_log, "restored_fus on cycles %d",
+					logbuffer_log(chip->monitor_log,
+						      "restored_fus on cycles %d",
 						      chip->cycle_count);
 				}
 			}
@@ -2359,6 +2449,56 @@ static int max1720x_clear_por(struct max1720x_chip *chip)
 				  0x0);
 }
 
+#define NOT_PRESENT_TIME_THRESHOLD_S 3
+static int max1720x_battery_present_check(struct max1720x_chip *chip, const u16 data)
+{
+	int is_present = !(data & MAX1720X_STATUS_BST);
+
+	/* honest to the initial probe value */
+	if (chip->not_present_start_time == -1) {
+		chip->not_present_start_time = 0;
+		chip->present = is_present;
+		gbms_logbuffer_devlog(chip->monitor_log, chip->dev,
+				      LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+				      "initial present:%d (%#x)", chip->present, data);
+
+		return is_present;
+	}
+
+	/* Handle state changes */
+	if (chip->present != is_present) {
+		gbms_logbuffer_devlog(chip->monitor_log, chip->dev,
+				      LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+				      "Present status changed: %d -> %d (%#x)",
+				      chip->present, is_present, data);
+
+		chip->present = is_present;
+
+		/* hold if the battery just became not present */
+		if (!is_present) {
+			is_present = 1;
+			chip->not_present_start_time = get_boot_sec();
+		} else {
+			/* Battery became present, reset counter */
+			chip->not_present_start_time = 0;
+		}
+	} else if (!is_present && chip->not_present_start_time) {
+		const ktime_t now = get_boot_sec();
+
+		/* Report as "present" until the threshold is met */
+		if ((now - chip->not_present_start_time) < NOT_PRESENT_TIME_THRESHOLD_S)
+			return 1;
+
+		gbms_logbuffer_devlog(chip->monitor_log, chip->dev,
+				      LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+				      "Battery not present confirmed: status=%#x, t=%lld",
+				      data, (long long)(now - chip->not_present_start_time));
+		chip->not_present_start_time = 0; // The threshold has passed, report "not present"
+	}
+
+	return is_present;
+}
+
 /* call holding chip->model_lock */
 static void max1720x_check_por(struct max1720x_chip *chip)
 {
@@ -2491,9 +2631,11 @@ static int max1720x_get_property(struct power_supply *psy,
 			if (rc < 0)
 				break;
 
+			/* filtering unstable momentary status bst bit readings */
+			val->intval = max1720x_battery_present_check(chip, data);
+
 			/* BST is 0 when the battery is present */
-			val->intval = !(data & MAX1720X_STATUS_BST);
-			if (!val->intval)
+			if (data & MAX1720X_STATUS_BST)
 				break;
 
 			if (!chip->por)
@@ -2777,8 +2919,18 @@ static int max1720x_gbms_get_property(struct power_supply *psy,
 		if (chip->gauge_type == MAX_M5_GAUGE_TYPE)
 			val->prop.intval = max_m5_recal_state(chip->model_data);
 		break;
-	case GBMS_PROP_AAFV:
+	case GBMS_PROP_AAFV_OFFSET:
 		val->prop.intval = chip->aafv;
+		break;
+	case GBMS_PROP_NEED_CHARGE_TO_FULL:
+		if (chip->gauge_type != MAX_M5_GAUGE_TYPE)
+			break;
+
+		val->prop.intval = maxfg_need_force_fullcharge(chip->ce_log, chip->dev,
+							       &chip->regmap,
+							       &chip->bypass_chargelimit,
+							       chip->cycle_count) ||
+							       chip->aafv_modified_fus;
 		break;
 	default:
 		pr_debug("%s: route to max1720x_get_property, psp:%d\n", __func__, psp);
@@ -2862,11 +3014,18 @@ static int max1720x_gbms_set_property(struct power_supply *psy,
 	case GBMS_PROP_RECAL_FG:
 		max1720x_set_recalibration(chip, val->prop.intval);
 		break;
-	case GBMS_PROP_AAFV:
+	case GBMS_PROP_AAFV_OFFSET:
 		mutex_lock(&chip->model_lock);
 		chip->aafv = val->prop.intval;
 		rc = max1720x_aafv_update(chip);
 		mutex_unlock(&chip->model_lock);
+		break;
+	case GBMS_PROP_NEED_CHARGE_TO_FULL:
+		rc = maxfg_update_bypass_charge_limit(chip->ce_log, chip->dev,
+						      &chip->regmap, &chip->bypass_chargelimit,
+						      val->prop.intval);
+		if (rc < 0)
+			dev_err(chip->dev, "failed to update bypass charge limit %d\n", rc);
 		break;
 	default:
 		pr_debug("%s: route to max1720x_set_property, psp:%d\n", __func__, psp);
@@ -2885,7 +3044,8 @@ static int max1720x_gbms_property_is_writeable(struct power_supply *psy,
 	switch (psp) {
 	case GBMS_PROP_BATT_CE_CTRL:
 	case GBMS_PROP_HEALTH_ACT_IMPEDANCE:
-	case GBMS_PROP_AAFV:
+	case GBMS_PROP_AAFV_OFFSET:
+	case GBMS_PROP_NEED_CHARGE_TO_FULL:
 		return 1;
 	default:
 		break;
@@ -3495,12 +3655,10 @@ static int max17x0x_apply_regval_register(struct max1720x_chip *chip,
 	}
 
 	for (idx = 0; idx < cnt; idx += 2) {
-		if (max1720x_is_reg(chip->dev, regs[idx])) {
-			err = REGMAP_READ(&chip->regmap, regs[idx], &data);
-			if (!err && data != regs[idx + 1])
-				REGMAP_WRITE(&chip->regmap, regs[idx],
-					     regs[idx + 1]);
-		}
+		err = REGMAP_READ(&chip->regmap, regs[idx], &data);
+		if (!err && data != regs[idx + 1])
+			REGMAP_WRITE(&chip->regmap, regs[idx],
+					regs[idx + 1]);
 	}
 register_out:
 	kfree(regs);
@@ -4262,22 +4420,19 @@ static ssize_t registers_dump_show(struct device *dev, struct device_attribute *
 	int ret = 0, offset = 0;
 
 	if (!chip->regmap.regmap) {
-		dev_err(dev, "Failed to read, no regmap\n");
+		dev_err(chip->dev, "Failed to read, no regmap\n");
 		return -EIO;
 	}
 
 	for (reg_address = 0; reg_address <= 0xFF; reg_address++) {
-		if (!max1720x_is_reg(dev, reg_address))
-			continue;
-
 		ret = regmap_read(chip->regmap.regmap, reg_address, &data);
 		if (ret < 0)
 			continue;
 
-		ret = sysfs_emit_at(buf, offset, "%02x: %04x\n", reg_address, data);
-		if (!ret) {
-			dev_err(dev, "[%s]: Not all registers printed. last:%x\n", __func__,
-				reg_address - 1);
+		ret = sysfs_emit_at(buf, offset, "%02x:%x\n", reg_address, data);
+		if (ret < 0 || offset + ret >= PAGE_SIZE - 1) {
+			dev_err(chip->dev, "[%s]: Not all regs printed. last:%x off:%d ret:%d\n",
+				__func__, reg_address - 1, offset, ret);
 			break;
 		}
 		offset += ret;
@@ -4287,23 +4442,20 @@ static ssize_t registers_dump_show(struct device *dev, struct device_attribute *
 		return offset;
 
 	ret = sysfs_emit_at(buf, offset, "\nnvram:\n");
-	if (!ret)
+	if (ret < 0 || offset + ret >= PAGE_SIZE - 1)
 		return offset;
 
 	offset += ret;
 
 	for (reg_address = 0; reg_address <= 0xFF; reg_address++) {
-		if (!max1720x_is_nvram_reg(dev, reg_address))
-			continue;
-
 		ret = regmap_read(chip->regmap_nvram.regmap, reg_address, &data);
 		if (ret < 0)
 			continue;
 
-		ret = sysfs_emit_at(buf, offset, "%02x: %04x\n", reg_address, data);
-		if (!ret) {
-			dev_err(dev, "[%s]: Not all registers printed. last:%x\n", __func__,
-				reg_address - 1);
+		ret = sysfs_emit_at(buf, offset, "%02x:%x\n", reg_address, data);
+		if (ret < 0 || offset + ret >= PAGE_SIZE - 1) {
+			dev_err(chip->dev, "[%s]: Not all regs printed. last:%x off:%d ret:%d\n",
+				__func__, reg_address - 1, offset, ret);
 			break;
 		}
 		offset += ret;
@@ -4385,6 +4537,20 @@ static int max17x0x_init_sysfs(struct max1720x_chip *chip)
 	if (ret)
 		dev_err(dev, "Failed to create aafv_config\n");
 
+	/* set fcn/fcr delta threshold may trigger force to full charge */
+	ret = device_create_file(dev, &dev_attr_bypass_chargelimit_fcn_delta);
+	if (ret)
+		dev_err(dev, "Failed to create bypass_chargelimit_fcn_delta\n");
+
+	/* set last full charge cycle delta threshold may trigger force to full charge */
+	ret = device_create_file(dev, &dev_attr_bypass_chargelimit_cycle_delta);
+	if (ret)
+		dev_err(dev, "Failed to create bypass_chargelimit_cycle_delta\n");
+
+	ret = device_create_file(dev, &dev_attr_bypass_chargelimit_mode);
+	if (ret)
+		dev_err(dev, "Failed to create bypass_chargelimit_mode");
+
 	if (chip->gauge_type == MAX_M5_GAUGE_TYPE) {
 		ret = device_create_file(dev, &dev_attr_m5_model_state);
 		if (ret)
@@ -4462,6 +4628,10 @@ static int max17x0x_init_sysfs(struct max1720x_chip *chip)
 	/* dynamic filtercfg for testing */
 	debugfs_create_bool("disable_dynamic_filtercfg", 0444, de,
 			    &chip->dyn_filtercfg.disable_dynamic_filtercfg);
+
+	/* bypass charge limits */
+	debugfs_create_u32("fcn_fcr_delta", 0644, de, &chip->bypass_chargelimit.fcn_fcr_delta);
+	debugfs_create_u32("last_fullcharge", 0644, de, &chip->bypass_chargelimit.last_fullcharge);
 
 	return 0;
 }
@@ -5304,6 +5474,7 @@ static int max1720x_init_chip(struct max1720x_chip *chip)
 		fus = misccfg >> MAX_M5_MISCCFG_OOPSFILTER_SHIFT;
 		chip->aafv_modified_fus = (fus == chip->aafv_cfgs[chip->aafv_cur_idx].fus);
 	}
+	dev_info(chip->dev, "aafv_modified_fus: %d\n", chip->aafv_modified_fus);
 
 	return 0;
 }
@@ -5900,6 +6071,12 @@ static void max1720x_init_work(struct work_struct *work)
 		}
 	}
 
+	/* initialize bypass charge limit after chip and storage are initialized */
+	ret = maxfg_init_bypass_charge_limit(&chip->regmap, chip->dev->of_node,
+					     &chip->bypass_chargelimit);
+	if (ret < 0)
+		dev_err(chip->dev, "error on init bypass charge limit(%d)\n", ret);
+
 	/* serial number might not be stored in the FG */
 	max17x0x_read_serial_number(chip);
 
@@ -6117,6 +6294,7 @@ static int max1720x_probe(struct i2c_client *client)
 	chip->fake_battery = of_property_read_bool(dev->of_node, "maxim,no-battery") ? 0 : -1;
 	chip->primary = client;
 	chip->batt_id_defer_cnt = DEFAULT_BATTERY_ID_RETRIES;
+	chip->not_present_start_time = -1; /* initial value */
 	i2c_set_clientdata(client, chip);
 
 	/* NOTE: < 0 not avalable, it could be a bare MLB */

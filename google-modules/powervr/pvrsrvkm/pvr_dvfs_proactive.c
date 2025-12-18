@@ -294,11 +294,8 @@ static int pdvfs_get_cur_freq(struct device *dev, unsigned long *freq)
 		return -ENOTSUPP;
 	}
 
-#if defined(RGXFW_META_SUPPORT_2ND_THREAD)
 	RGXPDVFSCheckCoreClkRateChange(psDevInfo);
-#endif
 	*freq = psDevInfo->ui32CoreClkRateSnapshot;
-
 	return 0;
 }
 

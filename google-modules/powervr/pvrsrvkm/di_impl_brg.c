@@ -74,7 +74,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define WRITER_THREAD_DESTROY_RETRIES 10U
 
 #define WRITE_RETRY_COUNT 10      /* retry a write to a TL buffer 10 times */
-#define WRITE_RETRY_WAIT_TIME 100 /* wait 10ms between write retries */
+#define WRITE_RETRY_WAIT_TIME 100 /* wait 100us between write retries */
 
 typedef enum THREAD_STATE
 {
@@ -149,7 +149,8 @@ static void _WriteWithRetires(void *pvNativeHandle, const IMG_CHAR *pszStr,
 		if (eError == PVRSRV_ERROR_STREAM_FULL)
 		{
 			// wait to give the client a change to read
-			OSSleepms(WRITE_RETRY_WAIT_TIME);
+			// TODO (422839489) don't do this with a spin lock held
+			OSSleepus_HandleNonPreemptible(WRITE_RETRY_WAIT_TIME);
 		}
 	}
 	while (eError == PVRSRV_ERROR_STREAM_FULL && iRetry++ < WRITE_RETRY_COUNT);

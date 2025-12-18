@@ -78,6 +78,7 @@ struct dw_mipi_dsi2h_plat_data {
 	unsigned int datarate;
 	unsigned int lp2hs_time;
 	unsigned int hs2lp_time;
+	bool dynamic_hs_clk_en;
 
 	unsigned int is_cphy;
 	char *phy_name;

@@ -197,6 +197,7 @@ struct vs_plane_info {
 	u32 sbs : 1;
 	u32 line_padding : 1;
 	u32 rcd_plane : 1;
+	u32 data_extend : 1;
 };
 
 struct vs_display_info {
@@ -315,6 +316,7 @@ struct vs_dc_info {
 
 	/* Regdump Skip Registers */
 	const struct regmap_access_table *dump_reg_access_table;
+	const struct regmap_access_table *dump_reg_access_table_secure;
 
 	/* Urgent configuration */
 	const struct vs_dc_urgent_cmd_config *urgent_cmd_config;

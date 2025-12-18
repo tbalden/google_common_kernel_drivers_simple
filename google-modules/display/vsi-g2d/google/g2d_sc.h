@@ -22,8 +22,7 @@ struct g2d_sc {
 
 struct platform_device;
 struct g2d_plane;
-void g2d_wb_hw_configure(struct g2d_writeback_connector *g2d_wb_connector,
-			 struct drm_framebuffer *fb);
+void g2d_wb_hw_commit(struct g2d_writeback_connector *g2d_wb_connector, struct drm_framebuffer *fb);
 void g2d_plane_hw_commit(struct sc_hw *hw, u8 display_id);
 void sc_crtc_init(struct g2d_crtc *g2d_crtc);
 void sc_plane_init(struct g2d_plane *g2d_plane);

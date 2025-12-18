@@ -1069,6 +1069,15 @@ void OSWaitus(IMG_UINT32 ui32Timeus);
 void OSSleepms(IMG_UINT32 ui32Timems);
 
 /*************************************************************************/ /*!
+@Function       OSSleepus_HandleNonPreemptible
+@Description    As OSSleepms, but use a non-blocking idle loop in case
+                preemption isn't safe, and don't sleep as long.
+@Input          ui32Timeus    The duration of the sleep (in us)
+@Return         None.
+*/ /**************************************************************************/
+void OSSleepus_HandleNonPreemptible(IMG_UINT32 ui32Timeus);
+
+/*************************************************************************/ /*!
 @Function       OSReleaseThreadQuanta
 @Description    Relinquishes the current thread's execution time-slice,
                 permitting the OS scheduler to schedule another thread.

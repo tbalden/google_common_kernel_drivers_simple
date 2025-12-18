@@ -25,6 +25,7 @@ ddk_module(
         "vs_crtc.c",
         "vs_dc_drm_property.c",
         "vs_drm_atomic.c",
+        "vs_drm_state_record.c",
         "vs_drv.c",
         "vs_fb.c",
         "vs_gem.c",
@@ -112,7 +113,7 @@ ddk_module(
     ] + select({
         "//private/google-modules/display/vsi-drm:trusty_is_enabled": [
             "//private/google-modules/soc/gs:headers",
-            "//private/google-modules/soc/gs/drivers/soc/google/gsa",
+            "//private/google-modules/soc/gs/drivers/soc/google/gsa:tzprot",
         ],
         "//conditions:default": [],
     }),

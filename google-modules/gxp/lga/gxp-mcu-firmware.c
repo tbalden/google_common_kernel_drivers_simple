@@ -18,7 +18,7 @@
 
 #include <gcip/gcip-alloc-helper.h>
 #include <gcip/gcip-common-image-header.h>
-#include <gcip/gcip-fault-injection.h>
+#include <gcip/gcip-fault-inject.h>
 #include <gcip/gcip-image-config.h>
 #include <gcip/gcip-iommu.h>
 #include <gcip/gcip-memory.h>
@@ -361,9 +361,11 @@ static int gxp_mcu_firmware_start(struct gxp_mcu_firmware *mcu_fw)
 	struct gxp_dev *gxp = mcu_fw->gxp;
 	int ret, state;
 
-	ret = gxp_lpm_up(gxp, GXP_REG_MCU_ID);
-	if (ret)
-		return ret;
+	if (gxp_mcu_need_lpm_init(mcu_fw)) {
+		ret = gxp_lpm_up(gxp, GXP_REG_MCU_ID);
+		if (ret)
+			return ret;
+	}
 
 	gxp_monitor_set_count_read_data(gxp);
 	gxp_monitor_start(gxp);
@@ -373,6 +375,7 @@ static int gxp_mcu_firmware_start(struct gxp_mcu_firmware *mcu_fw)
 	if (mcu_fw->is_secure) {
 		state = gsa_send_dsp_cmd(gxp->gsa_dev, GSA_DSP_START);
 		if (state != GSA_DSP_STATE_RUNNING) {
+			dev_err(gxp->dev, "GSA_DSP_START cmd failed (ret=%d)", state);
 			gxp_lpm_down(gxp, GXP_REG_MCU_ID);
 			return -EIO;
 		}
@@ -411,9 +414,14 @@ static int gxp_mcu_firmware_start(struct gxp_mcu_firmware *mcu_fw)
 int gxp_mcu_firmware_shutdown(struct gxp_mcu_firmware *mcu_fw)
 {
 	struct gxp_dev *gxp = mcu_fw->gxp;
+	int ret;
 
-	if (mcu_fw->is_secure)
-		return gsa_send_dsp_cmd(gxp->gsa_dev, GSA_DSP_SHUTDOWN);
+	if (mcu_fw->is_secure) {
+		ret = gsa_send_dsp_cmd(gxp->gsa_dev, GSA_DSP_SHUTDOWN);
+		if (ret < 0)
+			dev_err(gxp->dev, "GSA_DSP_SHUTDOWN cmd failed (ret=%d)", ret);
+		return ret;
+	}
 	return 0;
 }
 
@@ -832,8 +840,9 @@ static int gxp_mcu_firmware_fault_inject_init(struct gxp_mcu_firmware *mcu_fw)
 	const struct gcip_fault_inject_args args = { .dev = gxp->dev,
 						     .parent_dentry = gxp->d_entry,
 						     .pm = gxp->power_mgr->pm,
-						     .send_kci = gxp_kci_fault_injection,
-						     .kci_data = &mcu->kci };
+						     .send_kci = gxp_kci_fault_inject,
+						     .kci_data = &mcu->kci,
+						     .name = GXP_FAULT_INJECT_NAME };
 
 	injection = gcip_fault_inject_create(&args);
 
@@ -921,6 +930,10 @@ int gxp_mcu_firmware_stop(struct gxp_mcu_firmware *mcu_fw)
 	mutex_lock(&mcu_fw->lock);
 	ret = gxp_mcu_firmware_stop_locked(mcu_fw);
 	mutex_unlock(&mcu_fw->lock);
+
+	if (ret)
+		dev_err(mcu_fw->gxp->dev, "Failed to stop MCU FW (ret=%d)\n", ret);
+
 	return ret;
 }
 
@@ -1032,7 +1045,7 @@ void gxp_mcu_firmware_crash_handler(struct gxp_dev *gxp,
 	}
 
 	/* Dump diagnostic information for MCU crash before resetting it. */
-	gxp_debug_dump_report_mcu_crash(gxp);
+	gxp_debug_dump_report_mcu_crash(gxp, crash_type);
 
 	/* Waits for the MCU transiting to PG state and restart the MCU firmware. */
 	if (!wait_for_pg_state_shutdown_locked(gxp, crash_type == GCIP_FW_CRASH_HW_WDG_TIMEOUT)) {

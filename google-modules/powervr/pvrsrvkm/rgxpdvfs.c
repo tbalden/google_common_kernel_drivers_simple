@@ -154,7 +154,6 @@ PVRSRV_ERROR PDVFSSetParams(PVRSRV_RGXDEV_INFO *psDevInfo, RGXFW_PDVFS_PARAMS *p
 	return eError;
 }
 
-#if defined(RGXFW_META_SUPPORT_2ND_THREAD)
 /*************************************************************************/ /*!
 @Function       RGXPDVFSCheckCoreClkRateChange
 @Description    Checks if core clock rate has changed since the last snap-shot.
@@ -177,4 +176,3 @@ void RGXPDVFSCheckCoreClkRateChange(PVRSRV_RGXDEV_INFO *psDevInfo)
 		RGX_PROCESS_CORE_CLK_RATE_CHANGE(psDevInfo, ui32CoreClkRate);
 	}
 }
-#endif

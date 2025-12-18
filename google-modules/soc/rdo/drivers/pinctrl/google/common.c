@@ -141,10 +141,10 @@ static int google_pinctrl_attach_power_domain(struct google_pinctrl *gctl)
 						 RPM_AUTOSUSPEND_DELAY_MS);
 		pm_runtime_use_autosuspend(gctl->dev);
 		pm_runtime_set_active(gctl->dev);
+		pm_runtime_forbid(gctl->dev);
 		devm_pm_runtime_enable(gctl->dev);
 
-		if (!of_property_read_bool(gctl->dev->of_node, "runtime-pm-capable"))
-			pm_runtime_forbid(gctl->dev);
+		gctl->rpm_capable = of_property_read_bool(gctl->dev->of_node, "runtime-pm-capable");
 	}
 
 	return 0;
@@ -1840,6 +1840,9 @@ int google_pinctrl_probe(struct platform_device *pdev,
 	ret = google_pinctrl_init_debugfs(gctl, pdev, sswrp->num_groups);
 	if (ret < 0)
 		dev_err(&pdev->dev, "Failed to init pinctrl debugfs\n");
+
+	if (gctl->rpm_capable)
+		pm_runtime_allow(&pdev->dev);
 
 	return 0;
 

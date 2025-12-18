@@ -826,6 +826,20 @@ void OSSleepms(IMG_UINT32 ui32Timems)
 	msleep(ui32Timems);
 }
 
+/*
+	OSSleepms_HandleNonPreemptible
+*/
+void OSSleepus_HandleNonPreemptible(IMG_UINT32 ui32Timeus)
+{
+	if (preemptible())
+	{
+		usleep_range(ui32Timeus, ui32Timeus * 2);
+	}
+	else
+	{
+		udelay(ui32Timeus);
+	}
+}
 
 INLINE IMG_UINT64 OSGetCurrentProcessVASpaceSize(void)
 {

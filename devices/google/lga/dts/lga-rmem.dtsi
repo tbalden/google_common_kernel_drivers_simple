@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+
+#include <linux/kconfig.h>
+
 / {
 	reserved_memory: reserved-memory {
 		#address-cells = <0x00000002>;
@@ -183,6 +186,11 @@
 			no-map;
 		};
 
+		gsa_reserved_log_extended: gsa_reserved_log_extended@a61b2000 {
+			reg = <0x00000000 0xa61b2000 0x00000000 0x00002000>; /* 8KB */
+			no-map;
+		};
+
 		/* GPU firmware */
 		gpu_fw_reserved: gpu_fw@b9f00000 {
 			reg = <0x00000000 0xb9f00000 0x00000000 0x02100000>; /* 33MB */
@@ -208,7 +216,11 @@
 
 		cp_msi_rmem: cp_msi_rmem@f6200000 {
 			compatible = "exynos,modem_if";
+#if IS_ENABLED(CONFIG_ARM64_16K_PAGES)
+			reg = <0x00000000 0xf6200000 0x00000000 0x00004000>; /* 16KB */
+#else
 			reg = <0x00000000 0xf6200000 0x00000000 0x00001000>; /* 4KB */
+#endif
 			rmem_index = <1>;
 		};
 
@@ -250,7 +262,7 @@
 		};
 
 		faceauth_dsp: faceauth_dsp {
-			size = <0x0 0x02000000>; /* 32MB */
+			size = <0x0 0x01000000>; /* 16MB */
 			alignment = <0x0 0x00010000>;
 			alloc-ranges = <0x9 0x80000000 0x80000000>,
 				<0x9 0x00000000 0x80000000>,
@@ -260,7 +272,7 @@
 		};
 
 		faceauth_tpu: faceauth_tpu {
-			size = <0x0 0x01000000>; /* 16MB */
+			size = <0x0 0x02000000>; /* 32MB */
 			alignment = <0x0 0x00010000>;
 			alloc-ranges = <0x9 0x80000000 0x80000000>,
 				<0x9 0x00000000 0x80000000>,
@@ -314,7 +326,7 @@
 		};
 
 		farawimg: farawimg {
-			size = <0x0 0x06400000>; /* 100MB */
+			size = <0x0 0x05000000>; /* 80MB */
 			alignment = <0x0 0x00010000>;
 			alloc-ranges = <0x9 0x80000000 0x80000000>,
 				<0x9 0x00000000 0x80000000>,

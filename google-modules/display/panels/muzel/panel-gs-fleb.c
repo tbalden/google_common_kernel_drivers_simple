@@ -19,12 +19,25 @@
 #define FLEB_LUMINANCE_READ_SHORT_LEN 14
 #define FLEB_DEFAULT_VDDD 1100000
 
+#define ERR_FG_ADDR 0x5D
+#define ERR_FG_LEN 1
+#define ERR_FG_ERR 0x0E
+#define ERR_FG_CSUM_ERR BIT(1)
+#define ERR_FG_TE_ERR BIT(2)
+#define ERR_FG_DSI_ERR BIT(3)
+#define ERR_DSI_ADDR 0xAB
+#define ERR_DSI_ERR_LEN 2
+#define FLEB_PPS_ADDR 0x91
+#define FLEB_PPS_LEN 48
+
 #define MIPI_DSI_FREQ_MBPS_DEFAULT 756
 #define MIPI_DSI_FREQ_MBPS_ALTERNATIVE 740
 
 #define UNPREPARE_DELAY_MS 10
 
 #define PROJECT "FLEB"
+
+static const u8 VRR_MIN_IDLE_RR_HZ = 60;
 
 /* Truncate 8-bit signed value to 6-bit signed value */
 #define TO_6BIT_SIGNED(v) ((v) & 0x3F)
@@ -105,76 +118,116 @@ static const u16 HDISPLAY = 1080, VDISPLAY = 2424;
 static const u16 HFP = 32, HSA = 12, HBP = 16;
 static const u16 VFP = 12, VSA = 4, VBP = 15;
 
-static const struct gs_panel_mode_array fleb_modes = {
-	.num_modes = 2,
-	.modes = {
-		{
-			.mode = {
-				.name = "1080x2424x60@60",
-				DRM_MODE_TIMING(60, HDISPLAY, HFP, HSA, HBP,
-						VDISPLAY, VFP, VSA, VBP),
-				/* aligned to bootloader setting */
-				.type = DRM_MODE_TYPE_PREFERRED,
-				.width_mm = WIDTH_MM,
-				.height_mm = HEIGHT_MM,
-			},
-			.gs_mode = {
-				.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
-				.vblank_usec = 120,
-				.te_usec = 8390,
-				.bpc = 8,
-				.dsc = FLEB_DSC,
-			},
-			.te2_timing = {
-				.rising_edge = 0,
-				.falling_edge = 45,
-			},
+static const struct gs_panel_mode_array fleb_modes = GS_PANEL_MODES(
+	/* MRR modes */
+	{
+		.mode = {
+			.name = "1080x2424x60@60",
+			DRM_MODE_TIMING(60, HDISPLAY, HFP, HSA, HBP,
+					VDISPLAY, VFP, VSA, VBP),
+			/* aligned to bootloader setting */
+			.type = DRM_MODE_TYPE_PREFERRED,
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
 		},
-		{
-			.mode = {
-				.name = "1080x2424x120@120",
-				DRM_MODE_TIMING(120, HDISPLAY, HFP, HSA, HBP,
-						VDISPLAY, VFP, VSA, VBP),
-				.width_mm = WIDTH_MM,
-				.height_mm = HEIGHT_MM,
-			},
-			.gs_mode = {
-				.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
-				.vblank_usec = 120,
-				.te_usec = 275,
-				.bpc = 8,
-				.dsc = FLEB_DSC,
-			},
-			.te2_timing = {
-				.rising_edge = 0,
-				.falling_edge = 45,
-			},
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 8390,
+			.bpc = 8,
+			.dsc = FLEB_DSC,
 		},
-	},/* modes */
-};
+		.te2_timing = {
+			.rising_edge = 0,
+			.falling_edge = 45,
+		},
+	},
+	{
+		.mode = {
+			.name = "1080x2424x120@120",
+			DRM_MODE_TIMING(120, HDISPLAY, HFP, HSA, HBP,
+					VDISPLAY, VFP, VSA, VBP),
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
+		},
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 275,
+			.bpc = 8,
+			.dsc = FLEB_DSC,
+		},
+		.te2_timing = {
+			.rising_edge = 0,
+			.falling_edge = 45,
+		},
+	},
+	/* VRR modes */
+#ifndef PANEL_FACTORY_BUILD
+	{
+		.mode = {
+			.name = "1080x2424x60@60",
+			DRM_VRR_MODE_TIMING(60, 60, HDISPLAY, HFP, HSA, HBP,
+					VDISPLAY, VFP, VSA, VBP),
+			/* aligned to bootloader setting */
+			.type = DRM_MODE_TYPE_PREFERRED,
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
+		},
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 8606,
+			.bpc = 8,
+			.dsc = FLEB_DSC,
+		},
+		.te2_timing = {
+			.rising_edge = 0,
+			.falling_edge = 45,
+		},
+	},
+#endif
+	{
+		.mode = {
+			.name = "1080x2424x120@120",
+			DRM_VRR_MODE_TIMING(120, 120, HDISPLAY, HFP, HSA, HBP,
+						VDISPLAY, VFP, VSA, VBP),
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
+		},
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 276,
+			.bpc = 8,
+			.dsc = FLEB_DSC,
+		},
+		.te2_timing = {
+			.rising_edge = 0,
+			.falling_edge = 45,
+		},
+	},
+);
 
-static const struct gs_panel_mode_array fleb_lp_modes = {
-	.num_modes = 1,
-	.modes = {
-		{
-			.mode = {
-				.name = "1080x2424x30@30",
-				DRM_MODE_TIMING(30, 1080, 32, 12, 16, 2424, 12, 4, 15),
-				.type = DRM_MODE_TYPE_DRIVER,
-				.width_mm = WIDTH_MM,
-				.height_mm = HEIGHT_MM,
-			},
-			.gs_mode = {
-				.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
-				.vblank_usec = 120,
-				.te_usec = 1900,
-				.bpc = 8,
-				.dsc = FLEB_DSC,
-				.is_lp_mode = true,
-			},
+static const struct gs_panel_mode_array fleb_lp_modes = GS_PANEL_MODES(
+	{
+		.mode = {
+			.name = "1080x2424x30@30",
+			DRM_MODE_TIMING(30, 1080, 32, 12, 16, 2424, 12, 4, 15),
+			.type = DRM_MODE_TYPE_DRIVER,
+			.width_mm = WIDTH_MM,
+			.height_mm = HEIGHT_MM,
 		},
-	},/* modes */
-};
+		.gs_mode = {
+			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
+			.vblank_usec = 120,
+			.te_usec = 1900,
+			.bpc = 8,
+			.dsc = FLEB_DSC,
+			.is_lp_mode = true,
+		},
+	},
+);
 
 static const struct gs_brightness_configuration fleb_brt_configs[] = {
 	{
@@ -299,6 +352,57 @@ static const struct gs_dsi_cmd fleb_off_cmds[] = {
 	GS_DSI_DELAY_CMD(120, MIPI_DCS_ENTER_SLEEP_MODE),
 };
 static DEFINE_GS_CMDSET(fleb_off);
+
+static const struct gs_dsi_cmd fleb_vrr_60_te_cmds[] = {
+	GS_DSI_QUEUE_CMD(0xF0, 0x55, 0xAA, 0x52, 0x08, 0x00),
+	GS_DSI_QUEUE_CMD(0xBE, 0x4F, 0x47, 0x4C, 0x5F),
+	GS_DSI_QUEUE_CMD(0x6F, 0x08),
+	GS_DSI_QUEUE_CMD(0xBE, 0x02),
+	GS_DSI_QUEUE_CMD(0xF0, 0x55, 0xAA, 0x52, 0x08, 0x03),
+	GS_DSI_QUEUE_CMD(0xB3, 0x00, 0x00, 0x00, 0x00, 0x60, 0x10, 0x70, 0x42,
+			 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			 0x00, 0x00, 0x00, 0x60, 0x10, 0x70, 0x42, 0x60, 0x10,
+			 0x50, 0x10, 0x60, 0x10, 0x70, 0x42, 0x60, 0x10, 0x70,
+			 0x7D),
+	GS_DSI_QUEUE_CMD(0x6F, 0x01),
+	GS_DSI_QUEUE_CMD(0x35, 0x2D),
+	GS_DSI_QUEUE_CMD(0x6F, 0x26),
+	GS_DSI_QUEUE_CMD(0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
+	GS_DSI_QUEUE_CMD(0x6F, 0x34),
+	GS_DSI_QUEUE_CMD(0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
+	GS_DSI_QUEUE_CMD(0x6F, 0x63),
+	GS_DSI_QUEUE_CMD(0x44, 0x66),
+	GS_DSI_QUEUE_CMD(0x6F, 0x14),
+	GS_DSI_FLUSH_CMD(0x35, 0x00, 0xE0),
+};
+static DEFINE_GS_CMDSET(fleb_vrr_60_te);
+
+static const struct gs_dsi_cmd fleb_vrr_120_te_cmds[] = {
+	GS_DSI_QUEUE_CMD(0xF0, 0x55, 0xAA, 0x52, 0x08, 0x00),
+	GS_DSI_QUEUE_CMD(0xBE, 0x47, 0x4F, 0x4C, 0x5F),
+	GS_DSI_QUEUE_CMD(0x6F, 0x09),
+	GS_DSI_QUEUE_CMD(0xBE, 0x04),
+	GS_DSI_QUEUE_CMD(0xF0, 0x55, 0xAA, 0x52, 0x08, 0x03),
+	GS_DSI_QUEUE_CMD(0xC4, 0x00, 0x00, 0x00, 0x00, 0x60, 0x10, 0x60, 0x3D, 0x00, 0x00, 0x00,
+			 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x10, 0x60,
+			 0x3D, 0x60, 0x10, 0x60, 0x3D, 0x60, 0x10, 0x60, 0x3D, 0x60, 0x10, 0x60,
+			 0x3D),
+	GS_DSI_QUEUE_CMD(0xF0, 0x55, 0xAA, 0x52, 0x08, 0x05),
+	GS_DSI_QUEUE_CMD(0xB0, 0x83, 0x27, 0x01),
+	GS_DSI_QUEUE_CMD(0xB6, 0x07, 0x02, 0x00, 0x00, 0x00, 0x00, 0x87, 0x82, 0x00, 0x00, 0x00,
+			 0x00),
+	GS_DSI_QUEUE_CMD(0x6F, 0x01),
+	GS_DSI_QUEUE_CMD(0x8D, 0x06),
+	GS_DSI_QUEUE_CMD(0x6F, 0x26),
+	GS_DSI_QUEUE_CMD(0x44, 0x09, 0x66, 0x00, 0x00, 0x52, 0x09, 0xA8),
+	GS_DSI_QUEUE_CMD(0x6F, 0x34),
+	GS_DSI_QUEUE_CMD(0x44, 0x09, 0x66, 0x00, 0x00, 0x52, 0x09, 0xA8),
+	GS_DSI_QUEUE_CMD(0x6F, 0x63),
+	GS_DSI_QUEUE_CMD(0x44, 0x66),
+	GS_DSI_QUEUE_CMD(0x6F, 0x14),
+	GS_DSI_FLUSH_CMD(0x35, 0x60, 0xE0),
+};
+static DEFINE_GS_CMDSET(fleb_vrr_120_te);
 
 static const struct gs_dsi_cmd fleb_init_cmds[] = {
 	/* Peak IP setting */
@@ -610,13 +714,9 @@ static void fleb_update_irc(struct gs_panel *ctx, const enum gs_hbm_mode hbm_mod
 
 static void fleb_change_frequency(struct gs_panel *ctx, const struct gs_panel_mode *pmode)
 {
-	int vrefresh = drm_mode_vrefresh(&pmode->mode);
 	struct device *dev = ctx->dev;
-
-	if (vrefresh != 60 && vrefresh != 120) {
-		dev_warn(dev, "%s: invalid refresh rate %dhz\n", __func__, vrefresh);
-		return;
-	}
+	u32 vrefresh = gs_is_vrr_mode(pmode) ? ctx->sw_status.idle_vrefresh :
+					       drm_mode_vrefresh(&pmode->mode);
 
 	if (vrefresh == 120) {
 		GS_DCS_BUF_ADD_CMD(dev, 0x2F, 0x00);
@@ -647,8 +747,69 @@ static void fleb_change_frequency(struct gs_panel *ctx, const struct gs_panel_mo
 	}
 
 	GS_DCS_BUF_ADD_CMD_AND_FLUSH(dev, MIPI_DCS_NOP);
+
+	notify_panel_te2_freq_changed(ctx, 0);
+
 	dev_dbg(dev, "%s: change to %dhz\n", __func__, vrefresh);
 }
+
+static void fleb_mode_set(struct gs_panel *ctx, const struct gs_panel_mode *pmode)
+{
+	if (gs_is_vrr_mode(pmode)) {
+		if (drm_mode_vrefresh(&pmode->mode) > 60)
+			gs_panel_send_cmdset(ctx, &fleb_vrr_120_te_cmdset);
+		else
+			gs_panel_send_cmdset(ctx, &fleb_vrr_60_te_cmdset);
+	}
+
+	fleb_change_frequency(ctx, pmode);
+
+	dev_dbg(ctx->dev, "%s: change to %dhz\n", __func__, drm_mode_vrefresh(&pmode->mode));
+}
+
+#ifndef PANEL_FACTORY_BUILD
+static void fleb_refresh_ctrl(struct gs_panel *ctx)
+{
+	struct device *dev = ctx->dev;
+	const struct gs_panel_mode *pmode = ctx->current_mode;
+	const u32 ctrl = ctx->refresh_ctrl;
+
+	if (!pmode)
+		return;
+
+	dev_dbg(ctx->dev, "refresh_ctrl=%#X\n", ctrl);
+
+	if (!gs_is_vrr_mode(pmode)) {
+		dev_warn(dev, "refresh_ctrl: mode control not supported for %s\n",
+			       pmode->mode.name);
+		return;
+	}
+
+	PANEL_ATRACE_BEGIN(__func__);
+
+	if (ctrl & GS_PANEL_REFRESH_CTRL_FI_FRAME_COUNT_MASK ||
+	    ctrl & GS_PANEL_REFRESH_CTRL_FI_AUTO)
+		dev_warn(dev, "refresh_ctrl: FI functionality not supported\n");
+
+	if (ctrl & GS_PANEL_REFRESH_CTRL_MIN_REFRESH_RATE_MASK) {
+		u32 vrefresh = drm_mode_vrefresh(&pmode->mode);
+		u32 min_vrefresh = GS_PANEL_REFRESH_CTRL_MIN_REFRESH_RATE(ctrl);
+
+		if (min_vrefresh == vrefresh || min_vrefresh == VRR_MIN_IDLE_RR_HZ) {
+			ctx->sw_status.idle_vrefresh = min_vrefresh;
+			PANEL_ATRACE_INT_PID_FMT(ctx->sw_status.idle_vrefresh, ctx->trace_pid,
+						 "idle_vrefresh[%s]", ctx->panel_model);
+			fleb_change_frequency(ctx, pmode);
+		} else {
+			dev_warn(ctx->dev,
+				 "refresh_ctrl: %uHz min RR requested, only %u/%u Hz supported\n",
+				 min_vrefresh, VRR_MIN_IDLE_RR_HZ, vrefresh);
+		}
+	}
+
+	PANEL_ATRACE_END(__func__);
+}
+#endif /* !PANEL_FACTORY_BUILD */
 
 static void fleb_set_dimming(struct gs_panel *ctx, bool dimming_on)
 {
@@ -693,7 +854,7 @@ static void fleb_set_nolp_mode(struct gs_panel *ctx, const struct gs_panel_mode 
 		GS_DCS_BUF_ADD_CMD_AND_FLUSH(dev, MIPI_DCS_EXIT_IDLE_MODE);
 	}
 
-	fleb_change_frequency(ctx, pmode);
+	fleb_mode_set(ctx, pmode);
 
 	/* Delay setting dimming on AOD exit until brightness has stabilized. */
 	ctx->timestamps.idle_exit_dimming_delay_ts = ktime_add_us(
@@ -822,7 +983,7 @@ static int fleb_enable(struct drm_panel *panel)
 	if (spanel->in_aod && !pmode->gs_mode.is_lp_mode)
 		fleb_set_nolp_mode(ctx, pmode);
 	else
-		fleb_change_frequency(ctx, pmode);
+		fleb_mode_set(ctx, pmode);
 
 	/* dimming frame */
 	fleb_dimming_frame_setting(ctx, FLEB_DIMMING_FRAME);
@@ -958,11 +1119,6 @@ static void fleb_set_hbm_mode(struct gs_panel *ctx, enum gs_hbm_mode hbm_mode)
 	ctx->hbm_mode = hbm_mode;
 	dev_info(dev, "hbm_on=%d hbm_ircoff=%d\n", GS_IS_HBM_ON(ctx->hbm_mode),
 			 GS_IS_HBM_ON_IRC_OFF(ctx->hbm_mode));
-}
-
-static void fleb_mode_set(struct gs_panel *ctx, const struct gs_panel_mode *pmode)
-{
-	fleb_change_frequency(ctx, pmode);
 }
 
 static void fleb_get_panel_rev(struct gs_panel *ctx, u32 id)
@@ -1184,6 +1340,78 @@ static int fleb_set_color_data_config(struct gs_panel *ctx, enum color_data_type
 	return 0;
 }
 
+#define BR_LEN 2
+static int fleb_detect_fault(struct gs_panel *ctx)
+{
+	struct device *dev = ctx->dev;
+	struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
+	u8 buf[ERR_FG_LEN] = { 0 };
+	int ret;
+
+	PANEL_ATRACE_BEGIN(__func__);
+	ret = mipi_dsi_dcs_read(dsi, ERR_FG_ADDR, buf, ERR_FG_LEN);
+
+	if (ret != ERR_FG_LEN) {
+		dev_warn(dev, "Error reading ERR_FG (%pe)\n", ERR_PTR(ret));
+		goto end;
+	} else {
+		dev_dbg(dev, "ERR_FG: %02x\n", buf[0]);
+	}
+
+	if (buf[0] & ERR_FG_ERR) {
+		u8 err_buf[ERR_DSI_ERR_LEN] = { 0 };
+		u8 br_buf[BR_LEN] = { 0 };
+		u8 pps_buf[FLEB_PPS_LEN] = { 0 };
+
+		dev_err(dev, "DDIC error found, trigger register dump\n");
+		dev_err(dev, "ERR_FG: %02x\n", buf[0]);
+
+		bitmap_zero(ctx->panel_errors, GS_PANEL_ERR_MAX);
+		if (buf[0] & ERR_FG_CSUM_ERR)
+			set_bit(GS_PANEL_ERR_CHECKSUM, ctx->panel_errors);
+		if (buf[0] & ERR_FG_TE_ERR)
+			set_bit(GS_PANEL_ERR_TE, ctx->panel_errors);
+		if (buf[0] & ERR_FG_DSI_ERR)
+			set_bit(GS_PANEL_ERR_DSI_GENERAL, ctx->panel_errors);
+
+		/* DSI ERR */
+		ret = mipi_dsi_dcs_read(dsi, ERR_DSI_ADDR, err_buf, ERR_DSI_ERR_LEN);
+		if (ret == ERR_DSI_ERR_LEN)
+			dev_err(dev, "dsi_err: %02x %02x\n", err_buf[0], err_buf[1]);
+		else
+			dev_err(dev, "Error reading DSI error register (%pe)\n", ERR_PTR(ret));
+		bitmap_set_value8(ctx->panel_errors, err_buf[0], 8);
+		bitmap_set_value8(ctx->panel_errors, err_buf[1], 0);
+
+		/* Brightness */
+		ret = mipi_dsi_dcs_read(dsi, MIPI_DCS_GET_DISPLAY_BRIGHTNESS, br_buf, BR_LEN);
+		if (ret == BR_LEN)
+			dev_err(dev, "br: %02x %02x\n", br_buf[0], br_buf[1]);
+		else
+			dev_err(dev, "Error reading brightness (%pe)\n", ERR_PTR(ret));
+
+		/* PPS */
+		ret = mipi_dsi_dcs_read(dsi, FLEB_PPS_ADDR, pps_buf, FLEB_PPS_LEN);
+		if (ret == FLEB_PPS_LEN) {
+			char pps_str[FLEB_PPS_LEN * 2 + 1];
+
+			bin2hex(pps_str, pps_buf, FLEB_PPS_LEN);
+			dev_err(dev, "pps: %s\n", pps_str);
+		} else {
+			dev_err(dev, "Error reading pps (%pe)\n", ERR_PTR(ret));
+		}
+		/* positive return to indicate successful read of extant faults */
+		ret = 1;
+	} else {
+		ret = 0;
+	}
+
+end:
+	PANEL_ATRACE_END(__func__);
+
+	return ret;
+}
+
 static void fleb_debugfs_init(struct drm_panel *panel, struct dentry *root)
 {
 	struct gs_panel *ctx = container_of(panel, struct gs_panel, base);
@@ -1213,6 +1441,7 @@ panel_out:
 static void fleb_panel_init(struct gs_panel *ctx)
 {
 	struct device *dev = ctx->dev;
+	const struct gs_panel_mode *pmode = ctx->current_mode;
 
 	/* Peak IP setting */
 	GS_DCS_BUF_ADD_CMD(dev, 0xF0, 0x55, 0xAA, 0x52, 0x08, 0x08);
@@ -1220,6 +1449,11 @@ static void fleb_panel_init(struct gs_panel *ctx)
 	GS_DCS_BUF_ADD_CMD_AND_FLUSH(dev, 0xE9, 0x1A, 0xA5);
 
 	fleb_dimming_frame_setting(ctx, FLEB_DIMMING_FRAME);
+
+	if (gs_is_vrr_mode(pmode)) {
+		ctx->sw_status.idle_vrefresh = VRR_MIN_IDLE_RR_HZ;
+		fleb_mode_set(ctx, pmode);
+	}
 }
 
 static int fleb_panel_probe(struct mipi_dsi_device *dsi)
@@ -1263,11 +1497,14 @@ static const struct gs_panel_funcs fleb_gs_funcs = {
 	.set_binned_lp = gs_panel_set_binned_lp_helper,
 	.set_hbm_mode = fleb_set_hbm_mode,
 	.set_dimming = fleb_set_dimming,
-	.is_mode_seamless = gs_panel_is_mode_seamless_helper,
+	.is_mode_seamless_atomic = gs_panel_is_mode_seamless_atomic_helper,
 	.mode_set = fleb_mode_set,
 	.panel_init = fleb_panel_init,
 	.panel_config = fleb_panel_config,
 	.get_panel_rev = fleb_get_panel_rev,
+#ifndef PANEL_FACTORY_BUILD
+	.refresh_ctrl = fleb_refresh_ctrl,
+#endif
 	.get_te2_edges = gs_panel_get_te2_edges_helper,
 	.set_te2_edges = gs_panel_set_te2_edges_helper,
 	.update_te2 = fleb_update_te2,
@@ -1277,6 +1514,7 @@ static const struct gs_panel_funcs fleb_gs_funcs = {
 	.get_color_data = fleb_get_color_data,
 	.set_color_data_config = fleb_set_color_data_config,
 	.run_common_work = fleb_common_work,
+	.detect_fault = fleb_detect_fault,
 };
 
 static struct gs_panel_brightness_desc fleb_brightness_desc = {
@@ -1333,6 +1571,9 @@ static struct gs_panel_desc gs_fleb = {
 	.reset_timing_ms = { 1, 1, 20 },
 	.refresh_on_lp = true,
 	.common_work_delay_ms = 60000,
+	.fault_detect_interval_ms = 5000,
+	.panel_errors_mask = ~(BIT(GS_PANEL_ERR_DSI_SOT) | BIT(GS_PANEL_ERR_DSI_SOT_SYNC) |
+			BIT(GS_PANEL_ERR_DSI_FALSE_CONTROL)),
 };
 
 static int fleb_panel_config(struct gs_panel *ctx)

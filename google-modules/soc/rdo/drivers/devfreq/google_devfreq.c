@@ -302,19 +302,33 @@ static int google_devfreq_get_cur_freq_fabrics(struct device *dev, unsigned long
 	return 0;
 }
 
+static int google_devfreq_get_cur_freq(struct device *dev,
+	unsigned long *freq)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct google_devfreq *df = platform_get_drvdata(pdev);
+	int ret = 0;
+
+	if (IS_ERR_OR_NULL(df->devfreq) || !df->devfreq->previous_freq)
+		return google_devfreq_get_cur_freq_fabrics(dev, freq);
+
+	*freq = df->devfreq->previous_freq;
+
+	return ret;
+}
+
 static int google_devfreq_target_no_ops(struct device *dev, unsigned long *freq, u32 flags)
 {
 	/*
 	 * The target callback doesn't conduct the clock setting operations. Instead,
-	 * google_devfreq_update_*_freq_mba() sends the pf-state clamp request to the CPM. The
-	 * target callback only updates the *freq with current rate.
+	 * google_devfreq_update_*_freq_mba() sends the pf-state clamp request to the CPM.
 	 * For the fabric clocks, devfreq driver is to route the min/max frequency clamp request to
 	 * the CPM so that the CPM arbitrates the rate. The fabric devfreq driver directly hooks the
 	 * min/max frequency update request event, rather than deciding the frequency rate in the
 	 * target callback.
 	 */
 
-	return google_devfreq_get_cur_freq_fabrics(dev, freq);
+	return 0;
 }
 
 static inline void google_devfreq_mbox_free(struct google_devfreq *df)
@@ -464,7 +478,7 @@ static int google_devfreq_init_devfreq(struct google_devfreq *df)
 
 	profile->polling_ms = 0;
 	profile->target = google_devfreq_target_no_ops;
-	profile->get_cur_freq = google_devfreq_get_cur_freq_fabrics;
+	profile->get_cur_freq = google_devfreq_get_cur_freq;
 
 	df->profile = profile;
 

@@ -10658,8 +10658,6 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 		 */
 #ifdef PCIE_INB_DW
 		if (INBAND_DW_ENAB(bus)) {
-			DHD_ERROR(("d3_inform:send\n"));
-			dhd_plat_check_msi();
 			DHD_BUS_INB_DW_LOCK(bus->inb_lock, flags);
 			DHD_RPM(("%s: Before D3_INFORM inband_dw_state:%d\n",
 				__FUNCTION__, dhdpcie_bus_get_pcie_inband_dw_state(bus)));
@@ -15130,6 +15128,12 @@ dhdpcie_readshared(dhd_bus_t *bus)
 		PCIE_SHARED2_DEV_TXPOST_EXT_TAG_CAP_MESH)) ? TRUE : FALSE;
 #endif /* DHD_MESH */
 
+#ifdef DHD_ART
+	dhdp->dongle_art_enabled = (dhdp->dongle_txpost_ext_enabled &&
+		(sh->device_txpost_ext_tags_bitmask &
+		PCIE_SHARED2_DEV_TXPOST_EXT_TAG_CAP_ART)) ? TRUE : FALSE;
+	DHD_PRINT(("FW support ART: %s\n", dhdp->dongle_art_enabled ? "Y" : "N"));
+#endif /* DHD_ART */
 	bus->dhd->mdring_capable =
 		(sh->flags2 & PCIE_SHARED2_METADATA_RING) ? TRUE : FALSE;
 

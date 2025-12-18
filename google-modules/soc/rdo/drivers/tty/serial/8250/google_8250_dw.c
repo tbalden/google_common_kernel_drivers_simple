@@ -530,7 +530,7 @@ void google_8250_trace_init(struct platform_device *pdev)
 {
 	struct trace_array *trace_instance;
 
-	trace_instance = trace_array_get_by_name("google_8250");
+	trace_instance = trace_array_get_by_name_ext("google_8250", "uart");
 	if (!trace_instance) {
 		dev_err(&pdev->dev, "google_8250 trace instance creation/retrieve did not succeed\n");
 		return;

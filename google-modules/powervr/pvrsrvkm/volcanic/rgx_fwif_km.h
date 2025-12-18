@@ -773,9 +773,7 @@ typedef struct
 typedef struct
 {
 	OPP_LEVEL		asOPPValues[NUM_OPP_LEVELS];
-#if defined(DEBUG)
 	IMG_UINT32		ui32MinOPPPoint;
-#endif
 	IMG_UINT32		ui32MaxOPPPoint;
 } UNCACHED_ALIGN RGXFWIF_OPP_INFO;
 
@@ -1079,7 +1077,6 @@ typedef enum
 	                                                                                          \n Command data: None */
 	RGXFWIF_FWCCB_CMD_UPDATE_STATS                  = 107U | RGX_CMD_MAGIC_DWORD_SHIFTED,   /*!< Requests an on-demand update on process stats
 	                                                                                          \n Command data: RGXFWIF_FWCCB_CMD_UPDATE_STATS_DATA */
-	RGXFWIF_FWCCB_CMD_CORE_CLK_RATE_CHANGE          = 108U | RGX_CMD_MAGIC_DWORD_SHIFTED,
 	RGXFWIF_FWCCB_CMD_REQUEST_GPU_RESTART           = 109U | RGX_CMD_MAGIC_DWORD_SHIFTED,   /*!< Requests GPU restart
 	                                                                                          \n Command data: None */
 	RGXFWIF_FWCCB_CMD_CONTEXT_FW_PF_NOTIFICATION    = 112U | RGX_CMD_MAGIC_DWORD_SHIFTED,   /*!< Notifies host of a FW pagefault
@@ -1113,12 +1110,6 @@ typedef struct
 	IMG_INT32								i32AdjustmentValue;			/*!< Adjustment to be made to the statistic */
 } RGXFWIF_FWCCB_CMD_UPDATE_STATS_DATA;
 
-typedef struct
-{
-	IMG_UINT32 ui32CoreClkRate;
-} UNCACHED_ALIGN RGXFWIF_FWCCB_CMD_CORE_CLK_RATE_CHANGE_DATA;
-
-
 /*!
  ******************************************************************************
  * @Brief Firmware CCB command structure
@@ -1135,7 +1126,6 @@ typedef struct
 		RGXFWIF_FWCCB_CMD_FREELISTS_RECONSTRUCTION_DATA		sCmdFreeListsReconstruction;	/*!< Data for freelists reconstruction */
 		RGXFWIF_FWCCB_CMD_CONTEXT_RESET_DATA				sCmdContextResetNotification;	/*!< Data for context reset notification */
 		RGXFWIF_FWCCB_CMD_UPDATE_STATS_DATA					sCmdUpdateStatsData;			/*!< Data for updating process stats */
-		RGXFWIF_FWCCB_CMD_CORE_CLK_RATE_CHANGE_DATA			sCmdCoreClkRateChange;
 		RGXFWIF_FWCCB_CMD_FW_PAGEFAULT_DATA					sCmdFWPagefault;				/*!< Data for context reset notification */
 	} RGXFW_ALIGN uCmdData;
 } RGXFW_ALIGN RGXFWIF_FWCCB_CMD;

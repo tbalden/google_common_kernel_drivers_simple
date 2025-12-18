@@ -29,7 +29,11 @@ static int google_ccf_devfreq_get_cur_freq(struct device *dev, unsigned long *fr
 {
 	struct google_ccf_devfreq *df = dev_get_drvdata(dev);
 
-	*freq = clk_get_rate(df->clock);
+	if (IS_ERR_OR_NULL(df->devfreq) || !df->devfreq->previous_freq)
+		*freq = clk_get_rate(df->clock);
+	else
+		*freq = df->devfreq->previous_freq;
+
 	return 0;
 }
 
@@ -44,10 +48,21 @@ static int google_ccf_devfreq_target(struct device *dev, unsigned long *freq, u3
 		return err;
 	}
 
+	// To skip probe fw and guarantee the freq is an available OPP.
+	struct dev_pm_opp *opp;
+
+	opp = devfreq_recommended_opp(df->dev, freq, flags);
+	if (IS_ERR(opp)) {
+		dev_err(df->dev, "failed to find OPP. requested freq: %lu, err: %ld\n",
+			*freq, PTR_ERR(opp));
+	} else {
+		*freq = dev_pm_opp_get_freq(opp);
+	}
+
 	if (trace_clock_set_rate_enabled())
 		trace_clock_set_rate(df->cur_freq_trace_name, *freq, raw_smp_processor_id());
 
-	return google_ccf_devfreq_get_cur_freq(dev, freq);
+	return 0;
 }
 
 static int google_ccf_devfreq_remove(struct platform_device *pdev)

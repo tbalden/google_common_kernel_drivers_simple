@@ -38,8 +38,39 @@ struct device_node;
 #define GBMS_AACR_DATA_MAX 10
 #define GBMS_AAFV_DATA_MAX 16
 #define GBMS_AAFV_VOLTAGE_OFFSET_SCALE 1000
-#define GBMS_AACT_NB_LIMITS_MAX 10
+#define GBMS_AACT_NB_LIMITS_MAX 5
 #define GBMS_AACT_PROFILE_MAX 100
+#define GBMS_AACC_TEMP_NB_MAX 10
+#define GBMS_AACC_SOC_SIZE 100
+
+struct aacc_weight_profile {
+	/* the profile of aacc_chg/aacc_dsg */
+	int temp_nb_limits;
+	s32 temp_limits[GBMS_AACC_TEMP_NB_MAX];
+	u32 *weight_limits;
+};
+
+struct aacc_profile {
+	struct aacc_weight_profile chg;	/* the data of the charging session */
+	struct aacc_weight_profile dsg;	/* the data of the discharging session */
+	int start_soc;			/* the start soc in each session */
+	int end_soc;			/* the end soc in each session */
+	int aawc;			/* wrights cycles */
+
+	/* to calculate the average temperature */
+	long long temp_sum;
+	ktime_t time_sum;
+	ktime_t last_update;
+};
+
+/* index 0 will correspond to soc 1%, and so on, index 99 will correspond to soc 100% */
+#define GBMS_CHG_WEIGHTS(profile, ti, soc) \
+	(((ti) >= 0 && (soc) >= 1) ? \
+	profile->aacc_cycles.chg.weight_limits[((ti) * GBMS_AACC_SOC_SIZE) + (soc - 1)] : 0)
+
+#define GBMS_DSG_WEIGHTS(profile, ti, soc) \
+	(((ti) >= 0 && (soc) >= 1) ? \
+	profile->aacc_cycles.dsg.weight_limits[((ti) * GBMS_AACC_SOC_SIZE) + (soc - 1)] : 0)
 
 struct gbms_chg_profile {
 	const char *owner_name;
@@ -92,10 +123,46 @@ struct gbms_chg_profile {
 	int aact_idx;
 	bool aact_init_profile;
 	bool aact_update_profile;
+	bool aact_support_multiple_profiles;
+	bool aact_load_chg_ecc;
 	u32 *aact_cccm_limits;
+
+	/* AACC feature */
+	struct aacc_profile aacc_cycles;
 
 	bool debug_chg_profile;
 	bool enable_switch_chg_profile;
+};
+
+struct aact_limits_profiles {
+	char *temp_limits[GBMS_AACT_NB_LIMITS_MAX];
+	char *cv_limits[GBMS_AACT_NB_LIMITS_MAX];
+	char *cc_limits[GBMS_AACT_NB_LIMITS_MAX];
+};
+
+/* the number should be the same as GBMS_AACT_NB_LIMITS_MAX */
+static struct aact_limits_profiles aact_all_limits = {
+	.temp_limits = {
+		"google,aact-temp-limits",
+		"google,aact-temp-limits-1",
+		"google,aact-temp-limits-2",
+		"google,aact-temp-limits-3",
+		"google,aact-temp-limits-4"
+	},
+	.cv_limits = {
+		"google,aact-cv-limits",
+		"google,aact-cv-limits-1",
+		"google,aact-cv-limits-2",
+		"google,aact-cv-limits-3",
+		"google,aact-cv-limits-4"
+	},
+	.cc_limits = {
+		"google,aact-cc-limits",
+		"google,aact-cc-limits-1",
+		"google,aact-cc-limits-2",
+		"google,aact-cc-limits-3",
+		"google,aact-cc-limits-4"
+	}
 };
 
 #define WLC_BPP_THRESHOLD_UV	7000000
@@ -353,9 +420,9 @@ enum gbms_stats_tier_idx_t {
 	GBMS_STATS_BASE_BATT = 90,
 	GBMS_STATS_SEC_BATT = 91,
 
-	/* TODO: rename, these are not really related to AC */
-	GBMS_STATS_AC_TI_FULL_CHARGE = 100,
-	GBMS_STATS_AC_TI_HIGH_SOC = 101,
+	GBMS_STATS_TI_FULL_CHARGE = 100,
+	GBMS_STATS_TI_HIGH_SOC = 101,
+	GBMS_STATS_TI_EOC = 102,
 
 	/* Defender TEMP or DWELL */
 	GBMS_STATS_BD_TI_OVERHEAT_TEMP = 110,
@@ -424,8 +491,9 @@ struct gbms_charging_event {
 	uint16_t csi_aggregate_type;
 
 	int aacp_version;
-	int aacc;
 	int aafv;
+	int aacc;
+	int aacc_chg_cc;
 	int max_charge_voltage;
 
 	/* health based charging */
@@ -445,6 +513,7 @@ struct gbms_charging_event {
 	struct gbms_ce_tier_stats temp_filter_stats;
 	struct gbms_ce_tier_stats policy_longlife_stats;
 	struct gbms_ce_tier_stats policy_force_full_stats;
+	struct gbms_ce_tier_stats eoc_charge_stats;
 };
 
 #define GBMS_CCCM_LIMITS_SET(profile, ti, vi) \
@@ -453,12 +522,22 @@ struct gbms_charging_event {
 #define GBMS_CCCM_LIMITS_GET(profile, ti, vi) \
 	(((ti) >= 0 && (vi) >= 0) ? profile->cccm_limits[((ti) * profile->volt_nb_limits) + (vi)] : 0)
 
-#define GBMS_AACT_IDX(profile) \
-	(profile->aact_idx * (profile->temp_nb_limits - 1))
+/* only one table in each profile if multiple_profiles is supported */
+#define GBMS_AACT_TI(profile) \
+	(profile->aact_support_multiple_profiles ? \
+	0 : profile->aact_idx * (profile->temp_nb_limits - 1))
 
 #define GBMS_CCCM_LIMITS(profile, ti, vi) \
 	(((ti) >= 0 && (vi) >= 0) ? \
-	profile->cccm_limits[((ti + GBMS_AACT_IDX(profile)) * profile->volt_nb_limits) + (vi)] : 0)
+	profile->cccm_limits[((ti + GBMS_AACT_TI(profile)) * profile->volt_nb_limits) + (vi)] : 0)
+
+/* select the preset (first) profile if multiple_profiles is not supported */
+#define GBMS_AACT_IDX(profile) \
+	(profile->aact_support_multiple_profiles ? profile->aact_idx : 0)
+
+/* only one table in each profile if multiple_profiles is supported */
+#define GBMS_AACT_NB_LIMITS(profile) \
+	(profile->aact_support_multiple_profiles ? 1 : profile->aact_nb_limits)
 
 /* newgen charging */
 #define GBMS_CS_FLAG_BUCK_EN		BIT(0)
@@ -493,6 +572,7 @@ int gbms_init_aact_profile_internal(struct gbms_chg_profile *profile,
 	gbms_init_aact_profile_internal(p, n, KBUILD_MODNAME)
 int gbms_update_chg_profile_from_aact(struct gbms_chg_profile *profile);
 int gbms_aact_get_index(const struct gbms_chg_profile *profile, const int cycles);
+int gbms_read_chg_aact_ecc(struct gbms_chg_profile *profile, struct device_node *node);
 
 void gbms_init_chg_table(struct gbms_chg_profile *profile,
 			 struct device_node *node, u32 capacity);
@@ -653,6 +733,11 @@ int gbms_aafv_get_offset(const struct gbms_chg_profile *profile, const int cycle
 bool gbms_aafv_offset_is_valid(const struct gbms_chg_profile *profile,
 			       const u32 offset, const u32 len);
 int gbms_aafv_get_last_entry(const struct gbms_chg_profile *profile);
+int gbms_read_aacc_chg_weights(struct gbms_chg_profile *profile,
+			       struct device_node *node);
+int gbms_read_aacc_dsg_weights(struct gbms_chg_profile *profile,
+			       struct device_node *node);
+int gbms_aacc_temp_idx(const struct gbms_chg_profile *profile, int temp, bool is_charge);
 
 bool chg_state_is_disconnected(const union gbms_charger_state *chg_state);
 
@@ -929,6 +1014,13 @@ enum gbms_fwupdate_max77779_err_code {
 	FWU_MAX77779_ERR_PREPARE = -1,
 	FWU_MAX77779_ERR_UNKNOWN = 0,
 	FWU_MAX77779_ERR_NONE = 1,
+};
+
+enum bd_trickle_ver {
+	BD_TRICKLE_VER_NONE = 0,
+	BD_TRICKLE_VER_SOC = 1,
+	BD_TRICKLE_VER_FCC = 2,
+	BD_TRICKLE_VER_MAX,
 };
 
 /* Define charger status for stability dump */

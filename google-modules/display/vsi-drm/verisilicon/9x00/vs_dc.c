@@ -11,6 +11,9 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/err.h>
+#include <linux/irq.h>
+#include <linux/irqdesc.h>
+#include <linux/irqnr.h>
 #include <linux/kernel.h>
 #include <linux/media-bus-format.h>
 #include <linux/of.h>
@@ -19,6 +22,7 @@
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
 #include <linux/units.h>
+#include <linux/vmalloc.h>
 
 #if IS_ENABLED(CONFIG_VERISILICON_REGMAP)
 #include <linux/regmap.h>
@@ -41,6 +45,7 @@
 #include "vs_dc_post.h"
 #include "vs_dc_debugfs.h"
 #include "vs_dc_hw.h"
+#include "vs_drm_state_record.h"
 #include "vs_drv.h"
 #include "vs_dc_info.h"
 #include "vs_writeback.h"
@@ -67,6 +72,10 @@ MODULE_PARM_DESC(disable_hw_reset, "Disable hardware reset before power OFF");
 static bool disable_urgent;
 module_param(disable_urgent, bool, 0644);
 MODULE_PARM_DESC(disable_urgent, "Disable QoS urgent level feature");
+
+static bool disable_coredump;
+module_param(disable_coredump, bool, 0644);
+MODULE_PARM_DESC(disable_coredump, "Whether to disable subsystem coredump for this module");
 
 int vs_dc_power_get(struct device *dev, bool sync)
 {
@@ -213,6 +222,7 @@ static int vs_dc_res_disable(struct device *dev)
 
 	vs_dc_do_hw_reset(dev);
 	dc_hw_reset_all_be_interrupts(&dc->hw);
+	dc_hw_enable_clock_domain_iso(&dc->hw, true);
 
 	vs_qos_clear_qos_configs(dc);
 
@@ -237,6 +247,8 @@ static int vs_dc_res_enable(struct device *dev)
 	WARN_ON(dc->enabled);
 	if (dc->enabled)
 		goto end;
+
+	dc_hw_enable_clock_domain_iso(&dc->hw, false);
 
 	dc->enabled = true;
 
@@ -277,6 +289,107 @@ static const struct dev_pm_ops vs_dc_pm_ops = {
 	SET_RUNTIME_PM_OPS(vs_dc_pm_runtime_suspend, vs_dc_pm_runtime_resume, NULL)
 };
 #endif
+
+static ssize_t _get_sscd_regdump(struct vs_dc *dc, char *buffer, ssize_t count)
+{
+	struct drm_print_iterator iter;
+	struct drm_printer p;
+
+	iter.data = buffer;
+	iter.start = 0;
+	iter.remain = count;
+
+	p = drm_coredump_printer(&iter);
+
+	dc_hw_reg_dump_custom(&dc->hw, &p, "DPU", 0, dc->hw.reg_size);
+
+	return count - iter.remain;
+}
+
+static ssize_t get_sscd_regdump(struct vs_dc *dc, char **regdump_buf)
+{
+	ssize_t count;
+
+	count = _get_sscd_regdump(dc, NULL, INT_MAX);
+	*regdump_buf = vmalloc(count);
+	if (!regdump_buf)
+		return -ENOMEM;
+	_get_sscd_regdump(dc, *regdump_buf, count);
+
+	return count;
+}
+
+static ssize_t prepare_sscd_regdump(struct vs_dc *dc, char **regdump_buf)
+{
+	struct display_sscd_section_config hexdump_cfg;
+	ssize_t regdump_buf_size;
+
+	regdump_buf_size = get_sscd_regdump(dc, regdump_buf);
+	if (regdump_buf_size > 0) {
+		display_sscd_configure_phys_hexdump_section(&hexdump_cfg, "dpu register dump",
+							    (void *)(*regdump_buf),
+							    dc->hw.reg_base_phys, regdump_buf_size);
+		display_sscd_push_section(dc->disp_sscd, &hexdump_cfg);
+	}
+
+	return regdump_buf_size;
+}
+
+int vs_dc_coredump(struct vs_dc *dc, const char *reason)
+{
+	struct device *dev = dc->hw.dev;
+	char *regdump_buf;
+	ssize_t regdump_buf_size = 0;
+	struct vs_drm_private *priv = dc->drm_dev->dev_private;
+	struct drm_state_history_data sh_data;
+	struct drm_state_history_record *sh_record = priv->sh_record;
+	int ret, i, num_recorded_drm_states;
+
+	ret = pm_runtime_get_if_in_use(dev);
+	if (ret < 0) {
+		dev_err(dev, "Failed to power ON, ret %d\n", ret);
+		return ret;
+	}
+
+	if (ret == 0) {
+		dev_info(dev, "DPU off, skipping register coredump\n");
+	} else {
+		/* Get regdump */
+		regdump_buf_size = prepare_sscd_regdump(dc, &regdump_buf);
+
+		/* No need for power any more */
+		ret = pm_runtime_put(dev);
+	}
+
+	num_recorded_drm_states = vs_drm_recorded_states_prepare(&sh_data, sh_record);
+
+	for (i = 0; i < num_recorded_drm_states; ++i) {
+		struct display_sscd_section_config drm_state_cfg;
+		char cfg_name[13];
+
+		scnprintf(cfg_name, sizeof(cfg_name), "drm_state-%02d", i);
+		display_sscd_configure_log_buffer_section(
+			&drm_state_cfg, cfg_name, sh_data.buffers[i], sh_data.buffer_sizes[i]);
+		display_sscd_push_section(dc->disp_sscd, &drm_state_cfg);
+	}
+
+	display_sscd_report(dc->disp_sscd, reason);
+
+	for (i = 0; i < num_recorded_drm_states; ++i)
+		display_sscd_pop_section(dc->disp_sscd);
+	vs_drm_recorded_states_destroy(&sh_data);
+
+	if (regdump_buf_size > 0) {
+		display_sscd_pop_section(dc->disp_sscd);
+		/* free sscd regdump buffer */
+		vfree(regdump_buf);
+	}
+
+	if (ret < 0)
+		dev_err(dev, "Failed to power OFF, ret %d\n", ret);
+
+	return ret;
+}
 
 static void dc_deinit(struct device *dev)
 {
@@ -415,6 +528,34 @@ static void vs_dc_get_display_crc(struct vs_dc *dc, struct drm_crtc *crtc)
 }
 #endif /* CONFIG_DEBUG_FS */
 
+static void vs_dc_update_irq_status(struct vs_dc *dc, int irq_num, int irq_idx)
+{
+	ssize_t ret_masked, ret_pending;
+	bool masked, pending;
+	struct irq_desc *irq_desc = irq_to_desc(irq_num);
+
+	if (irq_desc)
+		dc->irq_depths[irq_idx] = irq_desc->depth;
+
+	ret_masked = irq_get_irqchip_state(irq_num, IRQCHIP_STATE_MASKED, &masked);
+	ret_pending = irq_get_irqchip_state(irq_num, IRQCHIP_STATE_PENDING, &pending);
+
+	if (!ret_masked)
+		assign_bit(irq_idx, dc->irq_masked_status, masked);
+	if (!ret_pending)
+		assign_bit(irq_idx, dc->irq_pending_status, pending);
+}
+
+void vs_dc_update_irq_statuses(struct vs_dc *dc)
+{
+	int i;
+
+	for (i = 0; i < dc->irq_num; ++i)
+		vs_dc_update_irq_status(dc, dc->irqs[i], i);
+
+	trace_disp_dc_irq_status(dc);
+}
+
 static void vs_dc_underrun_workaround(struct vs_dc *dc, struct drm_crtc *crtc,
 				      struct dc_hw_display *display, u8 display_id, bool enable)
 {
@@ -522,7 +663,8 @@ static void vs_dc_handle_interrupts(struct vs_dc *dc)
 
 		pid = vs_crtc->trace_pid;
 
-		if (display->mode.output_mode & VS_OUTPUT_MODE_CMD) {
+		if (display->mode.output_mode & VS_OUTPUT_MODE_CMD &&
+		    !(display->mode.output_mode & VS_OUTPUT_MODE_CMD_DE_SYNC)) {
 			if (display_mask & status.display_te_rising) {
 				DPU_ATRACE_INT_PID_FMT(1, pid, "TE[%d]", display_id);
 				if (display->mode.v_sync_polarity) {
@@ -818,7 +960,7 @@ int vs_get_hist_bins_query_ioctl(struct drm_device *dev, void *data, struct drm_
 		}
 
 		/* check if histogram_data is available */
-		gem_node = hw_hist_chan->gem_node[VS_HIST_STAGE_READY];
+		gem_node = hw_hist_chan->gem_node[VS_HIST_STAGE_DONE];
 		if (!gem_node) {
 			spin_unlock_irqrestore(&hw->histogram_slock, flags);
 			return -ENODATA;
@@ -860,7 +1002,7 @@ int vs_get_hist_bins_query_ioctl(struct drm_device *dev, void *data, struct drm_
 
 		/* mark handling user request */
 		/* check if histogram_data is available */
-		gem_node = hw_hist_rgb->gem_node[VS_HIST_STAGE_READY];
+		gem_node = hw_hist_rgb->gem_node[VS_HIST_STAGE_DONE];
 		if (!gem_node) {
 			spin_unlock_irqrestore(&hw->histogram_slock, flags);
 			return -ENODATA;
@@ -985,6 +1127,17 @@ static ssize_t early_wakeup_store(struct device *dev, struct device_attribute *a
 }
 static DEVICE_ATTR_RW(early_wakeup);
 
+static int dc_init_sscd(struct vs_dc *dc, struct device *dev)
+{
+	int ret = display_sscd_device_initialize(dev, &dc->disp_sscd, "dpu",
+						 SSCD_GET_DRIVER_VERSION(), NULL);
+
+	if (ret)
+		dev_err(dev, "Error registering sscd device(%d)\n", ret);
+
+	return ret;
+}
+
 static int dc_bind(struct device *dev, struct device *master, void *data)
 {
 	struct drm_device *drm_dev = data;
@@ -1024,6 +1177,7 @@ static int dc_bind(struct device *dev, struct device *master, void *data)
 	drm_dev->mode_config.max_height = 0x0;
 
 	priv->dc_dev = dev;
+	dc->drm_dev = drm_dev;
 
 	vs_drm_update_alignment(drm_dev, dc_info->pitch_alignment, dc_info->addr_alignment);
 
@@ -1032,6 +1186,9 @@ static int dc_bind(struct device *dev, struct device *master, void *data)
 		dev_err(dev, "%s: failed to power OFF\n", __func__);
 
 	device_create_file(dev, &dev_attr_early_wakeup);
+
+	if (dc->coredump_en)
+		dc_init_sscd(dc, dev);
 
 	return 0;
 
@@ -1050,6 +1207,10 @@ static void dc_unbind(struct device *dev, struct device *master, void *data)
 
 	vs_dc_disable_irqs(dc);
 
+	if (dc->coredump_en) {
+		display_sscd_device_free(dc->disp_sscd);
+		dc->disp_sscd = NULL;
+	}
 	device_remove_file(dev, &dev_attr_early_wakeup);
 
 	dc_deinit(dev);
@@ -1216,6 +1377,12 @@ static int dc_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto detach_pd;
 	}
+	dc->irq_depths = devm_kmalloc_array(dev, dc->irq_num, sizeof(*dc->irq_depths),
+					    GFP_KERNEL | __GFP_ZERO);
+	if (!dc->irq_depths) {
+		ret = -ENOMEM;
+		goto detach_pd;
+	}
 
 	for (i = 0; i < dc->irq_num; i++) {
 		irq = platform_get_irq(pdev, i);
@@ -1281,11 +1448,14 @@ static int dc_probe(struct platform_device *pdev)
 		goto detach_pd;
 	}
 
+	dc->coredump_en = !disable_coredump;
 	ret = dc_init_debugfs(dc);
 	if (ret) {
 		dev_err(dev, "failed to init debugfs\n");
 		goto detach_pd;
 	}
+	if (dc->coredump_en)
+		dc->hw.reg_base_phys = resource->start;
 
 	dev_set_drvdata(dev, dc);
 

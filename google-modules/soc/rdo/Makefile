@@ -12,8 +12,8 @@ endif
 ifneq ($(wildcard $(OUT_DIR)/../private/google-modules/perf/google_vote_manager_Module.symvers),)
 EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/perf/google_vote_manager_Module.symvers
 endif
-ifneq ($(wildcard $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/Module.symvers),)
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/Module.symvers
+ifneq ($(wildcard $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/gsa_ko_Module.symvers),)
+EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/gsa_ko_Module.symvers
 endif
 BMS_SYMVERS = $(OUT_DIR)/../private/google-modules/bms/misc/Module.symvers
 ifneq ("$(wildcard $(BMS_SYMVERS))","")

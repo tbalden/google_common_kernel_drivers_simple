@@ -25,6 +25,7 @@ struct dw_mipi_cdphy {
 	const struct dw_mipi_cdphy_data *driver_data;
 	union phy_configure_opts *cfg;
 	struct clk *pllref_clk;
+	u32 pll_ref_clk_khz;
 	u32 lanes_config;
 	u32 dphy_freq;
 	/* 0 dphy, 1 cphy */

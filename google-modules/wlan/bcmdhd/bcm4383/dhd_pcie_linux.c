@@ -869,6 +869,10 @@ static int dhdpcie_pm_resume(struct device *dev)
 	DHD_GENERAL_LOCK(bus->dhd, flags);
 	DHD_BUS_BUSY_SET_RESUME_IN_PROGRESS(bus->dhd);
 	DHD_GENERAL_UNLOCK(bus->dhd, flags);
+#ifdef DHD_ENABLE_L1SS_FROM_PM_COMPLETE
+	DHD_PRINT(("%s: Set system_resume_in_progress\n", __FUNCTION__));
+	bus->system_resume_in_progress = TRUE;
+#endif /* DHD_ENABLE_L1SS_FROM_PM_COMPLETE */
 
 	if (bus->dhd->up)
 		ret = dhdpcie_set_suspend_resume(bus, FALSE);
@@ -899,6 +903,17 @@ static void dhdpcie_pm_complete(struct device *dev)
 #endif /* WL_TWT */
 
 	bus->chk_pm = FALSE;
+
+#ifdef DHD_ENABLE_L1SS_FROM_PM_COMPLETE
+	DHD_PRINT(("%s: Clear system_resume_in_progress\n", __FUNCTION__));
+	bus->system_resume_in_progress = FALSE;
+
+	/*
+	 * Re-enable L1ss in Resume path. Implementation defalts to NOP
+	 * If need override in the paltform file
+	 */
+	dhd_plat_l1ss_ctrl(1);
+#endif /* DHD_ENABLE_L1SS_FROM_PM_COMPLETE */
 
 	return;
 }
@@ -1395,8 +1410,13 @@ static int dhdpcie_resume_dev(struct pci_dev *dev)
 	 * Re-enable L1ss in Resume path. Implementation defalts to NOP
 	 * If need override in the paltform file
 	 */
+#ifdef DHD_ENABLE_L1SS_FROM_PM_COMPLETE
+	if (pch->bus->system_resume_in_progress == FALSE) {
+		dhd_plat_l1ss_ctrl(1);
+	}
+#else
 	dhd_plat_l1ss_ctrl(1);
-
+#endif /* DHD_ENABLE_L1SS_FROM_PM_COMPLETE */
 
 out:
 	return err;
