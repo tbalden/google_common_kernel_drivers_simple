@@ -222,6 +222,11 @@ PVRSRVGetDevClockSpeedKM(CONNECTION_DATA * psConnection,
                          IMG_PUINT32  pui32RGXClockSpeed);
 
 PVRSRV_ERROR
+PVRSRVGetMaxClockSpeedKM(CONNECTION_DATA * psConnection,
+                         PVRSRV_DEVICE_NODE *psDeviceNode,
+                         IMG_PUINT32  pui32RGXClockSpeed);
+
+PVRSRV_ERROR
 PVRSRVHWOpTimeoutKM(CONNECTION_DATA *psConnection,
                     PVRSRV_DEVICE_NODE *psDeviceNode);
 

@@ -581,13 +581,21 @@ static void vs_drm_atomic_check_recovery_needed(struct drm_device *dev,
 		gs_conn_state = to_gs_connector_state(new_conn_state);
 		vs_crtc_state = to_vs_crtc_state(new_crtc_state);
 
+		if (test_bit(GS_DSI_ERR_HARD_RSTN, gs_conn_state->dsi_errors)) {
+			vs_crtc_state->needs_recovery = true;
+			dev_err(dev->dev, "marking crtc needs_recovery dsi:%*pb\n",
+				GS_DSI_ERR_MAX, gs_conn_state->dsi_errors);
+		}
+/* b/467541586 re-enable panel recovery */
+/*
 		if (test_bit(GS_DSI_ERR_HARD_RSTN, gs_conn_state->dsi_errors) ||
 		    !bitmap_empty(gs_conn_state->panel_errors, GS_PANEL_ERR_MAX)) {
 			vs_crtc_state->needs_recovery = true;
-			dev_dbg(dev->dev, "marking crtc needs_recovery dsi:%*pb panel:%*pb\n",
+			dev_err(dev->dev, "marking crtc needs_recovery dsi:%*pb panel:%*pb\n",
 				GS_DSI_ERR_MAX, gs_conn_state->dsi_errors, GS_PANEL_ERR_MAX,
 				gs_conn_state->panel_errors);
 		}
+*/
 		clear_bit(GS_DSI_ERR_HARD_RSTN, gs_conn_state->dsi_errors);
 		bitmap_clear(gs_conn_state->panel_errors, 0, GS_PANEL_ERR_MAX);
 	}

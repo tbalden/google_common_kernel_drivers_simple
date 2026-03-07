@@ -513,15 +513,31 @@ AcquireValidateRefCriticalBuffer(PVRSRV_DEVICE_NODE*     psDevNode,
 		    "%s: Failed to acquire reservation for critical buffer", __func__);
 	}
 
+	/* Prevent unmapping the PMR from the reservation while used as critical buffer */
+	if (!DevmemIntLockReservationMapping(psReservation))
+	{
+		eError = PVRSRV_ERROR_INVALID_PARAMS;
+		PVR_LOG_GOTO_IF_ERROR_VA(eError, RollbackReservationAcquire,
+		    "%s: Failed to lock reservation mapping for critical buffer. Already locked!", __func__);
+	}
+
 	eError = DevmemIntGetReservationData(psReservation, ppsPMR, psDevVAddr);
-	PVR_LOG_GOTO_IF_ERROR_VA(eError, RollbackReservation,
+	PVR_LOG_GOTO_IF_ERROR_VA(eError, RollbackReservationMapping,
 	    "%s: Error from DevmemIntGetReservationData for critical buffer: %s",
 	    __func__, PVRSRVGetErrorString(eError));
 
+	/* Make sure that the reservation is on a heap with correct policy */
+	if (psDevVAddr->uiAddr < RGX_PMMETA_PROTECT_HEAP_BASE ||
+	    psDevVAddr->uiAddr >= RGX_PMMETA_PROTECT_HEAP_BASE + RGX_PMMETA_PROTECT_HEAP_SIZE)
+	{
+		eError = PVRSRV_ERROR_INVALID_HEAP;
+		PVR_LOG_GOTO_IF_ERROR_VA(eError, RollbackReservationMapping,
+		    "%s: Invalid heap policy for the critical buffer", __func__);
+	}
 
 	/* Check buffer sizes and flags are as required */
 	eError = _ValidateCriticalPMR(*ppsPMR, ui64MinSize);
-	PVR_LOG_GOTO_IF_ERROR_VA(eError, RollbackReservation,
+	PVR_LOG_GOTO_IF_ERROR_VA(eError, RollbackReservationMapping,
 	    "%s: Validation of critical PMR failed: %s",
 	    __func__, PVRSRVGetErrorString(eError));
 
@@ -531,7 +547,7 @@ AcquireValidateRefCriticalBuffer(PVRSRV_DEVICE_NODE*     psDevNode,
 		PVR_DPF((PVR_DBG_ERROR,
 		     "%s: Critical PMR already in use (exclusive flag)!",
 		     __func__));
-		PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_INVALID_PARAMS, RollbackReservation);
+		PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_INVALID_PARAMS, RollbackReservationMapping);
 	}
 
 	/* If no error on validation ref the PMR */
@@ -544,7 +560,9 @@ AcquireValidateRefCriticalBuffer(PVRSRV_DEVICE_NODE*     psDevNode,
 
 UnsetExclusive:
 	PMR_SetExclusiveUse(*ppsPMR, IMG_FALSE);
-RollbackReservation:
+RollbackReservationMapping:
+	DevmemIntUnLockReservationMapping(psReservation);
+RollbackReservationAcquire:
 	DevmemIntReservationRelease(psReservation);
 ReturnError:
 	return eError;
@@ -568,7 +586,36 @@ void UnrefAndReleaseCriticalBuffer(DEVMEMINT_RESERVATION* psReservation)
 	PVR_LOG_IF_ERROR_VA(PVR_DBG_ERROR, eError,
 	    "Error on PMR unref in %s", __func__);
 
+	DevmemIntUnLockReservationMapping(psReservation);
 	DevmemIntReservationRelease(psReservation);
+}
+
+/* The upper bound comes from theoretical maximum range that PM can address
+ * when accessing tail ptr buffer.
+ * The size is bound by:
+ *     - maximum number of RTA layers (at most 2048)
+ *     - TPC stride (at most 16384 pages).
+ * The address is also offset in FW by half of the buffer size
+ * when TRP is enabled so maximum upper bound is:
+ * 2048 * 16384 pages * 1.5 = 192GB
+ */
+#define PM_BUFFER_SIZE_UPPER_BOUND (0x3000000000)
+
+static_assert(RGX_PMMETA_PROTECT_HEAP_BASE - (RGX_GENERAL_HEAP_BASE + RGX_GENERAL_HEAP_SIZE) > PM_BUFFER_SIZE_UPPER_BOUND,
+			  "Distance between PMMETA_PROTECT and GENERAL heaps is less than PM buffer size upper bound");
+PVRSRV_ERROR ValidatePMAddrs(IMG_DEV_VIRTADDR* psDevVAddr, IMG_UINT32 ui32NumAddr)
+{
+	IMG_UINT32 i;
+
+	for (i=0; i<ui32NumAddr; i++)
+	{
+		if (psDevVAddr[i].uiAddr >= (RGX_GENERAL_HEAP_BASE + RGX_GENERAL_HEAP_SIZE))
+		{
+			return PVRSRV_ERROR_INVALID_PARAMS;
+		}
+	}
+
+	return PVRSRV_OK;
 }
 
 /******************************************************************************

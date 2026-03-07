@@ -585,7 +585,7 @@ static int dw_mipi_dsi2h_exit_ulps(struct dw_mipi_dsi2h *dsi2h)
 		return ret;
 	}
 
-	ret = dw_dsi2h_pri_ulps_exit_request(dsi2h, 0xFF);
+	ret = dw_dsi2h_pri_ulps_exit_request(dsi2h, 0x8F7);
 	/* function dw_dsi2h_pri_ulps_exit_request return CSR value if success */
 	if (unlikely(ret < 0)) {
 		dev_err(dsi2h->dev, "%s dsi2h ULPS exit fail, ret = %d\n", __func__, ret);

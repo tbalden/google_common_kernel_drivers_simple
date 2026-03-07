@@ -85,6 +85,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_dvfs_events.h"
 #endif
 #endif /* SUPPORT_PVR_DVFS_GOVERNOR */
+#if defined(SUPPORT_LINUX_DVFS)
+#include "rgxtimecorr.h"
+#endif
 
 #include "kernel_compatibility.h"
 
@@ -1238,6 +1241,11 @@ PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 #endif
 #endif
 
+#if defined(SUPPORT_LINUX_DVFS)
+	/* 50ms chosen as a reasonable period for subtracting off time */
+	psDVFSDevice->off_period_ms = 50;
+#endif
+
 	psDVFSDevice->psDevFreq = devm_devfreq_add_device(psDev,
 													  &img_devfreq_dev_profile,
 #if defined(SUPPORT_PVR_DVFS_GOVERNOR)
@@ -1443,6 +1451,15 @@ PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		/* Device is shutting down, nothing to do. */
 		return PVRSRV_OK;
 	}
+
+#if defined(SUPPORT_LINUX_DVFS)
+#if defined(SUPPORT_SOC_TIMER)
+	psDVFSDevice->suspend_timestamp = RGXTimeGetSOCTimerValueNS(psDeviceNode);
+#else
+	psDVFSDevice->suspend_timestamp = RGXTimeCorrGetClockns64(psDeviceNode);
+#endif
+#endif
+
 	psDVFSDevice->eState = PVR_DVFS_STATE_OFF;
 
 	/* Communicate power suspend to devfreq framework */
@@ -1468,6 +1485,16 @@ PVRSRV_ERROR ResumeDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 	}
 
 	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+
+	/* Use suspend_duration as temporary storage for the current time */
+#if defined(SUPPORT_LINUX_DVFS)
+#if defined(SUPPORT_SOC_TIMER)
+	psDVFSDevice->suspend_duration = RGXTimeGetSOCTimerValueNS(psDeviceNode);
+#else
+	psDVFSDevice->suspend_duration = RGXTimeCorrGetClockns64(psDeviceNode);
+#endif
+	psDVFSDevice->suspend_duration -= psDVFSDevice->suspend_timestamp;
+#endif
 
 	/* Not supported in GuestOS drivers */
 	psDVFSDevice->eState = PVRSRV_VZ_MODE_IS(GUEST, DEVNODE, psDeviceNode) ? PVR_DVFS_STATE_NONE : PVR_DVFS_STATE_READY;

@@ -3587,7 +3587,8 @@ static struct gs_panel_desc NAME = {								\
 	 */											\
 	.notify_te2_freq_changed_work_delay_ms = 50,						\
 	.fault_detect_interval_ms = 5000,							\
-	.panel_errors_mask = ~(BIT(GS_PANEL_ERR_DSI_SOT) | BIT(GS_PANEL_ERR_DSI_SOT_SYNC)),	\
+	.panel_errors_mask = ~(BIT(GS_PANEL_ERR_DSI_SOT) | BIT(GS_PANEL_ERR_DSI_SOT_SYNC) |	\
+			BIT(GS_PANEL_ERR_DSI_HS_RX_TIMEOUT)), /* Peripheral timeout */		\
 }
 
 DEFINE_BMEA_PANEL_DESC(gs_bzea, bzea_modes, bzea_lp_modes, bzea_binned_lp,

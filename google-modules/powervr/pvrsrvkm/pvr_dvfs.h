@@ -145,6 +145,8 @@ typedef struct _IMG_DVFS_DEVICE_
 #if defined(CONFIG_PM_DEVFREQ_EVENT) && defined(SUPPORT_PVR_DVFS_GOVERNOR)
 	struct pvr_profiling_device *psProfilingDevice;
 #endif
+	IMG_UINT64 suspend_timestamp, suspend_duration;
+	u64 off_period_ms;
 } IMG_DVFS_DEVICE;
 #endif
 

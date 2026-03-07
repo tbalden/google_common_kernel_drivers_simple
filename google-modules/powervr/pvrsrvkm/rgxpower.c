@@ -132,6 +132,10 @@ PVRSRV_ERROR RGXGetGpuUtilStats(PVRSRV_DEVICE_NODE *psDeviceNode,
 	IMG_UINT32 ui32MaxDMCount;
 	RGXFWIF_DM eDM;
 	bool       bCacheStateTransition = true;
+#if defined(SUPPORT_LINUX_DVFS)
+	IMG_DVFS_DEVICE *psDVFSDevice =
+		&psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+#endif
 
 	/***** (1) Initialise return stats *****/
 
@@ -412,6 +416,15 @@ PVRSRV_ERROR RGXGetGpuUtilStats(PVRSRV_DEVICE_NODE *psDeviceNode,
 			psAggregateStats->aaui64DMOSStatActive[eDM][ui32DriverID]  += psReturnStats->aaui64DMOSStatActive[eDM][ui32DriverID];
 		}
 	}
+
+#if defined(SUPPORT_LINUX_DVFS)
+	if (psDVFSDevice->suspend_duration >
+	    psDVFSDevice->off_period_ms * 1000000) {
+		psReturnStats->ui64GpuStatCumulative -=
+			psDVFSDevice->suspend_duration;
+		psDVFSDevice->suspend_duration = 0;
+	}
+#endif
 
 	/***** (5) Convert return stats to microseconds *****/
 
