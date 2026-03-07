@@ -1671,6 +1671,15 @@ PVRSRV_ERROR RGXCreateHWRTDataSet2(
 	PVR_LOG_GOTO_IF_ERROR(eError,
 	    "Validation failed for secure data reservations", err_validation_mlist);
 
+	/* Need to verify if dev addrs passed do not point to critical buffers */
+	eError = ValidatePMAddrs(asTailPtrsDevVAddr, RGXMKIF_NUM_GEOMDATAS);
+	PVR_LOG_GOTO_IF_ERROR(eError,
+	    "Validation failed for TailPtr addresses", err_validation_devptr);
+
+	eError = ValidatePMAddrs(&sVHeapTableDevVAddr, 1);
+	PVR_LOG_GOTO_IF_ERROR(eError,
+	    "Validation failed for vheap table", err_validation_devptr);
+
 	/* Prepare KM cleanup object for common data */
 	psHWRTDataCommonCookie = OSAllocZMem(sizeof(*psHWRTDataCommonCookie));
 	if (psHWRTDataCommonCookie == NULL)
@@ -1747,6 +1756,7 @@ err_HWRTDataAlloc:
 	}
 	OSFreeMem(psHWRTDataCommonCookie);
 err_common_cookie_alloc:
+err_validation_devptr:
 	UnrefAndReleaseCriticalBuffer(psPMMListsReservation);
 err_validation_mlist:
 	if (psPMSecureStateReservation != psPMStateReservation)

@@ -1110,7 +1110,8 @@ const struct gs_panel_desc google_rgeb = {
 	.default_dsi_hs_clk_mbps = MIPI_DSI_FREQ_DEFAULT,
 	.reset_timing_ms = { -1, 1, 5 },
 	.fault_detect_interval_ms = 5000,
-	.panel_errors_mask = ~(BIT(GS_PANEL_ERR_DSI_SOT) | BIT(GS_PANEL_ERR_DSI_SOT_SYNC)),
+	.panel_errors_mask = ~(BIT(GS_PANEL_ERR_DSI_SOT) | BIT(GS_PANEL_ERR_DSI_SOT_SYNC) |
+			BIT(GS_PANEL_ERR_DSI_HS_RX_TIMEOUT)), /* Peripheral timeout */
 };
 
 static const struct of_device_id gs_panel_of_match[] = {

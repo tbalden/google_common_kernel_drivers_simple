@@ -21,6 +21,21 @@
 		.open = simple_open,                 \
 	}
 
+#if defined(SUPPORT_LINUX_DVFS)
+static int set_util_off_period_ms(void *data, u64 val)
+{
+	struct pixel_gpu_device *pixel_dev = data;
+	PPVRSRV_DEVICE_NODE psDeviceNode = pixel_dev->dev_config->psDevNode;
+	IMG_DVFS_DEVICE *psDVFSDevice =
+		&psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+
+	psDVFSDevice->off_period_ms = val;
+
+	return 0;
+}
+DEFINE_DEBUGFS_ATTRIBUTE_SIGNED(fops_util_off_period_ms, NULL, set_util_off_period_ms, "%llu\n");
+#endif
+
 static int set_mba(void *data, u64 val)
 {
 	struct pixel_gpu_device *pixel_dev = data;
@@ -263,6 +278,11 @@ int pixel_gpu_debug_init(struct pixel_gpu_device *pixel_dev)
 
 	debugfs_create_file("trigger_core_dump", MAY_WRITE, debug->root,
 				pixel_dev, &fops_trigger_core_dump);
+
+#if defined(SUPPORT_LINUX_DVFS)
+	debugfs_create_file("util_off_period_ms", MAY_WRITE, debug->root,
+				pixel_dev, &fops_util_off_period_ms);
+#endif
 	return 0;
 }
 

@@ -242,23 +242,10 @@
 			no-map;
 		};
 
-		cpm_tracepoint_ipc_dma: cpm_tracepoint_ipc_dma {
+		cpm_tracepoint_ipc_dma_buff: cpm_tracepoint_ipc_dma_buff@8cdf4000 {
 			compatible = "shared-dma-pool";
-			/*
-			 * Less than 4MB is needed, but it's the minimum CMA
-			 * config size.
-			 */
-			size = <0x0 0x00400000>; /* 4MB */
-			alignment = <0x0 0x00001000>;
-			/*
-			 * TODO(b/283179225): Workaround for the CPM address
-			 *                    limitation
-			 *
-			 * CPM can't handle the address over 0xA0000000 now on
-			 * gem5.
-			 */
-			alloc-ranges = <0x0 0x80000000 0x0 0x20000000>;
-			reusable;
+			reg = <0x00000000 0x8cdf4000 0x00000000 0x00004000>; /* 16KB */
+			no-map;
 		};
 
 		faceauth_dsp: faceauth_dsp {

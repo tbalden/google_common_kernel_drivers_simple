@@ -58,6 +58,8 @@ struct governor_data {
 	struct devfreq *devfreq;
 	/** @lock: lock used to synchronize state transitions with a polling interval change */
 	struct mutex lock;
+	/** @last_interval: timestamp of the most recent work_func  */
+	ktime_t last_interval;
 };
 
 static enum hrtimer_restart timer_callback(struct hrtimer *timer)
@@ -89,8 +91,10 @@ static void work_func(struct work_struct *work)
 {
 	struct governor_data *data = container_of(work, struct governor_data, work);
 	struct devfreq *df = data->devfreq;
+	const ktime_t now = ktime_get();
 
 	mutex_lock(&df->lock);
+	data->last_interval = ktime_to_ms(now);
 	update_devfreq(df);
 	mutex_unlock(&df->lock);
 }
@@ -200,10 +204,20 @@ static int precise_ondemand_resume(struct devfreq *df)
 
 	/* Transition to ON, from a stopped state (transition c) */
 	if (atomic_xchg(&data->timer_state, TIMER_ON) == TIMER_OFF) {
+		/* Find out when the next interval should be */
+		s64 expiry = 0;
+		const s64 now = ktime_to_ms(ktime_get());
+		const s64 delta = now - data->last_interval;
+
+		if (delta < data->devfreq->profile->polling_ms)
+			expiry = data->devfreq->profile->polling_ms - delta;
+
 		/* Start the timer only if it's been fully stopped (transition d), and
-		 * schedule an immediate update (0).
+		 * schedule an update (expiry).
 		 */
-		hrtimer_start(&data->timer, 0, HRTIMER_MODE_REL);
+		hrtimer_start(&data->timer,
+			      ms_to_ktime(expiry),
+			      HRTIMER_MODE_REL);
 	}
 
 	mutex_unlock(&data->lock);

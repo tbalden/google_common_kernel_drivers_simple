@@ -424,6 +424,25 @@ PVRSRVBridgeGetDevClockSpeed(IMG_UINT32 ui32DispatchTableEntry,
 }
 
 static IMG_INT
+PVRSRVBridgeGetMaxClockSpeed(IMG_UINT32 ui32DispatchTableEntry,
+			     IMG_UINT8 * psGetDevClockSpeedIN_UI8,
+			     IMG_UINT8 * psGetDevClockSpeedOUT_UI8, CONNECTION_DATA * psConnection)
+{
+	PVRSRV_BRIDGE_IN_GETMAXCLOCKSPEED *psGetDevClockSpeedIN =
+	    (PVRSRV_BRIDGE_IN_GETMAXCLOCKSPEED *) IMG_OFFSET_ADDR(psGetDevClockSpeedIN_UI8, 0);
+	PVRSRV_BRIDGE_OUT_GETMAXCLOCKSPEED *psGetDevClockSpeedOUT =
+	    (PVRSRV_BRIDGE_OUT_GETMAXCLOCKSPEED *) IMG_OFFSET_ADDR(psGetDevClockSpeedOUT_UI8, 0);
+
+	PVR_UNREFERENCED_PARAMETER(psGetDevClockSpeedIN);
+
+	psGetDevClockSpeedOUT->eError =
+	    PVRSRVGetMaxClockSpeedKM(psConnection, OSGetDevNode(psConnection),
+				     &psGetDevClockSpeedOUT->ui32ClockSpeed);
+
+	return 0;
+}
+
+static IMG_INT
 PVRSRVBridgeHWOpTimeout(IMG_UINT32 ui32DispatchTableEntry,
 			IMG_UINT8 * psHWOpTimeoutIN_UI8,
 			IMG_UINT8 * psHWOpTimeoutOUT_UI8, CONNECTION_DATA * psConnection)
@@ -1109,6 +1128,10 @@ PVRSRV_ERROR InitSRVCOREBridge(void)
 			      PVRSRVBridgeIsVirtualPlatform, NULL, 0,
 			      sizeof(PVRSRV_BRIDGE_OUT_ISVIRTUALPLATFORM));
 
+	SetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_GETMAXCLOCKSPEED,
+			      PVRSRVBridgeGetMaxClockSpeed, NULL, 0,
+			      sizeof(PVRSRV_BRIDGE_OUT_GETMAXCLOCKSPEED));
+
 	return PVRSRV_OK;
 }
 
@@ -1160,5 +1183,7 @@ void DeinitSRVCOREBridge(void)
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_ISEMULATOR);
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_ISVIRTUALPLATFORM);
+
+	UnsetDispatchTableEntry(PVRSRV_BRIDGE_SRVCORE, PVRSRV_BRIDGE_SRVCORE_GETMAXCLOCKSPEED);
 
 }

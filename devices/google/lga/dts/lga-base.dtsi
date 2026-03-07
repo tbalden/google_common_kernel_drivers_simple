@@ -306,20 +306,6 @@
 			multi-chan;
 		};
 
-		cpm_tracepoint {
-			compatible = "google,cpm-tracepoint";
-			// TODO(b/283179225): Workaround for the CPM address limitation
-			memory-region = <&cpm_tracepoint_ipc_dma>;
-			mba-dest-channel = <MBOX_DEST_CHAN_CPM_TRACEPOINT>;
-			/*
-			 * Buffer address on CPM side
-			 * remote-buff-addr =
-			 *	{CPM base address} + {CPM SRAM offset} + {CPM tracepoint offset}
-			 */
-			remote-buff-addr = <0x5219000>;
-			mboxes = <&goog_mba_cpm_iface>;
-		};
-
 		ODPM {
 			compatible = "google,odpm";
 			mba-dest-channel = <MBOX_DEST_CHAN_ODPM>;
@@ -732,7 +718,7 @@
 		compatible = "google,fwtp-cpm";
 		mboxes = <&goog_mba_cpm_iface>;
 		mba-dest-channel = <MBOX_DEST_CHAN_CPM_FWTP>;
-		memory-region = <&cpm_tracepoint_ipc_dma>;
+		memory-region = <&cpm_tracepoint_ipc_dma_buff>;
 		tracepoint-list = "cpm", "cap";
 	};
 

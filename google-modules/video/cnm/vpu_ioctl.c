@@ -1060,13 +1060,20 @@ static int vpu_mmap(struct file *fp, struct vm_area_struct *vm)
 	unsigned long pfn;
 	struct vpu_core *core =
 		container_of(fp->f_inode->i_cdev, struct vpu_core, cdev);
+	unsigned long size = vm->vm_end - vm->vm_start;
+
+	if (size > core->regs_size) {
+		dev_err(core->dev, "VPU mmap: requested size 0x%lx exceeds register size 0x%x\n",
+		       size, core->regs_size);
+		return -EINVAL;
+	}
 
 	vm_flags_set(vm, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
 	/* This is a CSRs mapping, use pgprot_device */
 	vm->vm_page_prot = pgprot_device(vm->vm_page_prot);
 	pfn = core->paddr >> PAGE_SHIFT;
 
-	return remap_pfn_range(vm, vm->vm_start, pfn, vm->vm_end-vm->vm_start, vm->vm_page_prot) ? -EAGAIN : 0;
+	return remap_pfn_range(vm, vm->vm_start, pfn, size, vm->vm_page_prot) ? -EAGAIN : 0;
 }
 
 static int vpu_open(struct inode *inode, struct file *file)

@@ -916,6 +916,23 @@ PVRSRVGetDevClockSpeedKM(CONNECTION_DATA * psConnection,
 	return eError;
 }
 
+/*
+	PVRSRVGetMaxClockSpeedKM
+*/
+PVRSRV_ERROR
+PVRSRVGetMaxClockSpeedKM(CONNECTION_DATA * psConnection,
+                         PVRSRV_DEVICE_NODE *psDeviceNode,
+                         IMG_PUINT32  pui32RGXClockSpeed)
+{
+	PVR_UNREFERENCED_PARAMETER(psConnection);
+	PVR_UNREFERENCED_PARAMETER(psDeviceNode);
+
+	*pui32RGXClockSpeed =
+		psDeviceNode->psDevConfig->sDVFS.sDVFSDevice.psDevFreq->scaling_max_freq;
+
+	return PVRSRV_OK;
+}
+
 
 /*
 	PVRSRVHWOpTimeoutKM
