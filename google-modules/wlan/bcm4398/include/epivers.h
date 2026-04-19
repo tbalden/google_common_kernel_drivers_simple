@@ -33,25 +33,25 @@
 
 #define EPI_RC_NUMBER		26u
 
-#define EPI_INCREMENTAL_NUMBER	35u
+#define EPI_INCREMENTAL_NUMBER	42u
 
-#define EPI_VERSION		(103, 101, 26, 35)
+#define EPI_VERSION		(103, 101, 26, 42)
 
-#define EPI_VERSION_NUM		0x67651a23u
+#define EPI_VERSION_NUM		0x67651a2au
 
-#define EPI_UNIQUE_NUM		0x67651a23u
+#define EPI_UNIQUE_NUM		0x67651a2au
 
 #define EPI_VERSION_DEV		(103.101.26)
 
 /* Driver Version String, ASCII, 32 chars max */
 #if defined(WLTEST)
-#define EPI_VERSION_STR		"103.101.26.35 (g07e1667 WLTEST)"
+#define EPI_VERSION_STR		"103.101.26.42 (g95fb5de WLTEST)"
 #elif (defined(BCMDBG_ASSERT) && \
 	!defined(BCMDBG_ASSERT_DISABLED) && \
 	!defined(ASSERT_FP_DISABLE))
-#define EPI_VERSION_STR		"103.101.26.35 (g07e1667 ASSRT)"
+#define EPI_VERSION_STR		"103.101.26.42 (g95fb5de ASSRT)"
 #else
-#define EPI_VERSION_STR		"103.101.26.35 (g07e1667)"
+#define EPI_VERSION_STR		"103.101.26.42 (g95fb5de)"
 #endif /* BCMINTERNAL */
 
 #endif /* _epivers_h_ */

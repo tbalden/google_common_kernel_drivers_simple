@@ -33,6 +33,7 @@ struct edgetpu_mapping_root {
 
 struct edgetpu_mapping {
 	struct gcip_iommu_mapping *gcip_mapping;
+	u64 host_addr; /* For edgetpu_host_map_show only. gcip_iommu_mapping has its own record. */
 	struct rb_node node;
 	edgetpu_map_flag_t flags; /* the flag passed by the runtime */
 	u32 mmu_flags;
@@ -137,12 +138,8 @@ void edgetpu_mappings_show(struct edgetpu_mapping_root *mappings,
 /* Returns gcip map flags based on @mmu_flags and @dir */
 static inline u64 mmu_flag_to_gcip_flags(u32 mmu_flags, enum dma_data_direction dir)
 {
-	u64 gcip_map_flags = 0;
-
-	if (mmu_flags & EDGETPU_MMU_COHERENT)
-		gcip_map_flags = GCIP_MAP_FLAGS_DMA_COHERENT_TO_FLAGS(true);
-	gcip_map_flags |= GCIP_MAP_FLAGS_DMA_DIRECTION_TO_FLAGS(dir);
-	return gcip_map_flags;
+	return gcip_iommu_encode_gcip_map_flags(dir, mmu_flags & EDGETPU_MMU_COHERENT, 0, false,
+						false);
 }
 
 /*

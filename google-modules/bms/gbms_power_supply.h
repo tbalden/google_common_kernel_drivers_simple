@@ -87,7 +87,6 @@ enum gbms_property {
 	GBMS_PROP_RESISTANCE_AVG,		/* GBMS google_resistance */
 	GBMS_PROP_BATTERY_AGE,			/* GBMS time in field */
 	GBMS_PROP_CAPACITY_FADE_RATE,		/* GBMS capacity fade rate by fullcapnom */
-	GBMS_PROP_CAPACITY_FADE_RATE_FCR,	/* GBMS capacity fade rate by fullcaprep */
 	GBMS_PROP_CHARGE_FULL_ESTIMATE,		/* GBMS google_capacity */
 	GBMS_PROP_WLC_OP_FREQ,			/* GBMS wlc frequency */
 	GBMS_PROP_WLC_VRECT,			/* GBMS wlc Vrect */
@@ -101,6 +100,8 @@ enum gbms_property {
 	GBMS_PROP_NEED_CHARGE_TO_FULL,		/* GBMS FG requests to bypass 80% limit */
 	GBMS_PROP_BD_TIME_SUM,			/* GBMS get temp-defend time sum */
 	GBMS_PROP_FG_EVENT_LOGGING,		/* GBMS FG event logging */
+	GBMS_PROP_CAPACITY_TO_CHARGER,		/* GBMS SOC for charge in boundary with spoof UI */
+	GBMS_PROP_DUAL_BATTERY_DC_STATE		/* GBMS dual battery disconnect state */
 };
 
 union gbms_propval {

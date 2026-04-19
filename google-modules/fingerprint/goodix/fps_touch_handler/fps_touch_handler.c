@@ -54,6 +54,7 @@ struct touch_event {
 	int id;
 	ktime_t ktime_mono;
 	bool updated;
+	ktime_t down_ktime_mono;
 };
 
 struct finger_detect_touch {
@@ -81,15 +82,15 @@ struct fth_drvdata {
 	struct mutex	fd_events_mutex;
 	struct finger_detect_touch fd_touch;
 	uint32_t current_slot_state[FTH_MAX_FINGERS];
-	DECLARE_KFIFO(fd_events, struct fth_touch_event_v6, FTH_MAX_FD_EVENTS);
+	DECLARE_KFIFO(fd_events, struct fth_touch_event_v7, FTH_MAX_FD_EVENTS);
 	wait_queue_head_t read_wait_queue_fd;
-	struct fth_fd_buf scrath_buf;
+	struct fth_fd_buf_v7 scrath_buf;
 	atomic_t wakelock_acquired;
 	bool lptw_event_report_enabled;
 };
 
 static void fth_fd_report_event(struct fth_drvdata *drvdata,
-		struct fth_touch_event_v6 *event)
+		struct fth_touch_event_v7 *event)
 {
 	if (!drvdata || !event) {
 		pr_err("NULL ptr passed\n");
@@ -192,6 +193,7 @@ static void fth_touch_report_event(struct input_handle *handle,
 	struct finger_detect_touch *fd_touch = &drvdata->fd_touch;
 	struct touch_event *event = NULL;
 	static bool report_event = true;
+	struct input_dev *dev = handle->dev;
 
 	if (!fd_touch->config.touch_fd_enable)
 		return;
@@ -222,6 +224,9 @@ static void fth_touch_report_event(struct input_handle *handle,
 	case ABS_MT_TRACKING_ID:
 		pr_debug("ABS_MT_TRACKING_ID:%d\n", value);
 		event->id = value;
+		/* A non-negative tracking ID signifies a new touch contact. */
+		event->down_ktime_mono = (value >= 0) ? dev->timestamp[INPUT_CLK_MONO] : 0;
+		pr_debug("ABS_MT down time:%lld\n", ktime_to_ms(event->down_ktime_mono));
 		report_event = false;
 		break;
 	case ABS_MT_POSITION_X:
@@ -273,7 +278,6 @@ static void fth_touch_report_event(struct input_handle *handle,
 					FTH_MAX_FINGERS * sizeof(
 					struct touch_event));
 		} else {
-			struct input_dev *dev = handle->dev;
 			event->ktime_mono = dev->timestamp[INPUT_CLK_MONO];
 			pm_stay_awake(drvdata->dev);
 			schedule_work(&drvdata->fd_touch.work);
@@ -344,7 +348,7 @@ static void fth_touch_work_func(struct work_struct *work)
 	struct fth_touch_config_v6 *large_config = NULL;
 	struct finger_detect_touch *fd_touch = NULL;
 	struct touch_event current_event, last_event;
-	struct fth_touch_event_v6 finger_event = {0};
+	struct fth_touch_event_v7 finger_event = {0};
 	bool in_small_aoi = false;
 	bool in_large_aoi = false;
 	int slot = 0;
@@ -361,6 +365,8 @@ static void fth_touch_work_func(struct work_struct *work)
 		if (fd_touch->current_events[slot].id >= 0) {
 			finger_event.X[slot] = fd_touch->current_events[slot].X;
 			finger_event.Y[slot] = fd_touch->current_events[slot].Y;
+			finger_event.down_time_us[slot] =
+				ktime_to_us(fd_touch->current_events[slot].down_ktime_mono);
 			finger_event.updated[slot] = true;
 			finger_event.num_fingers++;
 		}
@@ -379,30 +385,30 @@ static void fth_touch_work_func(struct work_struct *work)
 				sizeof(current_event));
 		if (current_event.id < 0) {
 			// -1 corresponds to finger being lifted.
-			finger_event.state = FTH_EVENT_FINGER_UP;
+			finger_event.state = FTH_TOUCH_STATE_UP;
 		} else if ((last_event.id < 0) && (current_event.id >= 0)) {
 			// The finger was previously up, and is now down.
-			finger_event.state = FTH_EVENT_FINGER_DOWN;
+			finger_event.state = FTH_TOUCH_STATE_DOWN;
 		} else if (last_event.id == current_event.id){
-			finger_event.state = FTH_EVENT_FINGER_MOVE;
+			finger_event.state = FTH_TOUCH_STATE_MOVE;
 		} else {
 			// Somehow got incrementing ids with no -1 between.
 			pr_warn("finger up got missed, reporting finger down\n");
-			finger_event.state = FTH_EVENT_FINGER_DOWN;
+			finger_event.state = FTH_TOUCH_STATE_DOWN;
 		}
 		// Do filtering to update state and only report events of interest.
 		in_small_aoi = fth_touch_filter_aoi_region(&current_event, config);
 		in_large_aoi = fth_touch_filter_aoi_region(&current_event, large_config);
 		if (!(*is_finger_in)) {
 			if (in_small_aoi && !(current_event.id < 0)) {
-					finger_event.state = FTH_EVENT_FINGER_DOWN;
+					finger_event.state = FTH_TOUCH_STATE_DOWN;
 					*is_finger_in = true;
 			} else {
 				if (drvdata->lptw_event_report_enabled) {
 					pr_debug("lptw finger_event.state:%d\n",
 							finger_event.state);
-					if (finger_event.state == FTH_EVENT_FINGER_DOWN) {
-						finger_event.state = FTH_EVENT_FINGER_MOVE;
+					if (finger_event.state == FTH_TOUCH_STATE_DOWN) {
+						finger_event.state = FTH_TOUCH_STATE_MOVE;
 					}
 				} else {
 					// Don't report.
@@ -414,14 +420,14 @@ static void fth_touch_work_func(struct work_struct *work)
 			if (current_event.id < 0) {
 				*is_finger_in = false;
 			} else if (!in_large_aoi) {
-					finger_event.state = FTH_EVENT_FINGER_UP;
+					finger_event.state = FTH_TOUCH_STATE_UP;
 					*is_finger_in = false;
 			}
 			// Report event.
 		}
 
 		// Radius filtering on moves to limit report frequency.
-		if (finger_event.state == FTH_EVENT_FINGER_MOVE &&
+		if (finger_event.state == FTH_TOUCH_STATE_MOVE &&
 				!fth_touch_filter_by_radius(drvdata,
 				&current_event,	&last_event, slot)) {
 			// Don't report if not enough movement since last move.
@@ -435,7 +441,7 @@ static void fth_touch_work_func(struct work_struct *work)
 			finger_event.orientation = current_event.orientation;
 		}
 		finger_event.time_us = ktime_to_us(current_event.ktime_mono);
-		if (finger_event.state != FTH_EVENT_FINGER_MOVE) {
+		if (finger_event.state != FTH_TOUCH_STATE_MOVE) {
 			drvdata->current_slot_state[slot] = finger_event.state;
 		}
 		if (config->touch_fd_enable) {
@@ -597,7 +603,7 @@ static long fth_ioctl(
 	case FTH_IOCTL_GET_TOUCH_FD_VERSION:
 	{
 		struct fth_touch_fd_version version;
-		version.version = FTH_TOUCH_FD_VERSION_6;
+		version.version = FTH_TOUCH_FD_VERSION_7;
 		rc = copy_to_user((void __user *)priv_arg,
 				&version, sizeof(version));
 		if (rc != 0) {
@@ -607,7 +613,7 @@ static long fth_ioctl(
 		}
 		break;
 	}
-	case FTH_IOCTL_CONFIGURE_TOUCH_FD_V6:
+	case FTH_IOCTL_CONFIGURE_TOUCH_FD_V7:
 	{
 		__s32 version;
 		if (copy_from_user(&drvdata->fd_touch.config.version,
@@ -619,7 +625,7 @@ static long fth_ioctl(
 			goto end;
 		}
 		version = drvdata->fd_touch.config.version.version;
-		if (version != FTH_TOUCH_FD_VERSION_6) {
+		if (version != FTH_TOUCH_FD_VERSION_7) {
 			rc = -EINVAL;
 			pr_err("unsupported version %d\n",
 					drvdata->fd_touch.config.version.version);
@@ -663,6 +669,20 @@ static long fth_ioctl(
 			drvdata->fd_touch.up_config.bottom);
 		break;
 	}
+	case FTH_IOCTL_GET_TOUCH_DEVICE_STATUS:
+	{
+		struct fth_touch_device_status status;
+
+		status.is_connected = drvdata->input_touch_dev != NULL;
+		rc = copy_to_user((void __user *)priv_arg,
+				&status, sizeof(status));
+		if (rc != 0) {
+			pr_err("Failed to copy touch device status: %d\n", rc);
+			rc = -EFAULT;
+			goto end;
+		}
+		break;
+	}
 	default:
 		pr_err("invalid cmd %d\n", cmd);
 		rc = -ENOIOCTLCMD;
@@ -688,9 +708,9 @@ static int get_events_fifo_len_locked(
 static ssize_t fth_read(struct file *filp, char __user *ubuf,
 		size_t cnt, loff_t *ppos)
 {
-	struct fth_touch_event_v6 *fd_evt;
+	struct fth_touch_event_v7 *fd_evt;
 	struct fth_drvdata *drvdata;
-	struct fth_fd_buf *scratch_buf;
+	struct fth_fd_buf_v7 *scratch_buf;
 	wait_queue_head_t *read_wait_queue = NULL;
 	int i = 0;
 	int minor_no = -1;
@@ -855,7 +875,7 @@ err_alloc:
  */
 static void fth_lptw_report_event(int state, int x, int y, int major, int minor,
 	int orientation) {
-	struct fth_touch_event_v6 event;
+	struct fth_touch_event_v7 event;
 	struct fth_drvdata *drvdata = fth_touch_handler.private;
 
 	memset(&event, 0, sizeof(event));

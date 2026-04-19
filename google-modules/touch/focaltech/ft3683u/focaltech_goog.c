@@ -69,6 +69,7 @@ static int goog_enter_deep_sleep_mode(struct fts_ts_data *ts_data)
 
     if (i >= 200) {
         FTS_ERROR("Enter deep sleep failed");
+        ret = -ETIMEDOUT;
         goto exit;
     } else {
         FTS_INFO("Enter deep sleep (%d ms)", i);
@@ -170,7 +171,7 @@ static int goog_fts_ts_suspend(struct device *dev)
 
         FTS_DEBUG("make TP enter into sleep mode");
         ret = goog_enter_deep_sleep_mode(ts_data);
-        ts_data->is_deepsleep = true;
+        ts_data->is_deepsleep = !ret;
         if (ret < 0) {
             FTS_ERROR("set TP to sleep mode fail, ret=%d", ret);
             continue;

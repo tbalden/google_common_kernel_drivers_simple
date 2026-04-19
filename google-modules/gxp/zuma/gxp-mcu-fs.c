@@ -28,10 +28,13 @@
 #include "gxp-uci.h"
 #include "gxp.h"
 
-static int gxp_mcu_fs_send_uci_cmd(struct gxp_client *client, u64 cmd_seq, u32 flags,
+static int gxp_mcu_fs_send_uci_cmd(struct gxp_client *client, u64 *cmd_seq, u32 flags,
 				   const u8 *opaque, u32 timeout_ms,
 				   struct gcip_fence_array *in_fences,
-				   struct gcip_fence_array *out_fences, const char *ioctl_name)
+				   struct gcip_fence_array *out_fences,
+				   struct gcip_fence_array *mid_in_fences,
+				   struct gcip_fence_array *mid_out_fences, u32 *mid_in_fence_fds,
+				   u32 *mid_out_fence_fds, const char *ioctl_name)
 {
 	struct gxp_dev *gxp = client->gxp;
 	int ret;
@@ -50,7 +53,8 @@ static int gxp_mcu_fs_send_uci_cmd(struct gxp_client *client, u64 cmd_seq, u32 f
 		goto out;
 	}
 
-	ret = gxp_uci_send_cmd(client, cmd_seq, flags, opaque, timeout_ms, in_fences, out_fences);
+	ret = gxp_uci_send_cmd(client, cmd_seq, flags, opaque, timeout_ms, in_fences, out_fences,
+			       mid_in_fences, mid_out_fences, mid_in_fence_fds, mid_out_fence_fds);
 	if (ret)
 		dev_err(gxp->dev, "Failed to request an UCI command (ret=%d)", ret);
 out:
@@ -63,18 +67,14 @@ static int gxp_ioctl_uci_command_compat(struct gxp_client *client,
 					struct gxp_mailbox_uci_command_compat_ioctl __user *argp)
 {
 	struct gxp_mailbox_uci_command_compat_ioctl ibuf;
-	struct gxp_dev *gxp = client->gxp;
-	struct gxp_mcu *mcu = gxp_mcu_of(gxp);
 	u64 cmd_seq;
 	int ret;
 
 	if (copy_from_user(&ibuf, argp, sizeof(ibuf)))
 		return -EFAULT;
 
-	cmd_seq = gcip_mailbox_inc_seq_num(mcu->uci.mbx->mbx_impl.gcip_mbx, 1);
-
-	ret = gxp_mcu_fs_send_uci_cmd(client, cmd_seq, 0, ibuf.opaque, 0, NULL, NULL,
-				      "GXP_MAILBOX_UCI_COMMAND_COMPAT");
+	ret = gxp_mcu_fs_send_uci_cmd(client, &cmd_seq, 0, ibuf.opaque, 0, NULL, NULL, NULL, NULL,
+				      NULL, NULL, "GXP_MAILBOX_UCI_COMMAND_COMPAT");
 	if (ret)
 		return ret;
 
@@ -114,18 +114,15 @@ static int get_num_fences(const int *fences)
 static int gxp_ioctl_uci_command(struct gxp_client *client,
 				 struct gxp_mailbox_uci_command_ioctl __user *argp)
 {
-	struct gxp_mcu *mcu = gxp_mcu_of(client->gxp);
 	struct gxp_mailbox_uci_command_ioctl ibuf;
-	struct gcip_fence_array *in_fences, *out_fences;
-	u64 cmd_seq;
-	int ret, num_in_fences, num_out_fences;
+	struct gcip_fence_array *in_fences, *out_fences, *mid_in_fences, *mid_out_fences;
+	u64 cmd_seq = 0;
+	int ret, num_in_fences, num_out_fences, num_mid_in_fences, num_mid_out_fences;
 
 	if (copy_from_user(&ibuf, argp, sizeof(ibuf)))
 		return -EFAULT;
 
-	cmd_seq = gcip_mailbox_inc_seq_num(mcu->uci.mbx->mbx_impl.gcip_mbx, 1);
-
-	trace_gxp_uci_cmd_start(cmd_seq);
+	trace_gxp_uci_cmd_start(0);
 
 	num_in_fences = get_num_fences(ibuf.in_fences);
 	if (num_in_fences < 0)
@@ -134,6 +131,14 @@ static int gxp_ioctl_uci_command(struct gxp_client *client,
 	num_out_fences = get_num_fences(ibuf.out_fences);
 	if (num_out_fences < 0)
 		return num_out_fences;
+
+	num_mid_in_fences = get_num_fences(ibuf.mid_in_fences);
+	if (num_mid_in_fences < 0)
+		return num_mid_in_fences;
+
+	num_mid_out_fences = get_num_fences(ibuf.mid_out_fences);
+	if (num_mid_out_fences < 0)
+		return num_mid_out_fences;
 
 	in_fences = gcip_fence_array_create(ibuf.in_fences, num_in_fences, true);
 	if (IS_ERR(in_fences))
@@ -145,8 +150,25 @@ static int gxp_ioctl_uci_command(struct gxp_client *client,
 		return PTR_ERR(out_fences);
 	}
 
-	ret = gxp_mcu_fs_send_uci_cmd(client, cmd_seq, ibuf.flags, ibuf.opaque, ibuf.timeout_ms,
-				      in_fences, out_fences, "GXP_MAILBOX_UCI_COMMAND");
+	mid_in_fences = gcip_fence_array_create(ibuf.mid_in_fences, num_mid_in_fences, false);
+	if (IS_ERR(mid_in_fences)) {
+		gcip_fence_array_put(out_fences);
+		gcip_fence_array_put(in_fences);
+		return PTR_ERR(mid_in_fences);
+	}
+
+	mid_out_fences = gcip_fence_array_create(ibuf.mid_out_fences, num_mid_out_fences, false);
+	if (IS_ERR(mid_out_fences)) {
+		gcip_fence_array_put(mid_in_fences);
+		gcip_fence_array_put(out_fences);
+		gcip_fence_array_put(in_fences);
+		return PTR_ERR(mid_out_fences);
+	}
+
+	ret = gxp_mcu_fs_send_uci_cmd(client, &cmd_seq, ibuf.flags, ibuf.opaque, ibuf.timeout_ms,
+				      in_fences, out_fences, mid_in_fences, mid_out_fences,
+				      ibuf.mid_in_fences, ibuf.mid_out_fences,
+				      "GXP_MAILBOX_UCI_COMMAND");
 	if (ret)
 		goto out;
 
@@ -156,6 +178,8 @@ static int gxp_ioctl_uci_command(struct gxp_client *client,
 		ret = -EFAULT;
 
 out:
+	gcip_fence_array_put(mid_out_fences);
+	gcip_fence_array_put(mid_in_fences);
 	gcip_fence_array_put(out_fences);
 	gcip_fence_array_put(in_fences);
 

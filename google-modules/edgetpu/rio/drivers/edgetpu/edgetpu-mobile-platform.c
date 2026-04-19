@@ -21,6 +21,7 @@
 #include "edgetpu-config.h"
 #include "edgetpu-devfreq.h"
 #include "edgetpu-dmabuf.h"
+#include "edgetpu-dt-mailbox-adapter.h"
 #include "edgetpu-firmware.h"
 #include "edgetpu-ikv.h"
 #include "edgetpu-internal.h"
@@ -111,6 +112,7 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	mutex_init(&etmdev->tz_mailbox_lock);
 	etdev = &etmdev->edgetpu_dev;
+	etdev->commit_hash = get_driver_commit();
 	platform_set_drvdata(pdev, etdev);
 	etdev->dev = dev;
 	etdev->num_cores = EDGETPU_NUM_CORES;
@@ -123,6 +125,8 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+	/* Initialize any potential offset between `regs` and the base of TPU_TOP first. */
+	edgetpu_dt_mailbox_adapter_init_regs_offset_from_top(etdev);
 	regs.phys = r->start;
 	regs.size = resource_size(r);
 	regs.mem = devm_ioremap_resource(dev, r);
@@ -146,7 +150,7 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = edgetpu_device_add(etdev, &regs, iface_params, ARRAY_SIZE(iface_params));
+	ret = edgetpu_device_add(etdev, &regs, ARRAY_SIZE(iface_params));
 	if (ret) {
 		dev_err(dev, "edgetpu device add failed: %d", ret);
 		goto out_cleanup_fw_region;
@@ -175,20 +179,31 @@ static int edgetpu_mobile_platform_probe(struct platform_device *pdev)
 	ret = edgetpu_sync_fence_manager_create(etdev);
 	if (ret) {
 		etdev_err(etdev, "Failed to create DMA fence manager: %d", ret);
-		goto out_destroy_thermal;
+		goto out_destroy_devfreq;
 	}
 
 	edgetpu_soc_post_power_on_init(etdev);
-	dev_info(dev, "%s edgetpu initialized. Build: %s", etdev->dev_name, get_driver_commit());
 
 	/* Turn the device off unless a client request is already received. */
 	edgetpu_pm_shutdown(etdev, false);
+
+	/*
+	 * edgetpu_fs_add() should be the very last line of probe(), since once it succeeds,
+	 * user-space can interact with the device through devtmpfs.
+	 */
+	ret = edgetpu_fs_add(etdev, iface_params, ARRAY_SIZE(iface_params));
+	if (ret) {
+		dev_err(etdev->dev, "%s: edgetpu_fs_add returns %d\n", etdev->dev_name, ret);
+		goto out_destroy_devfreq;
+	}
+
+	dev_info(dev, "%s edgetpu initialized. Build: %s", etdev->dev_name, etdev->commit_hash);
 
 	edgetpu_debug_pointer = etdev;
 
 	return 0;
 
-out_destroy_thermal:
+out_destroy_devfreq:
 	edgetpu_devfreq_destroy(etdev);
 	edgetpu_thermal_destroy(etdev);
 	edgetpu_firmware_destroy(etdev);
@@ -204,6 +219,7 @@ static void edgetpu_mobile_platform_remove(struct platform_device *pdev)
 	struct edgetpu_dev *etdev = platform_get_drvdata(pdev);
 	struct edgetpu_mobile_platform_dev *etmdev = to_mobile_dev(etdev);
 
+	edgetpu_fs_remove(etdev);
 	edgetpu_devfreq_destroy(etdev);
 	edgetpu_thermal_destroy(etdev);
 	edgetpu_firmware_destroy(etdev);

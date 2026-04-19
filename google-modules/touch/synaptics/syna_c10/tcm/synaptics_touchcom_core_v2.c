@@ -102,7 +102,7 @@ static int syna_tcm_v2_set_max_read_size(struct tcm_dev *tcm_dev)
 	if (rd_size == tcm_dev->max_rd_size)
 		return 0;
 
-	tcm_dev->max_rd_size = MIN(rd_size, tcm_dev->max_rd_size);
+	tcm_dev->max_rd_size = min(rd_size, tcm_dev->max_rd_size);
 
 	LOGD("max_rd_size = %d\n", tcm_dev->max_rd_size);
 
@@ -160,7 +160,7 @@ static int syna_tcm_v2_parse_idinfo(struct tcm_dev *tcm_dev,
 			sizeof(struct tcm_identification_info),
 			data,
 			size,
-			MIN(sizeof(*id_info), data_len));
+			min(sizeof(*id_info), data_len));
 	if (retval < 0) {
 		LOGE("Fail to copy identification info\n");
 		return retval;
@@ -169,7 +169,7 @@ static int syna_tcm_v2_parse_idinfo(struct tcm_dev *tcm_dev,
 	build_id = syna_pal_le4_to_uint(id_info->build_id);
 
 	wr_size = syna_pal_le2_to_uint(id_info->max_write_size);
-	tcm_dev->max_wr_size = MIN(wr_size, WR_CHUNK_SIZE);
+	tcm_dev->max_wr_size = min(wr_size, WR_CHUNK_SIZE);
 	if (tcm_dev->max_wr_size == 0) {
 		tcm_dev->max_wr_size = wr_size;
 		LOGD("max_wr_size = %d\n", tcm_dev->max_wr_size);

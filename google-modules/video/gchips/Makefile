@@ -13,9 +13,9 @@ M ?= $(shell pwd)
 
 KBUILD_OPTIONS += CONFIG_BIGWAVE=m ENABLE_SLC=y
 
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 
-EXTRA_CFLAGS += -I$(KERNEL_SRC)/../private/google-modules/video/gchips/include
+EXTRA_CFLAGS += -I$(ROOT_DIR)/private/google-modules/video/gchips/include
 EXTRA_CFLAGS += -DENABLE_SLC=1
 
 modules modules_install headers_install clean compile_commands.json:

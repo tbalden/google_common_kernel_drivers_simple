@@ -29,29 +29,29 @@
 
 #define EPI_MAJOR_VERSION	103u
 
-#define EPI_MINOR_VERSION	10u
+#define EPI_MINOR_VERSION	511u
 
-#define EPI_RC_NUMBER		407u
+#define EPI_RC_NUMBER		77u
 
-#define EPI_INCREMENTAL_NUMBER	48u
+#define EPI_INCREMENTAL_NUMBER	13u
 
-#define EPI_VERSION		(103, 10, 407, 48)
+#define EPI_VERSION		(103, 511, 77, 13)
 
-#define EPI_VERSION_NUM		0x670a1973u
+#define EPI_VERSION_NUM		0x671ff4d0u
 
-#define EPI_UNIQUE_NUM		0x670a19730u
+#define EPI_UNIQUE_NUM		0x671ff4d0du
 
-#define EPI_VERSION_DEV		(103.10.407)
+#define EPI_VERSION_DEV		(103.511.77)
 
 /* Driver Version String, ASCII, 32 chars max */
 #if defined(WLTEST)
-#define EPI_VERSION_STR		"103.10.407.48 (g37377a2 WLTEST)"
+#define EPI_VERSION_STR		"103.511.77.13 (g85cfd32 WLTEST)"
 #elif (defined(BCMDBG_ASSERT) && \
 	!defined(BCMDBG_ASSERT_DISABLED) && \
 	!defined(ASSERT_FP_DISABLE))
-#define EPI_VERSION_STR		"103.10.407.48 (g37377a2 ASSRT)"
+#define EPI_VERSION_STR		"103.511.77.13 (g85cfd32 ASSRT)"
 #else
-#define EPI_VERSION_STR		"103.10.407.48 (g37377a2)"
+#define EPI_VERSION_STR		"103.511.77.13 (g85cfd32)"
 #endif /* BCMINTERNAL */
 
 #endif /* _epivers_h_ */

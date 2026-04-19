@@ -14,9 +14,11 @@
 #include <iif/iif-dma-fence.h>
 #include <iif/iif-shared.h>
 
+#include "edgetpu-firmware.h"
 #include "edgetpu-ikv-mailbox-ops.h"
 #include "edgetpu-ikv.h"
 #include "edgetpu-iremap-pool.h"
+#include "edgetpu-kci.h"
 #include "edgetpu-mailbox.h"
 #include "edgetpu-vii-packet.h"
 
@@ -313,6 +315,7 @@ static void edgetpu_ikv_handle_awaiter_timedout(struct gcip_mailbox *mailbox,
 	u64 data = (u64)ikv->command_timeout_ms;
 
 	etdev_warn(ikv->etdev, "IKV seq %llu timed out", ikv_resp->client_seq);
+	edgetpu_firmware_log_state(ikv->etdev);
 	edgetpu_ikv_process_response(ikv_resp, &code, &data, -ETIMEDOUT, false);
 }
 
@@ -337,7 +340,7 @@ static void edgetpu_ikv_handle_awaiter_flushed(struct gcip_mailbox *mailbox,
 	/* Signal any out-fence, but skip the device group since it's being flushed. */
 	signal_response_waiters(ikv_resp, -ECANCELED, false);
 
-	gcip_mailbox_release_awaiter(awaiter);
+	gcip_mailbox_awaiter_put(awaiter);
 }
 
 static void edgetpu_ikv_release_awaiter_data(void *data)

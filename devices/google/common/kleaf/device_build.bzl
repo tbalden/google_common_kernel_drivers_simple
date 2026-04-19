@@ -4,6 +4,8 @@
 Define build targets for a device.
 """
 
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@bazel_skylib//rules:select_file.bzl", "select_file")
 load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 load(
     "//build/kernel/kleaf:kernel.bzl",
@@ -137,6 +139,7 @@ def device_build(
     target_defconfig_fragments = "{}/defconfig_fragments".format(name)
     target_kernel_sources = "{}/kernel_sources".format(name)
     target_dtstree = "{}/dtstree".format(name)
+    target_kmi_symbol_list = "{}/kmi_symbol_list".format(name)
     target_kernel = "{}/kernel".format(name)
     target_dtbs = "{}/dtbs".format(name)
     target_dtbos = "{}/dtbos".format(name)
@@ -160,6 +163,8 @@ def device_build(
     target_merged_dlkm_modules_blocklist = "{}/merged_dlkm_modules_blocklist".format(name)
     target_insmod_cfgs = "{}/insmod_cfgs".format(name)
     target_kernel_images = "{}/kernel_images".format(name)
+    target_boot_image_selection = "{}/boot_image_selection".format(name)
+    target_boot_image = "{}/boot_image".format(name)
     target_dtb_image = "{}/dtb_image".format(name)
     target_dist_files = "{}/dist_files".format(name)
     target_dist = "{}/dist".format(name)
@@ -212,6 +217,12 @@ def device_build(
             visibility = ["//visibility:private"],
         )
 
+    select_file(
+        name = target_kmi_symbol_list,
+        srcs = "//common:aarch64_additional_kmi_symbol_lists",
+        subpath = "android/abi_gki_aarch64_pixel",
+    )
+
     kernel_build(
         name = target_kernel,
         srcs = [target_kernel_sources],
@@ -225,7 +236,7 @@ def device_build(
         defconfig_fragments = [target_defconfig_fragments],
         kconfig_ext = target_kconfig_ext,
         make_goals = ["modules", "dtbs"],
-        kmi_symbol_list = "//common:pixel_symbol_list",
+        kmi_symbol_list = target_kmi_symbol_list,
         module_outs = module_outs,
         strip_modules = True,
         visibility = ["//visibility:private"],
@@ -408,7 +419,22 @@ def device_build(
         visibility = ["//visibility:private"],
     )
 
+    select_file(
+        name = target_boot_image_selection,
+        srcs = "//common:kernel_aarch64_gki_artifacts",
+        subpath = "boot-lz4.img",
+        visibility = ["//visibility:private"],
+    )
+
+    copy_file(
+        name = target_boot_image,
+        src = target_boot_image_selection,
+        out = "{}/boot.img".format(name),
+        visibility = ["//visibility:private"],
+    )
+
     dist_targets = [
+        target_boot_image,
         target_dtbs,
         target_dtbos,
         target_insmod_cfgs,
@@ -416,12 +442,11 @@ def device_build(
         target_kernel_images,
         target_kernel_modules_install,
         target_kernel_unstripped_modules_archive,
+        target_kmi_symbol_list,
         target_merged_ddk_uapi_headers,
         target_merged_kernel_and_ddk_uapi_headers,
         "//common:kernel_aarch64",
-        "//common:kernel_aarch64_gki_boot_image",
         "//common:kernel_aarch64_headers",
-        "//common:pixel_symbol_list",
         "//private/devices/google/common:kernel_gki_modules",
     ]
 
@@ -447,10 +472,10 @@ def device_build(
         dist_targets.append(target_dtb_image)
 
     dist_targets += select({
-        "//private/devices/google/common:enable_download_fips140": [
+        "//private/devices/google/common:use_prebuilt_fips140_is_true": [
             "//private/devices/google/common:fips140",
         ],
-        "//private/devices/google/common:disable_download_fips140": [],
+        "//conditions:default": [],
     })
 
     native.filegroup(

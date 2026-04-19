@@ -196,6 +196,9 @@ phys_addr_t edgetpu_firmware_fw_region_paddr(struct edgetpu_dev *etdev);
 /* Return size of entire FW remap region. */
 size_t edgetpu_firmware_fw_region_size(struct edgetpu_dev *etdev);
 
+/* Tell firmware to log state. */
+void edgetpu_firmware_log_state(struct edgetpu_dev *etdev);
+
 #if IS_ENABLED(CONFIG_EDGETPU_TEST)
 /* Used by unit tests to set a mocked GSA device. */
 void edgetpu_firmware_set_fake_gsa_dev(struct edgetpu_dev *etdev, struct device *gsa_dev);

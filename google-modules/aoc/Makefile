@@ -8,7 +8,7 @@ KBUILD_OPTIONS	+= CONFIG_AOC_DRIVER=m CONFIG_WC_MBOX=m \
 		  CONFIG_AOC_CONTROL_DRIVER=m CONFIG_AOC_UWB_DRIVER=m \
 		  CONFIG_AOC_TBN_DRIVER=m CONFIG_AOC_UNIT_TEST_DRIVER=m \
 
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 
 modules modules_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 \

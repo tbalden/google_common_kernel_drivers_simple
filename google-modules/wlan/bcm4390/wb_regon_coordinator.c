@@ -131,8 +131,6 @@ struct wbrc_pvt_data {
 
 #define WBRC_CHKCHIP(chipid) ((chipid) != (0x4390))
 
-#define	MIN(a, b)	(((a) < (b)) ? (a) : (b))
-
 #ifdef WBRC_HW_QUIRKS
 static void
 wbrc_delay(uint msec)
@@ -535,7 +533,11 @@ wbrc_init(void)
 		goto err_register;
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0))
+	wbrc_data->wbrc_bt_dev_class = class_create(CLASS_NAME);
+#else
 	wbrc_data->wbrc_bt_dev_class = class_create(THIS_MODULE, CLASS_NAME);
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)) */
 	err = PTR_ERR(wbrc_data->wbrc_bt_dev_class);
 	if (IS_ERR(wbrc_data->wbrc_bt_dev_class)) {
 		pr_alert("Failed to register device class\n");

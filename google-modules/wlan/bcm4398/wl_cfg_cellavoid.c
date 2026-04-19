@@ -1579,6 +1579,11 @@ wl_cellavoid_handle_apsta_concurrency(struct bcm_cfg80211 *cfg)
 					WL_INFORM_MEM(("AP %s down to prevent beaconing\n",
 						ndev->name));
 					wl_cfg80211_bss_up(cfg, ndev, bssidx, 0);
+
+					if (delayed_work_pending(&cfg->ap_work)) {
+						dhd_cancel_delayed_work_sync(&cfg->ap_work);
+						WL_DBG(("cancelled ap_work\n"));
+					}
 				}
 			}
 		}

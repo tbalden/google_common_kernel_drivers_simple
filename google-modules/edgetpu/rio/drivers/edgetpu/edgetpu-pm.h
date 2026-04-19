@@ -30,6 +30,14 @@ struct edgetpu_pm {
 	struct mutex freq_limits_lock;
 	u32 min_freq;
 	u32 max_freq;
+	/*
+	 * If true the device is never powered down, and no PM hardware blocks (such as LPB on
+	 * Destiny SoCs) may be accessed directly.  This is used on emulation platforms or testing
+	 * configurations with no PM hardware emulated/simulated, or if PM is disabled (such as to
+	 * workaround bugs).
+	 * TODO(b/432319195): add explanation of how the code behaves in more detail.
+	 */
+	bool always_on;
 };
 
 extern const struct dev_pm_ops edgetpu_pm_ops;
@@ -76,6 +84,15 @@ static inline int edgetpu_pm_get_flags(struct edgetpu_dev *etdev, enum gcip_pm_f
 static inline void edgetpu_pm_put(struct edgetpu_dev *etdev)
 {
 	gcip_pm_put(etdev->pm->gpm);
+}
+
+/*
+ * Decreases @pm->count and powers off the device if @pm->count reaches zero, asynchronously in a
+ * worker.  Wrapper for gcip_pm_put_async.
+ */
+static inline void edgetpu_pm_put_async(struct edgetpu_dev *etdev)
+{
+	gcip_pm_put_async(etdev->pm->gpm);
 }
 
 /*
@@ -126,6 +143,12 @@ static inline int edgetpu_pm_trylock(struct edgetpu_dev *etdev)
 static inline void edgetpu_pm_unlock(struct edgetpu_dev *etdev)
 {
 	gcip_pm_unlock(etdev->pm->gpm);
+}
+
+/* Return true if power management is disabled on the platform / unit tests. */
+static inline bool edgetpu_pm_always_on(struct edgetpu_dev *etdev)
+{
+	return etdev->pm->always_on;
 }
 
 /**

@@ -2959,6 +2959,12 @@ reg_update_usable_chan_resp(struct wlan_objmgr_pdev *pdev,
 				0, &ch_params);
 		res_msg[index].freq = (qdf_freq_t)pcl_ch[i];
 		res_msg[index].iface_mode_mask |= 1 << iface_mode_mask;
+#if defined(CONFIG_WCN_GOOGLE)
+		// 6GHz channels are only supported in station mode
+		if (reg_is_6ghz_chan_freq(res_msg[index].freq)) {
+			res_msg[index].iface_mode_mask &= (1 << IFTYPE_STATION);
+		}
+#endif
 		res_msg[index].bw = ch_params.ch_width;
 		if (ch_params.center_freq_seg0)
 			res_msg[index].seg0_freq =
@@ -3214,6 +3220,13 @@ reg_skip_invalid_chan_freq(struct wlan_objmgr_pdev *pdev,
 								chan_enum);
 				}
 			}
+#if defined(CONFIG_WCN_GOOGLE)
+			// Clean up 6GHz channels
+			if (reg_is_6ghz_chan_freq(res_msg[chan_enum].freq)) {
+				if (!res_msg[chan_enum].iface_mode_mask)
+					reg_remove_freq(res_msg, chan_enum);
+			}
+#endif
 		}
 
 		iface_mode_mask &= ~iface_mode;
@@ -3366,6 +3379,12 @@ reg_add_usable_channel_to_resp(struct wlan_objmgr_pdev *pdev,
 			reg_err("invalid iface mask");
 			return QDF_STATUS_E_FAILURE;
 		}
+#if defined(CONFIG_WCN_GOOGLE)
+		// 6GHz channels are only supported in station mode
+		if (reg_is_6ghz_chan_freq(res_msg[chan_enum].freq)) {
+			res_msg[chan_enum].iface_mode_mask &= (1 << IFTYPE_STATION);
+		}
+#endif
 		res_msg[chan_enum].bw = ch_params.ch_width;
 		res_msg[chan_enum].state = chan_list[chan_enum].state;
 		if (ch_params.center_freq_seg0)

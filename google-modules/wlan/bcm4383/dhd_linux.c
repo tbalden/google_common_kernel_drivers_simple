@@ -16701,8 +16701,6 @@ dhd_dev_get_feature_set(struct net_device *dev)
 		feature_set |= WIFI_FEATURE_INFRA_5G;
 	if (FW_SUPPORTED(dhd, p2p))
 		feature_set |= WIFI_FEATURE_P2P;
-	if (dhd->op_mode & DHD_FLAG_HOSTAP_MODE)
-		feature_set |= WIFI_FEATURE_SOFT_AP;
 	if (FW_SUPPORTED(dhd, tdls))
 		feature_set |= WIFI_FEATURE_TDLS;
 	if (FW_SUPPORTED(dhd, vsdb))
@@ -16773,7 +16771,12 @@ dhd_dev_get_feature_set(struct net_device *dev)
 #endif /* ROAMEXP_SUPPORT */
 #ifdef WL_LATENCY_MODE
 	feature_set |= WIFI_FEATURE_SET_LATENCY_MODE;
+	feature_set |= WIFI_FEATURE_SET_VOIP_MODE;
 #endif /* WL_LATENCY_MODE */
+
+	feature_set |= WIFI_FEATURE_SOFT_AP;
+	feature_set |= WIFI_FEATURE_CACHED_SCAN_RESULTS;
+	feature_set |= WIFI_FEATURE_DYNAMIC_SET_MAC;
 
 #ifdef WL_AGGRESSIVE_ROAM
 	feature_set |= WIFI_FEATURE_ROAMING_MODE_CONTROL;

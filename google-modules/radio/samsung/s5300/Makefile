@@ -1,11 +1,11 @@
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
 M ?= $(shell pwd)
 
-KCFLAGS += -I$(KERNEL_SRC)/../private/google-modules/soc/gs/include
-KCFLAGS += -I$(KERNEL_SRC)/../private/google-modules/soc/gs/include/uapi
+KCFLAGS += -I$(ROOT_DIR)/private/google-modules/soc/gs/include
+KCFLAGS += -I$(ROOT_DIR)/private/google-modules/soc/gs/include/uapi
 
-EXTRA_SYMBOLS += $(O)/../private/google-modules/soc/gs/Module.symvers
-EXTRA_SYMBOLS += $(O)/../private/google-modules/bms/misc/Module.symvers
+EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/soc/gs/Module.symvers
+EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/bms/misc/Module.symvers
 
 EXTRA_CFLAGS+="-Wno-missing-prototypes"
 

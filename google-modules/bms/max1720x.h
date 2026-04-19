@@ -123,6 +123,9 @@ enum max1720x_register {
 	MAX1720X_VFOCV = 0xFB,
 	MAX1720X_ALARM = 0xFD,
 	MAX1720X_VFSOC = 0xFF,
+
+	/* Debug registers for max17201 stuck issue */
+	MAX1720X_VCONVERT = 0xDB,
 };
 
 enum max1720x_status_bits {
@@ -237,6 +240,13 @@ enum max1720x_nvram {
 	MAX1720X_NVRAM_HISTORY_VALID_STATUS_START = 0xEB,
 	MAX1720X_NVRAM_REMAINING_UPDATES = 0xED,
 	MAX1720X_NVRAM_HISTORY_END = 0xEF,
+
+	/* Debug registers for max17201 stuck issue */
+	MAX1720X_FSTAT2 = 0x6E,
+	MAX1720X_NPACKCFG = 0xB5,
+	MAX1720X_HCONFIG2 = 0xF5,
+	MAX1720X_VOLT_RAW = 0xF9,
+	MAX1720X_HCONFIG = 0xFD,
 };
 
 #define MAX1720X_HISTORY_PAGE_SIZE \

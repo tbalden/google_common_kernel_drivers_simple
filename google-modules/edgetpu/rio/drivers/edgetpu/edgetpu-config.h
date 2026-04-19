@@ -42,6 +42,10 @@
 #define EDGETPU_ALLOW_NONSECURE_FW 0
 #endif
 
+/*
+ * "Always on" can be enabled in a chip config.h file using this define; see comments for
+ * field @always_on in edgetpu-pm.h. * The default is to not force "always on".
+ */
 #ifndef EDGETPU_FEATURE_ALWAYS_ON
 #define EDGETPU_FEATURE_ALWAYS_ON 0
 #endif
@@ -77,6 +81,15 @@
 
 #ifndef EDGETPU_USE_HW_WDT
 #define EDGETPU_USE_HW_WDT 0
+#endif
+
+#ifndef EDGETPU_POWER_ISLAND_COUNT
+#define EDGETPU_POWER_ISLAND_COUNT 0
+#endif
+
+/* Whether the IOMMU granularity is same as PAGE_SIZE. */
+#ifndef EDGETPU_MMU_GRANULARITY_IS_PAGE
+#define EDGETPU_MMU_GRANULARITY_IS_PAGE 1
 #endif
 
 #endif /* __EDGETPU_CONFIG_H__ */

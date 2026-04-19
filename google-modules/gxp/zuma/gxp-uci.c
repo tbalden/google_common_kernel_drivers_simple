@@ -148,7 +148,7 @@ static void gxp_uci_mailbox_manager_release_unconsumed_async_resps(struct gxp_vi
 			 "Client leaves without consuming UCI response, client_id=%d, cmd_seq=%llu",
 			 client_id, cur->resp.seq);
 		list_del(&cur->dest_list_entry);
-		gcip_mailbox_release_awaiter(cur->awaiter);
+		gcip_mailbox_awaiter_put(cur->awaiter);
 	}
 
 	/*
@@ -563,10 +563,16 @@ static void gxp_uci_additional_info_fill_header(struct gxp_uci_additional_info_h
 static void gxp_uci_additional_info_fill_root(struct gxp_uci_additional_info_root *root,
 					      uint32_t root_offset, uint32_t in_fences_size,
 					      uint32_t out_fences_size, uint32_t timeout_ms,
-					      uint32_t runtime_additional_info_size)
+					      uint32_t runtime_additional_info_size,
+					      uint32_t num_mid_in_fences,
+					      uint32_t num_mid_out_fences)
 {
 	uint32_t in_fences_size_b = sizeof(uint16_t) * in_fences_size;
 	uint32_t out_fences_size_b = sizeof(uint16_t) * out_fences_size;
+	uint32_t mid_in_fence_fds_size_b = sizeof(uint32_t) * num_mid_in_fences;
+	uint32_t mid_in_fence_ids_size_b = sizeof(uint16_t) * num_mid_in_fences;
+	uint32_t mid_out_fence_fds_size_b = sizeof(uint32_t) * num_mid_out_fences;
+	uint32_t mid_out_fence_ids_size_b = sizeof(uint16_t) * num_mid_out_fences;
 
 	root->object_size = sizeof(*root);
 	root->in_fences_offset =
@@ -579,6 +585,20 @@ static void gxp_uci_additional_info_fill_root(struct gxp_uci_additional_info_roo
 	root->runtime_additional_info_offset = gxp_uci_additional_info_align_offset(
 		root->out_fences_offset + out_fences_size_b, runtime_additional_info_size);
 	root->runtime_additional_info_size = runtime_additional_info_size;
+	root->mid_in_fence_fds_offset = gxp_uci_additional_info_align_offset(
+		root->runtime_additional_info_offset + runtime_additional_info_size,
+		mid_in_fence_fds_size_b);
+	root->num_mid_in_fence_fds = num_mid_in_fences;
+	root->mid_in_fence_ids_offset = gxp_uci_additional_info_align_offset(
+		root->mid_in_fence_fds_offset + mid_in_fence_fds_size_b, mid_in_fence_ids_size_b);
+	root->num_mid_in_fence_ids = num_mid_in_fences;
+	root->mid_out_fence_fds_offset = gxp_uci_additional_info_align_offset(
+		root->mid_in_fence_ids_offset + mid_in_fence_ids_size_b, mid_out_fence_fds_size_b);
+	root->num_mid_out_fence_fds = num_mid_out_fences;
+	root->mid_out_fence_ids_offset = gxp_uci_additional_info_align_offset(
+		root->mid_out_fence_fds_offset + mid_out_fence_fds_size_b,
+		mid_out_fence_ids_size_b);
+	root->num_mid_out_fence_ids = num_mid_out_fences;
 }
 
 /*
@@ -621,6 +641,32 @@ static int gxp_uci_allocate_additional_info(struct gxp_uci_async_response *async
 		memcpy(buf->virt_addr + info->header.root_offset +
 			       info->root.runtime_additional_info_offset,
 		       info->runtime_additional_info, info->root.runtime_additional_info_size);
+
+	/* Copy mid_in_fence_fds. */
+	if (info->root.num_mid_in_fence_fds)
+		memcpy(buf->virt_addr + info->header.root_offset +
+			       info->root.mid_in_fence_fds_offset,
+		       info->mid_in_fence_fds, sizeof(uint32_t) * info->root.num_mid_in_fence_fds);
+
+	/* Copy mid_in_fence_ids. */
+	if (info->root.num_mid_in_fence_ids)
+		memcpy(buf->virt_addr + info->header.root_offset +
+			       info->root.mid_in_fence_ids_offset,
+		       info->mid_in_fence_ids, sizeof(uint16_t) * info->root.num_mid_in_fence_ids);
+
+	/* Copy mid_out_fence_fds. */
+	if (info->root.num_mid_out_fence_fds)
+		memcpy(buf->virt_addr + info->header.root_offset +
+			       info->root.mid_out_fence_fds_offset,
+		       info->mid_out_fence_fds,
+		       sizeof(uint32_t) * info->root.num_mid_out_fence_fds);
+
+	/* Copy mid_out_fence_ids. */
+	if (info->root.num_mid_out_fence_ids)
+		memcpy(buf->virt_addr + info->header.root_offset +
+			       info->root.mid_out_fence_ids_offset,
+		       info->mid_out_fence_ids,
+		       sizeof(uint16_t) * info->root.num_mid_out_fence_ids);
 
 	return 0;
 }
@@ -675,9 +721,13 @@ void gxp_uci_exit(struct gxp_uci *uci)
  * @additional_info: The additional information to be serialized and passed to the command.
  * @in_fences: The fences which the command is waiting on to be unblocked.
  * @out_fences: The fences which the command will signal.
+ * @mid_in_fences: The mid-fences which the command will wait on in the middle of execution. These
+ *                 will be merged with @in_fences and tracked.
+ * @mid_out_fences: The mid-fences which the command will signal in the middle of execution. These
+ *                  will be merged with @out_fences and tracked.
  * @iif_ikf: The inter-IP fence which will be signaled once in-kernel fences in @in_fences are
  *           signaled.
- * @flags: The GCIP mailbox flags.
+ * @gcip_mailbox_cmd_flags: The GCIP mailbox command flags.
  *
  * Returns 0 on success or errno on failure.
  */
@@ -685,7 +735,9 @@ static int gxp_uci_push_cmd(struct gxp_uci *uci, struct gxp_client *client,
 			    struct gxp_uci_command *cmd,
 			    struct gxp_uci_additional_info *additional_info,
 			    struct gcip_fence_array *in_fences, struct gcip_fence_array *out_fences,
-			    struct iif_fence *iif_ikf, gcip_mailbox_cmd_flags_t flags)
+			    struct gcip_fence_array *mid_in_fences,
+			    struct gcip_fence_array *mid_out_fences, struct iif_fence *iif_ikf,
+			    u32 gcip_mailbox_cmd_flags)
 {
 	struct gxp_virtual_device *vd = client->vd;
 	struct mailbox_resp_queue *mbox_rsp_queue = &vd->mailbox_resp_queues[UCI_RESOURCE_ID];
@@ -695,6 +747,7 @@ static int gxp_uci_push_cmd(struct gxp_uci *uci, struct gxp_client *client,
 	uint32_t additional_info_address = 0;
 	uint16_t additional_info_size = 0;
 	int ret;
+	int i;
 
 	if (!gxp_vd_has_and_use_credit(vd))
 		return -EBUSY;
@@ -727,6 +780,21 @@ static int gxp_uci_push_cmd(struct gxp_uci *uci, struct gxp_client *client,
 	cmd->additional_info_address = additional_info_address;
 	cmd->additional_info_size = additional_info_size;
 
+	/*
+	 * Merge mid_in_fences with in_fences and mid_out_fences with out_fences. This is done since
+	 * we need to notify IIF driver of submission and completion of signalers and waiters and
+	 * this is already being done for the fences in @in_fences and @out_fences.
+	 */
+	if (mid_in_fences) {
+		for (i = 0; i < mid_in_fences->size; i++)
+			gcip_fence_array_add(in_fences, mid_in_fences->fences[i]);
+	}
+
+	if (mid_out_fences) {
+		for (i = 0; i < mid_out_fences->size; i++)
+			gcip_fence_array_add(out_fences, mid_out_fences->fences[i]);
+	}
+
 	async_resp->in_fences = gcip_fence_array_get(in_fences);
 	async_resp->out_fences = gcip_fence_array_get(out_fences);
 	async_resp->iif_ikf = iif_fence_get(iif_ikf);
@@ -735,7 +803,8 @@ static int gxp_uci_push_cmd(struct gxp_uci *uci, struct gxp_client *client,
 	 * @async_resp->awaiter will be set from the `gxp_uci_before_enqueue_wait_list`
 	 * callback.
 	 */
-	awaiter = gxp_mailbox_put_cmd(uci->mbx, cmd, &async_resp->resp, async_resp, flags);
+	awaiter = gxp_mailbox_put_cmd(uci->mbx, cmd, &async_resp->resp, async_resp,
+				      gcip_mailbox_cmd_flags);
 	if (IS_ERR(awaiter)) {
 		ret = PTR_ERR(awaiter);
 		goto err_put_iif_ikf;
@@ -762,7 +831,7 @@ err_release_credit:
 /**
  * gxp_uci_create_and_push_cmd() - Creates and pushes the UCI command to the UCI mailbox.
  * @client: The client sending the command.
- * @cmd_seq: The command sequence number.
+ * @cmd_seq: The pointer used to return the command sequence number.
  * @flags: The command flags passed from the UCI command ioctl. (See gxp_mailbox_uci_command_ioctl)
  * @opaque: The runtime command. (See gxp_mailbox_uci_command_ioctl)
  * @timeout_ms: The command timeout.
@@ -770,6 +839,10 @@ err_release_credit:
  * @out_fences: The out-fences which will be signaled once the command is processed.
  * @iif_ikf: The inter-IP fence which will be signaled once in-kernel fences in @in_fences are
  *           signaled.
+ * @mid_in_fences: The in-fences that the command will wait on in the middle of execution.
+ * @mid_out_fences: The out-fences that the command will signal in the middle of execution.
+ * @mid_in_fence_fds: The FDs corresponding to @mid_in_fences.
+ * @mid_out_fence_fds: The FDs corresponding to @mid_out_fences.
  *
  * Following tasks will be done in this function:
  * 1. Check the client and its virtual device to see if they are still available.
@@ -779,18 +852,18 @@ err_release_credit:
  *
  * Return: 0 on success or errno on failure.
  */
-static int gxp_uci_create_and_push_cmd(struct gxp_client *client, u64 cmd_seq, u32 flags,
-				       const u8 *opaque, u32 timeout_ms,
-				       struct gcip_fence_array *in_fences,
-				       struct gcip_fence_array *out_fences,
-				       struct iif_fence *iif_ikf)
+static int gxp_uci_create_and_push_cmd(
+	struct gxp_client *client, u64 *cmd_seq, u32 flags, const u8 *opaque, u32 timeout_ms,
+	struct gcip_fence_array *in_fences, struct gcip_fence_array *out_fences,
+	struct iif_fence *iif_ikf, struct gcip_fence_array *mid_in_fences,
+	struct gcip_fence_array *mid_out_fences, u32 *mid_in_fence_fds, u32 *mid_out_fence_fds)
 {
 	struct gxp_dev *gxp = client->gxp;
 	struct gxp_mcu *mcu = gxp_mcu_of(gxp);
 	struct gxp_uci_command cmd = {};
 	struct gxp_uci_additional_info additional_info = {};
-	uint16_t *in_iif_fences, *out_iif_fences;
-	uint32_t in_iif_fences_size, out_iif_fences_size;
+	uint16_t *in_iif_fences, *out_iif_fences, *mid_in_iif_fences, *mid_out_iif_fences;
+	uint32_t in_iif_fences_size, out_iif_fences_size, mid_in_fences_size, mid_out_fences_size;
 	int ret;
 
 	in_iif_fences = gcip_fence_array_get_iif_id(in_fences, &in_iif_fences_size, false, 0);
@@ -808,23 +881,46 @@ static int gxp_uci_create_and_push_cmd(struct gxp_client *client, u64 cmd_seq, u
 		goto err_put_in_iif_fences;
 	}
 
+	mid_in_iif_fences =
+		gcip_fence_array_get_iif_id(mid_in_fences, &mid_in_fences_size, false, 0);
+	if (IS_ERR(mid_in_iif_fences)) {
+		ret = PTR_ERR(mid_in_iif_fences);
+		dev_err(gxp->dev, "Failed to get IIF IDs from mid-in-fences, ret=%d", ret);
+		goto err_put_out_iif_fences;
+	}
+
+	mid_out_iif_fences =
+		gcip_fence_array_get_iif_id(mid_out_fences, &mid_out_fences_size, true, IIF_IP_DSP);
+	if (IS_ERR(mid_out_iif_fences)) {
+		ret = PTR_ERR(mid_out_iif_fences);
+		dev_err(gxp->dev, "Failed to get IIF IDs from mid-out-fences, ret=%d", ret);
+		goto err_put_mid_in_iif_fences;
+	}
+
 	if (opaque)
 		memcpy(cmd.opaque, opaque, sizeof(cmd.opaque));
 
 	cmd.client_id = client->vd->client_id;
-	cmd.seq = cmd_seq;
 
 	if (flags & GXP_UCI_NULL_COMMAND_FLAG)
 		cmd.type = NULL_COMMAND;
 
 	gxp_uci_fill_additional_info(&additional_info, in_iif_fences, in_iif_fences_size,
-				     out_iif_fences, out_iif_fences_size, timeout_ms, NULL, 0);
+				     out_iif_fences, out_iif_fences_size, timeout_ms, NULL, 0,
+				     mid_in_fence_fds, mid_in_iif_fences, mid_in_fences_size,
+				     mid_out_fence_fds, mid_out_iif_fences, mid_out_fences_size);
 
 	ret = gxp_uci_push_cmd(&mcu->uci, client, &cmd, &additional_info, in_fences, out_fences,
-			       iif_ikf, GCIP_MAILBOX_CMD_FLAGS_SKIP_ASSIGN_SEQ);
+			       mid_in_fences, mid_out_fences, iif_ikf, 0);
 	if (ret)
 		dev_err(gxp->dev, "Failed to enqueue mailbox command (ret=%d)\n", ret);
+	else
+		*cmd_seq = cmd.seq;
 
+	kfree(mid_out_iif_fences);
+err_put_mid_in_iif_fences:
+	kfree(mid_in_iif_fences);
+err_put_out_iif_fences:
 	kfree(out_iif_fences);
 err_put_in_iif_fences:
 	kfree(in_iif_fences);
@@ -917,8 +1013,8 @@ int gxp_uci_wait_async_response(struct mailbox_resp_queue *uci_resp_queue,
 	 * handler (which may reference the `gxp_async_response`) has
 	 * been able to exit cleanly.
 	 */
-	gcip_mailbox_cancel_awaiter_timeout(async_resp->awaiter);
-	gcip_mailbox_release_awaiter(async_resp->awaiter);
+	gcip_mailbox_cancel_timeout_work_sync(async_resp->awaiter);
+	gcip_mailbox_awaiter_put(async_resp->awaiter);
 
 	return ret;
 }
@@ -927,20 +1023,29 @@ void gxp_uci_fill_additional_info(struct gxp_uci_additional_info *info, uint16_t
 				  uint32_t in_fences_size, uint16_t *out_fences,
 				  uint32_t out_fences_size, uint32_t timeout_ms,
 				  uint8_t *runtime_additional_info,
-				  uint32_t runtime_additional_info_size)
+				  uint32_t runtime_additional_info_size, uint32_t *mid_in_fence_fds,
+				  uint16_t *mid_in_fences_ids, uint32_t num_mid_in_fences,
+				  uint32_t *mid_out_fence_fds, uint16_t *mid_out_fences_ids,
+				  uint32_t num_mid_out_fences)
 {
 	gxp_uci_additional_info_fill_header(&info->header);
 	gxp_uci_additional_info_fill_root(&info->root, info->header.root_offset, in_fences_size,
-					  out_fences_size, timeout_ms,
-					  runtime_additional_info_size);
+					  out_fences_size, timeout_ms, runtime_additional_info_size,
+					  num_mid_in_fences, num_mid_out_fences);
 	info->in_fences = in_fences;
 	info->out_fences = out_fences;
 	info->runtime_additional_info = runtime_additional_info;
+	info->mid_in_fence_fds = mid_in_fence_fds;
+	info->mid_in_fence_ids = mid_in_fences_ids;
+	info->mid_out_fence_fds = mid_out_fence_fds;
+	info->mid_out_fence_ids = mid_out_fences_ids;
 }
 
-int gxp_uci_send_cmd(struct gxp_client *client, u64 cmd_seq, u32 flags, const u8 *opaque,
+int gxp_uci_send_cmd(struct gxp_client *client, u64 *cmd_seq, u32 flags, const u8 *opaque,
 		     u32 timeout_ms, struct gcip_fence_array *in_fences,
-		     struct gcip_fence_array *out_fences)
+		     struct gcip_fence_array *out_fences, struct gcip_fence_array *mid_in_fences,
+		     struct gcip_fence_array *mid_out_fences, u32 *mid_in_fence_fds,
+		     u32 *mid_out_fence_fds)
 {
 	struct gxp_dev *gxp = client->gxp;
 	struct gxp_iif *giif = gxp_mcu_of(gxp)->giif;
@@ -992,7 +1097,8 @@ int gxp_uci_send_cmd(struct gxp_client *client, u64 cmd_seq, u32 flags, const u8
 	}
 
 	ret = gxp_uci_create_and_push_cmd(client, cmd_seq, flags, opaque, timeout_ms, in_fences,
-					  out_fences, iif_ikf);
+					  out_fences, iif_ikf, mid_in_fences, mid_out_fences,
+					  mid_in_fence_fds, mid_out_fence_fds);
 stop_iif_dma_fence:
 	if (ret && iif_ikf)
 		iif_dma_fence_stop(iif_ikf);
@@ -1028,9 +1134,8 @@ void gxp_uci_send_iif_unblock_noti(struct gxp_uci *uci, int iif_id)
 
 	cmd.type = IIF_UNBLOCK_COMMAND;
 	cmd.iif_id = iif_id;
-	cmd.seq = gcip_mailbox_inc_seq_num(uci->mbx->mbx_impl.gcip_mbx, 1);
 
-	ret = gxp_mailbox_send_cmd(uci->mbx, &cmd, NULL, GCIP_MAILBOX_CMD_FLAGS_SKIP_ASSIGN_SEQ);
+	ret = gxp_mailbox_send_cmd(uci->mbx, &cmd, NULL, 0);
 	if (ret)
 		dev_warn(uci->gxp->dev, "Failed to notify the IIF unblock: id=%d, ret=%d", iif_id,
 			 ret);

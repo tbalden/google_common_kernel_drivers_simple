@@ -16,6 +16,7 @@
 #include <uapi/linux/sched/types.h>
 
 #include "../../include/pixel_mm_hint.h"
+#include "../../include/pixel_mm.h"
 
 static struct task_struct *tsk_kswapd, *tsk_kcompactd;
 
@@ -302,6 +303,10 @@ static int vh_mm_init(void)
 	if (ret)
 		goto out_err;
 
+	ret = pixel_mm_filemap_sysfs(vendor_mm_kobj);
+	if (ret)
+		goto out_err;
+
 	ret = register_trace_android_vh_mm_kcompactd_cpu_online(
 		vh_kcompactd_cpu_online, NULL);
 	if (ret)
@@ -312,6 +317,10 @@ static int vh_mm_init(void)
 		goto out_err;
 
 	ret = register_trace_android_vh_calculate_totalreserve_pages(vh_update_lmkd_watermark, NULL);
+	if (ret)
+		goto out_err;
+
+	ret = register_trace_android_vh_do_async_mmap_readahead(vh_do_async_mmap_readahead, NULL);
 	if (ret)
 		goto out_err;
 

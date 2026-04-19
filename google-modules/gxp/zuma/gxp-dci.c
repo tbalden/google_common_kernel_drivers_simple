@@ -165,8 +165,8 @@ static int gxp_dci_mailbox_manager_wait_async_resp(struct gxp_client *client,
 	 * handler (which may reference the `gxp_dci_async_response`) has
 	 * been able to exit cleanly.
 	 */
-	gcip_mailbox_cancel_awaiter_timeout(resp_ptr->awaiter);
-	gcip_mailbox_release_awaiter(resp_ptr->awaiter);
+	gcip_mailbox_cancel_timeout_work_sync(resp_ptr->awaiter);
+	gcip_mailbox_awaiter_put(resp_ptr->awaiter);
 
 	return 0;
 }
@@ -189,7 +189,7 @@ static void gxp_dci_mailbox_manager_release_unconsumed_async_resps(struct gxp_vi
 			cur, nxt, &vd->mailbox_resp_queues[i].dest_queue,
 			list_entry) {
 			list_del(&cur->list_entry);
-			gcip_mailbox_release_awaiter(cur->awaiter);
+			gcip_mailbox_awaiter_put(cur->awaiter);
 		}
 		spin_unlock_irqrestore(&vd->mailbox_resp_queues[i].lock, flags);
 	}
@@ -332,7 +332,7 @@ static void gxp_dci_handle_awaiter_flushed(struct gcip_mailbox *mailbox,
 	async_resp->dest_queue = NULL;
 	spin_unlock_irqrestore(async_resp->dest_queue_lock, flags);
 
-	gcip_mailbox_release_awaiter(async_resp->awaiter);
+	gcip_mailbox_awaiter_put(async_resp->awaiter);
 }
 
 static void gxp_dci_release_awaiter_data(void *data)

@@ -23,22 +23,13 @@ label_flag(
 )
 
 bool_flag(
-    name = "download_prebuilt_gki_fips140",
+    name = "use_prebuilt_fips140",
     build_setting_default = False,
 )
 
 config_setting(
-    name = "enable_download_fips140",
-    flag_values = {
-        ":download_prebuilt_gki_fips140": "1",
-    },
-)
-
-config_setting(
-    name = "disable_download_fips140",
-    flag_values = {
-        ":download_prebuilt_gki_fips140": "0",
-    },
+    name = "use_prebuilt_fips140_is_true",
+    flag_values = {":use_prebuilt_fips140": "1"},
 )
 
 _STRIP = "//prebuilts/clang/host/linux-x86/clang-{}:bin/llvm-strip".format(VARS["CLANG_VERSION"])

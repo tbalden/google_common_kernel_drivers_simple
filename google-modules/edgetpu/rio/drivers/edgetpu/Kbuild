@@ -2,7 +2,7 @@
 #
 # Arguments
 #   GMODULE_SRC_PATH: The path of directory containing source of google-modules.
-#                     (default: $(KERNEL_SRC)/../private/google-modules)
+#                     (default: $(ROOT_DIR)/private/google-modules)
 
 # Use the absolute path of this Makefile to get the source directory.
 CURRENT_DIR=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -44,6 +44,7 @@ rio-objs	:= rio-core.o \
 		   rio-debug.o \
 		   rio-devfreq.o \
 		   rio-device-group.o \
+		   rio-dt-mailbox-adapter.o \
 		   rio-external.o \
 		   rio-firmware.o \
 		   rio-fs.o \
@@ -61,6 +62,7 @@ CFLAGS_rio-core.o := -DCONFIG_RIO=1
 CFLAGS_rio-debug.o := -DCONFIG_RIO=1
 CFLAGS_rio-devfreq.o := -DCONFIG_RIO=1
 CFLAGS_rio-device-group.o := -DCONFIG_RIO=1
+CFLAGS_rio-dt-mailbox-adapter.o := -DCONFIG_RIO=1
 CFLAGS_rio-external.o := -DCONFIG_RIO=1
 CFLAGS_rio-firmware.o := -DCONFIG_RIO=1
 CFLAGS_rio-fs.o := -DCONFIG_RIO=1
@@ -80,7 +82,7 @@ CFLAGS_rio-vii-packet.o := -DCONFIG_RIO=1
 
 
 # Set the path of google-modules sources if not defined.
-GMODULE_SRC_PATH ?= $(KERNEL_SRC)/../private/google-modules
+GMODULE_SRC_PATH ?= $(ROOT_DIR)/private/google-modules
 
 ifneq ($(wildcard $(GMODULE_SRC_PATH)/power/mitigation),)
 ccflags-y += -I$(GMODULE_SRC_PATH)/power/mitigation

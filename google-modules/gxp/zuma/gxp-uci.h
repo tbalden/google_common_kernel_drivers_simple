@@ -147,6 +147,22 @@ struct gxp_uci_additional_info_root {
 	int32_t runtime_additional_info_offset;
 	/* The size of the runtime defined additional info buffer in bytes. */
 	uint32_t runtime_additional_info_size;
+	/* The offset of the mid_in_fence_fds vector. */
+	int32_t mid_in_fence_fds_offset;
+	/* The number of elements in the mid_in_fence_fds vector. */
+	uint32_t num_mid_in_fence_fds;
+	/* The offset of the mid_in_fence_ids vector. */
+	int32_t mid_in_fence_ids_offset;
+	/* The number of elements in the mid_in_fence_ids vector. */
+	uint32_t num_mid_in_fence_ids;
+	/* The offset of the mid_out_fence_fds vector. */
+	int32_t mid_out_fence_fds_offset;
+	/* The number of elements in the mid_out_fence_fds vector. */
+	uint32_t num_mid_out_fence_fds;
+	/* The offset of the mid_out_fence_ids vector. */
+	int32_t mid_out_fence_ids_offset;
+	/* The number of elements in the mid_out_fence_ids vector. */
+	uint32_t num_mid_out_fence_ids;
 } __packed;
 
 struct gxp_uci_additional_info {
@@ -160,6 +176,14 @@ struct gxp_uci_additional_info {
 	uint16_t *out_fences;
 	/* The pointer to runtime_additional_info of UCI command ioctl. */
 	uint8_t *runtime_additional_info;
+	/* The pointer to mid_in_fence_fds of UCI command ioctl. */
+	uint32_t *mid_in_fence_fds;
+	/* The pointer to mid_in_fence_ids of UCI command ioctl. */
+	uint16_t *mid_in_fence_ids;
+	/* The pointer to mid_out_fence_fds of UCI command ioctl. */
+	uint32_t *mid_out_fence_fds;
+	/* The pointer to mid_out_fence_ids of UCI command ioctl. */
+	uint16_t *mid_out_fence_ids;
 };
 
 struct gxp_uci_response {
@@ -281,12 +305,15 @@ void gxp_uci_fill_additional_info(struct gxp_uci_additional_info *info, uint16_t
 				  uint32_t in_fences_size, uint16_t *out_fences,
 				  uint32_t out_fences_size, uint32_t timeout_ms,
 				  uint8_t *runtime_additional_info,
-				  uint32_t runtime_additional_info_size);
+				  uint32_t runtime_additional_info_size, uint32_t *mid_in_fence_fds,
+				  uint16_t *mid_in_fences_ids, uint32_t num_mid_in_fences,
+				  uint32_t *mid_out_fence_fds, uint16_t *mid_out_fences_ids,
+				  uint32_t num_mid_out_fences);
 
 /**
  * gxp_uci_send_cmd() - Sends an UCI command to the firmware.
  * @client: The client sending the command.
- * @cmd_seq: The command sequence number.
+ * @cmd_seq: The pointer to return the command sequence number.
  * @flags: The command flags passed from the UCI command ioctl. (See gxp_mailbox_uci_command_ioctl)
  * @opaque: The runtime command. (See gxp_mailbox_uci_command_ioctl)
  * @timeout_ms: The command timeout. If 0, the default one (MAILBOX_TIMEOUT) will be used. Note
@@ -300,15 +327,21 @@ void gxp_uci_fill_additional_info(struct gxp_uci_additional_info *info, uint16_t
  *             notify the firmware of the in-kernel fence unblock later. Note that @timeout_ms will
  *             be also used for waiting on in-kernel fences.
  * @out_fences: The out-fences which will be signaled once the command is processed.
+ * @mid_in_fences: The in-fences that the command will wait for in the middle of execution.
+ * @mid_out_fences: The out-fences that the command will signal in the middle of execution.
+ * @mid_in_fence_fds: The FDs corresponding to @mid_in_fences.
+ * @mid_out_fence_fds: The FDs corresponding to @mid_out_fences.
  *
  * This function should be called in the ioctl function only, where the `gxp_client_destroy()` is
  * guaranteed not to be called simultaneously.
  *
  * Return: 0 on success or errno on failure.
  */
-int gxp_uci_send_cmd(struct gxp_client *client, u64 cmd_seq, u32 flags, const u8 *opaque,
+int gxp_uci_send_cmd(struct gxp_client *client, u64 *cmd_seq, u32 flags, const u8 *opaque,
 		     u32 timeout_ms, struct gcip_fence_array *in_fences,
-		     struct gcip_fence_array *out_fences);
+		     struct gcip_fence_array *out_fences, struct gcip_fence_array *mid_in_fences,
+		     struct gcip_fence_array *mid_out_fences, u32 *mid_in_fence_fds,
+		     u32 *mid_out_fence_fds);
 
 /*
  * TODO(b/395523291): Remove @gxp_uci_send_iif_unblock_noti() once IIF signalling mailbox available.

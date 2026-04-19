@@ -3,7 +3,7 @@ M ?= $(shell pwd)
 
 KBUILD_OPTIONS += CONFIG_LWIS=m
 
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 
 KBUILD_CFLAGS += -Wall -Werror
 

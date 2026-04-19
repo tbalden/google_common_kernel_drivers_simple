@@ -21,6 +21,7 @@
 
 #define GCIP_TELEMETRY_NAME_LOG "telemetry_log"
 #define GCIP_TELEMETRY_NAME_TRACE "telemetry_trace"
+#define GCIP_TELEMETRY_NAME_HWTRACE "telemetry_hwtrace"
 #define GCIP_TELEMETRY_NAME_OPAQUE "telemetry_opaque"
 
 /* Log level codes used by gcip firmware. */
@@ -30,8 +31,6 @@
 #define GCIP_FW_LOG_LEVEL_WARN (-1)
 #define GCIP_FW_LOG_LEVEL_ERROR (-2)
 #define GCIP_FW_LOG_LEVEL_FATAL (-3)
-
-#define GCIP_FW_DMESG_LOG_LEVEL (GCIP_FW_LOG_LEVEL_INFO)
 
 /* When log data arrives, recheck for more log data after this delay. */
 #define GCIP_TELEMETRY_TYPE_LOG_RECHECK_DELAY 200 /* ms */
@@ -46,6 +45,7 @@ enum gcip_telemetry_state {
 enum gcip_telemetry_type {
 	GCIP_TELEMETRY_TYPE_LOG,
 	GCIP_TELEMETRY_TYPE_TRACE,
+	GCIP_TELEMETRY_TYPE_HWTRACE,
 	GCIP_TELEMETRY_TYPE_OPAQUE,
 	GCIP_TELEMETRY_TYPE_COUNT,
 };

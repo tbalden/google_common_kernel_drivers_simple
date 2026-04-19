@@ -178,10 +178,8 @@ static int add_image_config_iova_translate(struct edgetpu_dev *etdev, dma_addr_t
 					   unsigned int cfg_map_flags,
 					   struct edgetpu_iommu_domain *etdomain)
 {
-	u64 gcip_map_flags = GCIP_MAP_FLAGS_DMA_RW;
-
-	if (GCIP_IMAGE_CONFIG_MAP_MMIO(cfg_map_flags))
-		gcip_map_flags |= GCIP_MAP_FLAGS_MMIO_TO_FLAGS(1);
+	u64 gcip_map_flags = gcip_iommu_encode_gcip_map_flags(
+		DMA_BIDIRECTIONAL, false, 0, false, GCIP_IMAGE_CONFIG_MAP_MMIO(cfg_map_flags));
 
 	return edgetpu_mmu_add_translation(etdev, daddr, paddr, size, gcip_map_flags, etdomain);
 }
@@ -404,6 +402,7 @@ static int edgetpu_firmware_gsa_authenticate(struct edgetpu_dev *etdev, const st
 	void *header_vaddr;
 	dma_addr_t header_dma_addr;
 	int tpu_state;
+	size_t fw_header_size;
 	int ret = 0;
 
 	tpu_state = gsa_send_tpu_cmd(et_fw->gsa_dev, GSA_TPU_GET_STATE);
@@ -424,24 +423,25 @@ static int edgetpu_firmware_gsa_authenticate(struct edgetpu_dev *etdev, const st
 	}
 
 	/* Copy the firmware image to the carveout, skipping the header */
-	memcpy(image_vaddr, fw->data + GCIP_FW_HEADER_SIZE, fw->size - GCIP_FW_HEADER_SIZE);
+	fw_header_size = gcip_common_get_fw_header_size(fw->data, EDGETPU_FW_MAGIC);
+	memcpy(image_vaddr, fw->data + fw_header_size, fw->size - fw_header_size);
 
 	/* Allocate coherent memory for the image header */
-	header_vaddr = dma_alloc_coherent(et_fw->gsa_dev, GCIP_FW_HEADER_SIZE, &header_dma_addr,
+	header_vaddr = dma_alloc_coherent(et_fw->gsa_dev, fw_header_size, &header_dma_addr,
 					  GFP_KERNEL);
 	if (!header_vaddr) {
 		etdev_err(etdev, "Failed to allocate coherent memory for header\n");
 		return -ENOMEM;
 	}
 
-	memcpy(header_vaddr, fw->data, GCIP_FW_HEADER_SIZE);
+	memcpy(header_vaddr, fw->data, fw_header_size);
 	etdev_dbg(etdev, "Requesting GSA image load. meta = %pad payload = %pap", &header_dma_addr,
 		  &et_fw->fw_region_paddr);
 	ret = gsa_load_tpu_fw_image(et_fw->gsa_dev, header_dma_addr, et_fw->fw_region_paddr);
 	if (ret)
 		etdev_err(etdev, "GSA authentication failed: %d\n", ret);
 
-	dma_free_coherent(et_fw->gsa_dev, GCIP_FW_HEADER_SIZE, header_vaddr, header_dma_addr);
+	dma_free_coherent(et_fw->gsa_dev, fw_header_size, header_vaddr, header_dma_addr);
 	return ret;
 }
 
@@ -556,15 +556,15 @@ static int edgetpu_firmware_update_remapped_data_region(struct edgetpu_dev *etde
 	if (ret)
 		goto out_iremap_pool_destroy;
 
-	ret = edgetpu_kci_init(etdev->mailbox_manager, etdev->etkci);
+	ret = edgetpu_kci_init(etdev, etdev->etkci);
 	if (ret)
 		goto out_telemetry_exit;
 
-	ret = edgetpu_ikv_init(etdev->mailbox_manager, etdev->etikv);
+	ret = edgetpu_ikv_init(etdev, etdev->etikv);
 	if (ret)
 		goto out_kci_release;
 
-	ret = edgetpu_iif_init_mailbox(etdev->mailbox_manager, etdev->etiif);
+	ret = edgetpu_iif_init_mailbox(etdev, etdev->etiif);
 	if (ret)
 		goto out_ikv_release;
 
@@ -692,6 +692,7 @@ static int edgetpu_firmware_restart(struct edgetpu_firmware *et_fw, bool force_r
  */
 static int edgetpu_firmware_setup_image(struct edgetpu_firmware *et_fw, const struct firmware *fw)
 {
+	size_t fw_header_size;
 	int ret = 0;
 	void *image_vaddr;
 	struct edgetpu_dev *etdev = et_fw->etdev;
@@ -699,9 +700,9 @@ static int edgetpu_firmware_setup_image(struct edgetpu_firmware *et_fw, const st
 	struct gcip_image_config_parser *cfg_parser = edgetpu_firmware_get_img_cfg_parser(et_fw);
 	phys_addr_t image_start, image_end, carveout_start, carveout_end;
 
-	if (fw->size < GCIP_FW_HEADER_SIZE) {
+	if (fw->size < GCIP_FW_MAX_HEADER_SIZE) {
 		etdev_err(etdev, "Invalid firmware image size: %zu < %d\n",
-			  fw->size, GCIP_FW_HEADER_SIZE);
+			  fw->size, GCIP_FW_MAX_HEADER_SIZE);
 		return -EINVAL;
 	}
 
@@ -731,16 +732,17 @@ static int edgetpu_firmware_setup_image(struct edgetpu_firmware *et_fw, const st
 
 	memcpy(&etdev->fw_version, &image_config->firmware_versions, sizeof(etdev->fw_version));
 
-#if EDGETPU_ALLOW_NONSECURE_FW || IS_ENABLED(CONFIG_EDGETPU_TEST)
-	if (gcip_image_config_is_ns(image_config))
-		etdev_warn(etdev, "Loading non-secure firmware image\n");
-#else
 	if (gcip_image_config_is_ns(image_config)) {
-		etdev_err(etdev, "Non-secure firmware image not allowed\n");
-		ret = -EINVAL;
-		goto out;
+		if (EDGETPU_ALLOW_NONSECURE_FW || IS_ENABLED(CONFIG_EDGETPU_TEST) ||
+		    IS_ENABLED(CONFIG_EDGETPU_FUZZ)) {
+			etdev_warn(etdev, "Loading non-secure firmware image\n");
+			/* continue with the non-secure boot flow */
+		} else {
+			etdev_err(etdev, "Non-secure firmware image not allowed\n");
+			ret = -EINVAL;
+			goto out;
+		}
 	}
-#endif
 
 	if (et_fw->gsa_dev) {
 		/* The following also copies the image to the carveout. */
@@ -753,7 +755,8 @@ static int edgetpu_firmware_setup_image(struct edgetpu_firmware *et_fw, const st
 		etdev_dbg(etdev, "No GSA device available, but firmware is non-secure.");
 		etdev_dbg(etdev, "Continuing without authentication.");
 		/* Copy the firmware image to the target location, skipping the header. */
-		memcpy(image_vaddr, fw->data + GCIP_FW_HEADER_SIZE, fw->size - GCIP_FW_HEADER_SIZE);
+		fw_header_size = gcip_common_get_fw_header_size(fw->data, EDGETPU_FW_MAGIC);
+		memcpy(image_vaddr, fw->data + fw_header_size, fw->size - fw_header_size);
 	} else {
 		etdev_err(etdev,
 			  "Cannot load firmware at privilege level %d with no authentication\n",
@@ -907,6 +910,7 @@ static int edgetpu_firmware_handshake(struct edgetpu_firmware *et_fw)
 		   etdev->fw_version.major_version,
 		   etdev->fw_version.minor_version,
 		   et_fw->fw_info.fw_changelist);
+	/* Tell fw about log, trace, and optionally hwtrace buffers. */
 	ret = edgetpu_telemetry_kci(etdev);
 	if (ret)
 		etdev_warn(etdev, "telemetry KCI error: %d", ret);
@@ -1380,7 +1384,7 @@ void edgetpu_firmware_watchdog_restart(struct edgetpu_dev *etdev, bool in_powerd
 	 * groups the CLOSE_DEVICE and RELEASE_VMBOX KCIs won't be sent.
 	 */
 	edgetpu_handshake_clear_fw_state(&etdev->mailbox_manager->open_devices);
-	edgetpu_handshake_clear_fw_state(&etdev->mailbox_manager->enabled_pasids);
+	edgetpu_ikv_clear_active_clients(etdev->etikv);
 
 	if (!in_powerdown) {
 		/* Another procedure is loading the firmware, let it do the work. */
@@ -1647,6 +1651,15 @@ void edgetpu_firmware_mappings_show(struct edgetpu_dev *etdev,
 		return;
 	seq_printf(s, "  %pad %lu fw\n", &fw_carveout_daddr,
 		   DIV_ROUND_UP(et_fw->fw_region_size, PAGE_SIZE));
+}
+
+void edgetpu_firmware_log_state(struct edgetpu_dev *etdev)
+{
+	if (edgetpu_pm_get_if_powered(etdev, false))
+		return;
+
+	edgetpu_kci_fw_log_state(etdev);
+	edgetpu_pm_put_async(etdev);
 }
 
 #if IS_ENABLED(CONFIG_EDGETPU_TEST)

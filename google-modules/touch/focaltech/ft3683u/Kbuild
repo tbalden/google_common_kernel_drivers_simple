@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-ccflags-y += -I$(srctree)/../private/google-modules/touch/common
-ccflags-y += -I$(srctree)/../private/google-modules/touch/common/include
+ccflags-y += -I$(ROOT_DIR)/private/google-modules/touch/common
+ccflags-y += -I$(ROOT_DIR)/private/google-modules/touch/common/include
 
 obj-$(CONFIG_TOUCHSCREEN_FTS) = focal_touch.o
 focal_touch-objs += focaltech_core.o focaltech_ex_fun.o focaltech_ex_mode.o \

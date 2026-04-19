@@ -14,6 +14,7 @@
 #include <linux/mm_types.h>
 #include <linux/mutex.h>
 #include <linux/refcount.h>
+#include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 
@@ -142,13 +143,11 @@ static void gcip_telemetry_fw_log(const struct gcip_telemetry *log)
 		copy_with_wrap(header, buffer, entry.length, queue_size, start);
 		buffer[entry.length] = 0;
 
-		if (entry.code > GCIP_FW_DMESG_LOG_LEVEL)
-			continue;
-
 		switch (entry.code) {
 		case GCIP_FW_LOG_LEVEL_VERBOSE:
 		case GCIP_FW_LOG_LEVEL_DEBUG:
-			dev_dbg(dev, "%s", buffer);
+		case GCIP_FW_LOG_LEVEL_INFO:
+			dev_info(dev, "%s", buffer);
 			break;
 		case GCIP_FW_LOG_LEVEL_WARN:
 			dev_warn(dev, "%s", buffer);
@@ -156,10 +155,6 @@ static void gcip_telemetry_fw_log(const struct gcip_telemetry *log)
 		case GCIP_FW_LOG_LEVEL_FATAL:
 		case GCIP_FW_LOG_LEVEL_ERROR:
 			dev_err(dev, "%s", buffer);
-			break;
-		case GCIP_FW_LOG_LEVEL_INFO:
-		default:
-			dev_info(dev, "%s", buffer);
 			break;
 		}
 	}
@@ -238,6 +233,31 @@ static const struct vm_operations_struct gcip_telemetry_vma_ops = {
 	.close = gcip_telemetry_vma_ops_close,
 };
 
+static int gcip_telemetry_mmap_sgt(struct gcip_telemetry *tel, struct vm_area_struct *vma,
+				   unsigned long size)
+{
+	struct scatterlist *sg;
+	int i;
+	unsigned long vm_next = vma->vm_start;
+
+	for_each_sgtable_sg(tel->memory.sgt, sg, i) {
+		unsigned long pfn = page_to_pfn(sg_page(sg));
+		int ret;
+
+		ret = remap_pfn_range(vma, vm_next, pfn, sg->length, vma->vm_page_prot);
+		if (ret) {
+			dev_err(tel->dev, "cannot remap log/trace segment#%d size=%u ret=%d\n",
+				i, sg->length, ret);
+			/* zap_page_range* not exported to modules, leave partial map in place. */
+			return ret;
+		}
+
+		vm_next += sg->length;
+	}
+
+	return 0;
+}
+
 int gcip_telemetry_mmap(struct gcip_telemetry *tel, struct vm_area_struct *vma)
 {
 	struct gcip_memory *mem = &tel->memory;
@@ -251,9 +271,6 @@ int gcip_telemetry_mmap(struct gcip_telemetry *tel, struct vm_area_struct *vma)
 		return -EINVAL;
 	}
 
-	dev_dbg(tel->dev, "%s: virt = %pK phys = %pap\n", __func__, mem->virt_addr,
-		&mem->phys_addr);
-
 	mutex_lock(&tel->mmap_lock);
 
 	if (tel->mmapped_count) {
@@ -266,8 +283,17 @@ int gcip_telemetry_mmap(struct gcip_telemetry *tel, struct vm_area_struct *vma)
 	vm_flags_set(vma, VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP);
 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 	vma->vm_pgoff = 0;
-	ret = remap_pfn_range(vma, vma->vm_start, mem->phys_addr >> PAGE_SHIFT, size,
-			      vma->vm_page_prot);
+
+	if (mem->sgt) {
+		dev_dbg(tel->dev, "%s: virt = %pK sgt\n", __func__, mem->virt_addr);
+		ret = gcip_telemetry_mmap_sgt(tel, vma, size);
+	} else {
+		dev_dbg(tel->dev, "%s: virt = %pK phys = %pap\n", __func__, mem->virt_addr,
+			&mem->phys_addr);
+		ret = remap_pfn_range(vma, vma->vm_start, mem->phys_addr >> PAGE_SHIFT, size,
+				      vma->vm_page_prot);
+	}
+
 	vma->vm_pgoff = orig_pgoff;
 	if (ret)
 		goto err_unlock;
@@ -287,7 +313,7 @@ err_unlock:
 }
 
 /**
- * gcip_telemetry_worker() - The worker for processing the log/trace buffers.
+ * gcip_telemetry_worker() - The worker for processing log/trace/hwtrace buffers.
  * @work: The work_struct of the telemetry.
  */
 static void gcip_telemetry_worker(struct work_struct *work)
@@ -359,6 +385,11 @@ int gcip_telemetry_init(struct gcip_telemetry *tel, enum gcip_telemetry_type typ
 		break;
 	case GCIP_TELEMETRY_TYPE_TRACE:
 		name = GCIP_TELEMETRY_NAME_TRACE;
+		fallback_fn = gcip_telemetry_fw_trace;
+		header = mem->virt_addr;
+		break;
+	case GCIP_TELEMETRY_TYPE_HWTRACE:
+		name = GCIP_TELEMETRY_NAME_HWTRACE;
 		fallback_fn = gcip_telemetry_fw_trace;
 		header = mem->virt_addr;
 		break;

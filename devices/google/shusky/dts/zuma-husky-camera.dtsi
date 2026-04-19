@@ -268,7 +268,9 @@
 					 0
 					 0
 					 1000
-					 1000>;
+					 /* AF need 7.1ms (rounded to 8ms) before I2C stable,
+					    added the remaining here */
+					 6000>;
 
 				/* Power down sequence */
 				power-down-seqs =
@@ -952,7 +954,9 @@
 					<500
 					 750
 					 0
-					 0>;
+					 /* AF need 7.1ms (rounded to 8ms) before I2C stable,
+					    added the remaining here */
+					 8000>;
 
 				/* Power down sequence */
 				power-down-seqs =
@@ -1019,7 +1023,9 @@
 					 750
 					 1000
 					 500
-					 0>;
+					 /* AF need 7.1ms (rounded to 8ms) before I2C stable,
+					    added the remaining here */
+					 8000>;
 
 				/* Power down sequence */
 				power-down-seqs =

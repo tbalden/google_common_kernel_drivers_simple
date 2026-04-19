@@ -2,7 +2,7 @@
 /*
  * Support for using dma-bufs.
  *
- * Copyright (C) 2022 Google LLC
+ * Copyright (C) 2022-2025 Google LLC
  */
 
 #include <linux/dma-buf.h>
@@ -12,6 +12,7 @@
 #include <gcip/gcip-config.h>
 #include <gcip/gcip-iommu-reserve.h>
 #include <gcip/gcip-iommu.h>
+#include <gcip/gcip-mapping.h>
 
 #include "gxp-dma.h"
 #include "gxp-dmabuf.h"
@@ -49,8 +50,7 @@ struct gxp_mapping *gxp_dmabuf_map(struct gxp_dev *gxp, struct gcip_iommu_reserv
 		return ERR_CAST(dmabuf);
 
 	/* Skip CPU cache syncs while mapping this dmabuf. */
-	gcip_map_flags = gxp_dma_encode_gcip_map_flags(flags, 0) |
-			 GCIP_MAP_FLAGS_DMA_ATTR_TO_FLAGS(DMA_ATTR_SKIP_CPU_SYNC);
+	gcip_map_flags = gxp_dma_encode_gcip_map_flags(flags, DMA_ATTR_SKIP_CPU_SYNC);
 
 	mapping = kzalloc(sizeof(*mapping), GFP_KERNEL);
 	if (!mapping) {
@@ -88,5 +88,3 @@ err_dma_buf_put:
 	dma_buf_put(dmabuf);
 	return ERR_PTR(ret);
 }
-
-MODULE_IMPORT_NS(DMA_BUF);

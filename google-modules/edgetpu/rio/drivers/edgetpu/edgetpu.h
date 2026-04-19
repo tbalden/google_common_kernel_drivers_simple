@@ -11,6 +11,22 @@
 #include <linux/ioctl.h>
 #include <linux/types.h>
 
+/**
+ * define _EDGETPU_INTERFACE_VERSION_MAJOR - The major version number of the interfaces in this
+ * file.
+ *
+ * This number must be incremented when deprecated features or fields are removed.
+ */
+#define _EDGETPU_INTERFACE_VERSION_MAJOR 1
+
+/**
+ * define _EDGETPU_INTERFACE_VERSION_MINOR - The minor version number of the interfaces in this
+ * file.
+ * This number must be incremented when new features or fields are added, or when existing features
+ * are marked deprecated.
+ */
+#define _EDGETPU_INTERFACE_VERSION_MINOR 0
+
 /*
  * Legacy Platforms Only: mmap offsets for mailbox CSRs, command queue, and response queue.
  *
@@ -33,6 +49,7 @@
 #define EDGETPU_MMAP_TRACE2_BUFFER_OFFSET 0x2000000
 #define EDGETPU_MMAP_LOG3_BUFFER_OFFSET 0x2100000
 #define EDGETPU_MMAP_TRACE3_BUFFER_OFFSET 0x2200000
+#define EDGETPU_MMAP_HWTRACE_BUFFER_OFFSET 0x2300000
 
 /* EdgeTPU map flag macros */
 
@@ -240,6 +257,7 @@ struct edgetpu_mailbox_attr {
  */
 #define EDGETPU_PERDIE_EVENT_LOGS_AVAILABLE		0x1000
 #define EDGETPU_PERDIE_EVENT_TRACES_AVAILABLE		0x1001
+#define EDGETPU_PERDIE_EVENT_HWTRACES_AVAILABLE		0x1002
 
 /*
  * Set eventfd for notification of per-die events from kernel.
@@ -284,7 +302,7 @@ struct edgetpu_sync_ioctl {
 	 * Set RESERVED bits to 0 to ensure backwards compatibility.
 	 *
 	 * Bitfields:
-	 *   [1:0]   - DMA_DIRECTION:
+	 *   [1:0]   - DMA_DIRECTION: Deprecated. Directions will be fetched from internal records.
 	 *               00 = DMA_BIDIRECTIONAL
 	 *               01 = DMA_TO_DEVICE
 	 *               10 = DMA_FROM_DEVICE
@@ -424,9 +442,8 @@ struct edgetpu_map_bulk_dmabuf_ioctl {
 	/*
 	 * The list of file descriptors backed by dma-buf.
 	 *
-	 * The first FD will be mapped to the first device in the target group
-	 * (i.e. the master die); the second FD will be mapped to the second
-	 * device and so on.
+	 * The first FD will be mapped to the first device in the target group;
+	 * the second FD will be mapped to the second device and so on.
 	 * Only the first N FDs will be used, where N is the number of devices
 	 * in the group.
 	 *
@@ -439,7 +456,7 @@ struct edgetpu_map_bulk_dmabuf_ioctl {
 };
 
 /*
- * Map a list of dma-buf FDs to devices in the group.
+ * Obsolete: Map a list of dma-buf FDs to devices in the group.
  *
  * On success, @device_address is set and the syscall returns zero.
  *
@@ -452,7 +469,7 @@ struct edgetpu_map_bulk_dmabuf_ioctl {
 #define EDGETPU_MAP_BULK_DMABUF \
 	_IOWR(EDGETPU_IOCTL_BASE, 22, struct edgetpu_map_bulk_dmabuf_ioctl)
 /*
- * Un-map address previously mapped by EDGETPU_MAP_BULK_DMABUF.
+ * Obsolete: Un-map address previously mapped by EDGETPU_MAP_BULK_DMABUF.
  *
  * Only field @device_address in the third argument is used, other fields such
  * as @size will be fetched from the kernel's internal records.
@@ -656,8 +673,9 @@ struct edgetpu_vii_command {
 	 */
 	__u16 code;
 	/*
-	 * Priority level from 0 to 99, with 0 being the highest.
+	 * Priority level from 0 to 11, with 0 being the highest.
 	 * Pending commands with higher priorities will be executed before lower priority ones.
+	 * Firmware behavior for invalid values is undefined.
 	 */
 	__u8 priority;
 	__u8 reserved_0[5];
@@ -881,6 +899,8 @@ struct edgetpu_vii_litebuf_response_ioctl {
  * The set of IOCTLs supported by the limited interface includes:
  * - EDGETPU_MAP_BUFFER
  * - EDGETPU_UNMAP_BUFFER
+ * - EDGETPU_MAP_DMABUF
+ * - EDGETPU_UNMAP_DMABUF
  *
  * To create a limited interface, a file descriptor must be obtained by calling open() on the
  * limited interface's device node (e.g. /dev/edgetpu-limited). The limited interface FD must then
@@ -910,5 +930,38 @@ struct edgetpu_vii_litebuf_response_ioctl {
  * cannot run the associated models until another call to remap buffers returns successfully.
  */
 #define EDGETPU_REMAP_BUFFERS	_IO(EDGETPU_IOCTL_BASE, 41)
+
+#define EDGETPU_INTERFACE_VERSION_BUFFER_SIZE 64
+
+/**
+ * struct edgetpu_interface_version_ioctl - The object to output the version information of the
+ * driver.
+ * @version_major: The major version number of the current driver.
+ * @version_minor: The minor version number of the current driver.
+ */
+struct edgetpu_interface_version_ioctl {
+	__u16 version_major;
+	__u16 version_minor;
+	/**
+	 * @version_build: The build identifier of current driver.
+	 *
+	 * The identifier is a NULL-terminated string which is the git hash of the commit that the
+	 * driver was built from.
+	 *
+	 * If the driver had uncommitted changes the string will end with "-dirty".
+	 */
+	char version_build[EDGETPU_INTERFACE_VERSION_BUFFER_SIZE];
+};
+
+/**
+ * define EDGETPU_GET_INTERFACE_VERSION - The encoded cmd for querying the driver's interface
+ * version.
+ *
+ * Return the interface version of the running kernel driver. A user-space application must check
+ * the version through this ioctl for compatibility, instead of directly checking the
+ * _EDGETPU_INTERFACE_VERSION_* macros.
+ */
+#define EDGETPU_GET_INTERFACE_VERSION _IOR(EDGETPU_IOCTL_BASE, 42, \
+					   struct edgetpu_interface_version_ioctl)
 
 #endif /* __EDGETPU_H__ */

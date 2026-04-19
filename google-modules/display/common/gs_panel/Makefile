@@ -5,7 +5,7 @@ KBASE_PATH_RELATIVE = $(M)
 EXTRA_CFLAGS += -DDYNAMIC_DEBUG_MODULE=1
 EXTRA_CFLAGS += -Werror
 
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/display/common/gs_drm/Module.symvers
+EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/display/common/gs_drm/Module.symvers
 
 modules modules_install headers_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 \

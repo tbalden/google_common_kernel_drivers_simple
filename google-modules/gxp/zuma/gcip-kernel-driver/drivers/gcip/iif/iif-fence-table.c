@@ -209,7 +209,7 @@ void iif_fence_table_init_single_shot_fence_entry(struct iif_fence_table *fence_
 						  unsigned int total_signalers, u8 waiters)
 {
 	fence_table->wait_table[fence_id].waiting_ips = waiters;
-	fence_table->wait_table[fence_id].reusable = 0;
+	fence_table->wait_table[fence_id].flag = 0;
 	fence_table->signal_table[fence_id].remaining_signals = total_signalers;
 	fence_table->signal_table[fence_id].flag = 0;
 	fence_table->signal_table[fence_id].error = 0;
@@ -219,7 +219,7 @@ void iif_fence_table_init_reusable_fence_entry(struct iif_fence_table *fence_tab
 					       unsigned int fence_id, u16 timeout, u8 waiters)
 {
 	fence_table->wait_table[fence_id].waiting_ips = waiters;
-	fence_table->wait_table[fence_id].reusable = BIT(0);
+	fence_table->wait_table[fence_id].flag = BIT(IIF_WAIT_TABLE_FLAG_REUSABLE_BIT);
 	memset(fence_table->wait_table[fence_id].sync_points, 0,
 	       sizeof(fence_table->wait_table[fence_id].sync_points));
 

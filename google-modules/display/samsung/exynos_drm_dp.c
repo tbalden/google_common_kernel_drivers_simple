@@ -152,6 +152,14 @@ static bool dp_get_fast_training(struct dp_device *dp)
 	return (dp->host.fast_training && dp->sink.fast_training);
 }
 
+static void dp_connection_result_update(struct dp_device *dp, bool success)
+{
+	if (success)
+		dp->stats.connection_success++;
+	else
+		dp->stats.connection_failure++;
+}
+
 #define MAX_VOLTAGE_LEVEL 3
 #define MAX_PREEMPH_LEVEL 3
 
@@ -1316,9 +1324,15 @@ static int dp_set_audio_infoframe(struct dp_device *dp)
 	return 0;
 }
 
+/*
+ * Add one frame buffer time for the mode switch
+ */
+#define MIN_MODE_SWITCH_INTERVAL_US 20000
+
 static void dp_enable(struct drm_encoder *encoder)
 {
 	struct dp_device *dp = encoder_to_dp(encoder);
+	s64 delta_us;
 
 	if (dp->restart_pending) {
 		dp_debug(dp, "%s: ignored, because of restart_pending", __func__);
@@ -1327,6 +1341,13 @@ static void dp_enable(struct drm_encoder *encoder)
 
 	mutex_lock(&dp->cmd_lock);
 
+	if (dp->is_mode_changed && dp->last_disable_ts != 0) {
+		delta_us = ktime_us_delta(ktime_get(), dp->last_disable_ts);
+		if (delta_us < MIN_MODE_SWITCH_INTERVAL_US)
+			udelay(MIN_MODE_SWITCH_INTERVAL_US - delta_us);
+	}
+
+	dp->is_mode_changed = false;
 	dp->hw_config.bpc = dp_get_bpc(dp);
 	dp->hw_config.range = VESA_RANGE;
 	dp_set_video_timing(dp);
@@ -1398,6 +1419,8 @@ static void dp_disable(struct drm_encoder *encoder)
 
 		dp->state = DP_STATE_ON;
 		dp_info(dp, "%s: DP State changed to ON\n", __func__);
+
+		dp->last_disable_ts = ktime_get();
 	} else
 		dp_info(dp, "%s: DP State is not RUN\n", __func__);
 
@@ -1658,6 +1681,8 @@ static void dp_on_by_hpd_plug(struct dp_device *dp)
 		dp_info(dp, "%s: detected pending HPD UNPLUG\n", __func__);
 		return;
 	}
+
+	dp_connection_result_update(dp, true);
 
 	if (dp->bist_mode == DP_BIST_OFF) {
 		/*
@@ -1931,6 +1956,8 @@ static int dp_link_down_event_handler(struct dp_device *dp)
 			dp_update_link_status(dp, LINK_TRAINING_FAILURE);
 		else
 			dp_update_link_status(dp, LINK_TRAINING_FAILURE_SINK);
+
+		dp_connection_result_update(dp, false);
 		dp_err(dp, "failed to DP Link Up during re-negotiation\n");
 		return ret;
 	}
@@ -1955,6 +1982,8 @@ static int dp_downstream_port_event_handler(struct dp_device *dp, int new_sink_c
 				dp_update_link_status(dp, LINK_TRAINING_FAILURE);
 			else
 				dp_update_link_status(dp, LINK_TRAINING_FAILURE_SINK);
+
+			dp_connection_result_update(dp, false);
 			dp_err(dp, "failed to DP Link Up during DFP event\n");
 			return ret;
 		}
@@ -2084,6 +2113,7 @@ static void dp_work_hpd(enum hotplug_state state)
 
 HPD_PLUG_FAIL:
 	dp_err(dp, "[HPD_PLUG fail] Check CCIC or USB!!\n");
+	dp_connection_result_update(dp, false);
 	dp_set_hpd_state(dp, EXYNOS_HPD_UNPLUG);
 	hdcp_dplink_connect_state(DP_DISCONNECT);
 	dp_hw_deinit(&dp->hw_config);
@@ -2486,6 +2516,7 @@ static void dp_atomic_mode_set(struct drm_encoder *encoder,
 
 	if (!drm_mode_equal(&dp->cur_mode, adjusted_mode)) {
 		drm_mode_copy(&dp->cur_mode, adjusted_mode);
+		dp->is_mode_changed = true;
 	}
 }
 
@@ -2710,6 +2741,11 @@ static enum drm_mode_status dp_conn_mode_valid(struct drm_connector *connector, 
 	if (link_data_rate < mode_data_rate) {
 		dp_info(dp, "DROP: " DRM_MODE_FMT "\n", DRM_MODE_ARG(mode));
 		return MODE_CLOCK_HIGH;
+	}
+
+	if (drm_mode_vrefresh(mode) != 60) {
+		dp_info(dp, "DROP: " DRM_MODE_FMT "\n", DRM_MODE_ARG(mode));
+		return MODE_VSYNC;
 	}
 
 	dp_info(dp, "PICK: " DRM_MODE_FMT "\n", DRM_MODE_ARG(mode));
@@ -3313,6 +3349,25 @@ static ssize_t fec_dsc_not_supported_show(struct device *dev, struct device_attr
 }
 static DEVICE_ATTR_RO(fec_dsc_not_supported);
 
+/* Connection Result Sysfs */
+static ssize_t connection_success_show(struct device *dev, struct device_attribute *attr,
+					  char *buf)
+{
+	struct dp_device *dp = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", dp->stats.connection_success);
+}
+static DEVICE_ATTR_RO(connection_success);
+
+static ssize_t connection_failure_show(struct device *dev, struct device_attribute *attr,
+					  char *buf)
+{
+	struct dp_device *dp = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", dp->stats.connection_failure);
+}
+static DEVICE_ATTR_RO(connection_failure);
+
 static struct attribute *dp_stats_attrs[] = { &dev_attr_link_negotiation_failures.attr,
 					      &dev_attr_edid_read_failures.attr,
 					      &dev_attr_dpcd_read_failures.attr,
@@ -3332,6 +3387,8 @@ static struct attribute *dp_stats_attrs[] = { &dev_attr_link_negotiation_failure
 					      &dev_attr_max_res_other.attr,
 					      &dev_attr_fec_dsc_supported.attr,
 					      &dev_attr_fec_dsc_not_supported.attr,
+					      &dev_attr_connection_success.attr,
+					      &dev_attr_connection_failure.attr,
 					      NULL };
 
 static const struct attribute_group dp_stats_group = {
@@ -3400,6 +3457,7 @@ static int dp_probe(struct platform_device *pdev)
 	/* Driver Initialization */
 	dp_drvdata = dp;
 	dp_init_info(dp);
+	dp->is_mode_changed = false;
 
 	dma_set_mask(dev, DMA_BIT_MASK(32));
 

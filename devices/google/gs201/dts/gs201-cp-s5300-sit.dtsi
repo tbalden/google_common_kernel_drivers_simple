@@ -74,6 +74,8 @@
 				offset_srinfo_offset = <0x64>;
 				offset_capability_offset = <0x70>;
 
+				offset_boot_indicator = <0x90>;
+
 				srinfo_offset = <0x400000>;
 				srinfo_size = <0x300000>;
 				capability_offset = <0xA0>;

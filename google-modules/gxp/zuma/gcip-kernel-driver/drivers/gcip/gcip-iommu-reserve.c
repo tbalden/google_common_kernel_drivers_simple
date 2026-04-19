@@ -20,6 +20,7 @@
 
 #include <gcip/gcip-iommu-reserve.h>
 #include <gcip/gcip-iommu.h>
+#include <gcip/gcip-mapping.h>
 
 /* Wrapping mapping structure to be managed by the `struct gcip_iommu_reserve_region`. */
 struct gcip_iommu_reserve_mapping {

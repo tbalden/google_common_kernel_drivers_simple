@@ -874,7 +874,6 @@ extern uint32 dhdpcie_rc_access_cap(dhd_bus_t *bus, int cap, uint offset, bool i
 extern uint32 dhdpcie_ep_access_cap(dhd_bus_t *bus, int cap, uint offset, bool is_ext,
 		bool is_write, uint32 writeval);
 extern uint32 dhd_debug_get_rc_linkcap(dhd_bus_t *bus);
-extern void dhdpcie_enable_irq_loop(dhd_bus_t *bus);
 #else
 static INLINE uint32 dhdpcie_rc_config_read(dhd_bus_t *bus, uint offset) { return 0;}
 static INLINE uint32 dhdpcie_rc_access_cap(dhd_bus_t *bus, int cap, uint offset, bool is_ext,

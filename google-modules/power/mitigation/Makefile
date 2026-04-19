@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 subdir-ccflags-y += \
-		-I$(KERNEL_SRC)/../private/google-modules/bms
+		-I$(ROOT_DIR)/private/google-modules/bms
 
 obj-$(CONFIG_GOOGLE_BCL) += google_bcl.o
 google_bcl-y			+= google_bcl_core.o
@@ -21,15 +21,15 @@ endif
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
 M ?= $(shell pwd)
 
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/bms/Module.symvers
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/bms/misc/Module.symvers
+EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/bms/Module.symvers
+EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/bms/misc/Module.symvers
 
-ifneq ($(wildcard $(OUT_DIR)/../private/google-modules/radio/samsung/*/Module.symvers),)
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/radio/samsung/*/Module.symvers
+ifneq ($(wildcard $(COMMON_OUT_DIR)/private/google-modules/radio/samsung/*/Module.symvers),)
+EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/radio/samsung/*/Module.symvers
 endif
 
 KBUILD_OPTIONS += CONFIG_GOOGLE_BCL=m
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 
 modules modules_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) \

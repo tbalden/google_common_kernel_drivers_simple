@@ -199,3 +199,19 @@ KernelVersion:	6.1
 Contact:	"Weizhung Ding" <weizhungding@google.com>
 Description:
 		HWC uses this interface to trigger HDCP negotiation.
+
+What:		/sys/devices/platform/110f0000.drmdp/drm-displayport-stats/connection_success
+Date:		November 2025
+KernelVersion:	6.1
+Contact:	"Weizhung Ding" <weizhungding@google.com>
+Description:
+		Used to count the number of connection successes. If connection is successful,
+		the count will be increased.
+
+What:		/sys/devices/platform/110f0000.drmdp/drm-displayport-stats/connection_failure
+Date:		November 2025
+KernelVersion:	6.1
+Contact:	"Weizhung Ding" <weizhungding@google.com>
+Description:
+		Used to count the number of connection failures. If connection fails,
+		the count will be increased.

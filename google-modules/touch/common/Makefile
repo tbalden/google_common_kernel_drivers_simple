@@ -9,11 +9,11 @@ KBUILD_OPTIONS	+= CONFIG_TOUCHSCREEN_OFFLOAD=m
 KBUILD_OPTIONS	+= CONFIG_GOOG_TOUCH_INTERFACE=m
 
 EXTRA_CFLAGS	+= -DDYNAMIC_DEBUG_MODULE
-EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/aoc/Module.symvers
-EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/display/common/gs_drm/Module.symvers
-EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/display/samsung/Module.symvers
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/aoc/Module.symvers
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/display/common/gs_drm/Module.symvers
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/display/samsung/Module.symvers
 
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 
 modules modules_install headers_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) $(KBUILD_OPTIONS) \

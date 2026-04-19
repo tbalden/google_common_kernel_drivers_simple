@@ -9,11 +9,9 @@ if [ -z "$BUILD_ON_BUILD_BOT" ]; then
   GKI_REMOTE="aosp"
 else
   GKI_REMOTE="android"
-  git -C aosp branch -D update_symbol_list-delete-after-push
+  git -C common/ack branch -D update_symbol_list-delete-after-push
 fi
-GKI_SHA=`repo --color=never info aosp | grep "Manifest revision" | sed 's/Manifest revision: //g'`
 GKI_BRANCH="android14-6.1" # Need to push symbol list changes to the main ACK branch (not release branches)
-GKI_STAGING_REMOTE="partner-common"
 PIXEL_SYMBOL_LIST="android/abi_gki_aarch64_pixel"
 TARGET=
 FOR_AOSP_PUSH_BRANCH="update_symbol_list-delete-after-push"
@@ -26,7 +24,7 @@ function usage {
 
   echo "$0 --config TARGET [-p|--prepare-aosp-abi BUG_NUMBER] [--change-id CHANGE_ID] [--continue]"
   echo
-  echo "This script will update the pixel symbol list."
+  echo "This script will update the pixel symbol list in common/ack."
   echo
   echo " The following arguments are supported:"
   echo "  --config <device-name>               Specifies which target to build."
@@ -40,7 +38,7 @@ function usage {
 
 # Add a trap to remove the temporary files in case of an error on early exit.
 cleanup_trap() {
-  rm -f ${TMP_LIST} ${COMMIT_TEXT}
+  rm -f ${COMMIT_TEXT}
   exit $1
 }
 trap 'cleanup_trap' EXIT
@@ -51,7 +49,6 @@ function exit_if_error {
     exit $1
   fi
 }
-
 
 while [[ $# -gt 0 ]]; do
   next="$1"
@@ -90,11 +87,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 function bazel_cquery() {
-  tools/bazel cquery --config="${TARGET}" "$@"
+  tools/bazel cquery --config="${TARGET}" --kernel_package=ack "$@"
 }
 
 function bazel_run() {
-  tools/bazel run --config="${TARGET}" "$@"
+  tools/bazel run --config="${TARGET}" --kernel_package=ack "$@"
 }
 
 KERNEL_TARGET="$(bazel_cquery \
@@ -108,25 +105,24 @@ echo "KERNEL_TARGET=${KERNEL_TARGET}"
 
 KERNEL_DIR="$(bazel_cquery \
   'filter(kernel_aarch64_sources, deps(//private/devices/google/common:kernel))' \
-  2>/dev/null | grep -v common | sed -n 's://\(.*\)\:kernel_aarch64_sources.*:\1:p')"
-if [[ -n "${KERNEL_DIR}" ]]; then
-  echo "KERNEL_DIR=${KERNEL_DIR}"
-else
+  2>/dev/null | tail -n 1 | sed -n 's://\(.*\)\:kernel_aarch64_sources.*:\1:p')"
+if [[ -z "${KERNEL_DIR}" ]]; then
   echo "Could not detect kernel dir"
   exit 1
 fi
+echo "KERNEL_DIR=${KERNEL_DIR}"
 
 
 function verify_aosp_tree {
-  pushd aosp >/dev/null
+  pushd "${KERNEL_DIR}" >/dev/null
     if ! git diff --quiet HEAD; then
       exit_if_error 1 \
-        "Found uncommitted changes in aosp/. Commit your changes before updating the ABI"
+        "Found uncommitted changes in "${KERNEL_DIR}". Commit your changes before updating the ABI"
     fi
 
     if [ "${CONTINUE_AFTER_REBASE}" = "0" ]; then
       if git branch | grep "\<${FOR_AOSP_PUSH_BRANCH}\>" 2>&1 >/dev/null; then
-        echo "The branch '${FOR_AOSP_PUSH_BRANCH}' already exists in aosp/. Please delete" >&2
+        echo "The branch '${FOR_AOSP_PUSH_BRANCH}' already exists in "${KERNEL_DIR}". Please delete" >&2
         echo "this branch (git branch -D ${FOR_AOSP_PUSH_BRANCH}) before continuing." >&2
         exit 1
       fi
@@ -146,20 +142,20 @@ function verify_aosp_tree {
 
 function print_final_message {
   echo "========================================================"
-  if ! git -C aosp diff --quiet ${GKI_REMOTE}/${GKI_BRANCH}..HEAD; then
-    echo " A symbol list commit in aosp/ was created for you."
+  if ! git -C "${KERNEL_DIR}" diff --quiet ${GKI_REMOTE}/${GKI_BRANCH}..HEAD; then
+    echo " A symbol list commit in ${KERNEL_DIR} was created for you."
     echo
     echo " Please verify your commit(s) before pushing. Here are the steps to perform:"
     echo
-    echo "   cd aosp"
+    echo "   cd ${KERNEL_DIR}"
     echo "   git log --oneline ${FOR_AOSP_PUSH_BRANCH}"
     echo "   git push ${GKI_REMOTE} ${FOR_AOSP_PUSH_BRANCH:-HEAD}:refs/for/${GKI_BRANCH}"
     echo
     if [ -n "${FOR_AOSP_PUSH_BRANCH}" ]; then
-      echo " After pushing your changes to aosp/, you can delete the temporary"
+      echo " After pushing your changes to ${KERNEL_DIR}, you can delete the temporary"
       echo " branch: ${FOR_AOSP_PUSH_BRANCH} using the command:"
       echo
-      echo "   cd aosp"
+      echo "   cd ${KERNEL_DIR}"
       echo "   git branch -D ${FOR_AOSP_PUSH_BRANCH}"
       echo
     fi
@@ -169,40 +165,15 @@ function print_final_message {
 
   # Rollback to the original branch/commit
   if [ -n "${AOSP_CUR_BRANCH_OR_SHA1}" ]; then
-    git -C aosp checkout --quiet ${AOSP_CUR_BRANCH_OR_SHA1}
+    git -C "${KERNEL_DIR}" checkout --quiet ${AOSP_CUR_BRANCH_OR_SHA1}
   fi
 }
 
-# Update the AOSP symbol list
-# $1 the base kernel
-# $2 the aosp kernel symbol list
-function apply_to_aosp_symbol_list {
-  TMP_LIST=$(mktemp -t symbol_list.XXXX)
-  cp -f $2 ${TMP_LIST}
-
-  # Only apply the new symbol additions. This makes sure that we don't copy
-  # over any symbols that are only found in the aosp-staging branch.
-  GKI_STAGING_BRANCH=`repo --color=never info ${KERNEL_DIR} | grep "Manifest revision" | sed 's/Manifest revision: //g'`
-  git -C $1 diff ${GKI_STAGING_REMOTE}/${GKI_STAGING_BRANCH}..HEAD ${PIXEL_SYMBOL_LIST} | grep "^+  " >> ${TMP_LIST}
-
-  # Remove leading plus signs from the `git show`
-  sed -i 's:^+  \(.\+\):  \1:g' ${TMP_LIST}
-
-  # Remove empty lines and comments
-  sed -i '/^$/d' ${TMP_LIST}
-  sed -i '/^#/d' ${TMP_LIST}
-  LC_ALL=en_US.utf8 sort -ubfi ${TMP_LIST} > $2
-
-  rm -f ${TMP_LIST}
-}
-
 function commit_the_symbol_list {
-  local aosp_dir="$1"
+  echo "Committing symbol list: ${KERNEL_DIR}"
 
-  echo "Committing symbol list: ${aosp_dir}"
-
-  NEW_SYMS=$(git -C "${aosp_dir}" diff ${PIXEL_SYMBOL_LIST} 2>/dev/null | sed -n 's/^+\s\+\(.*\)/\1\n/p')
-  OLD_SYMS=$(git -C "${aosp_dir}" diff ${PIXEL_SYMBOL_LIST} 2>/dev/null | sed -n 's/^-\s\+\(.*\)/\1\n/p')
+  NEW_SYMS=$(git -C "${KERNEL_DIR}" diff ${PIXEL_SYMBOL_LIST} 2>/dev/null | sed -n 's/^+\s\+\(.*\)/\1\n/p')
+  OLD_SYMS=$(git -C "${KERNEL_DIR}" diff ${PIXEL_SYMBOL_LIST} 2>/dev/null | sed -n 's/^-\s\+\(.*\)/\1\n/p')
 
   ADDING=$(for s in ${NEW_SYMS}; do [[ ! "${OLD_SYMS}" =~ ${s} ]] && echo "${s}"; done)
   REMOVING=$(for s in ${OLD_SYMS}; do [[ ! "${NEW_SYMS}" =~ ${s} ]] && echo "${s}"; done)
@@ -230,69 +201,15 @@ function commit_the_symbol_list {
   if [ -n "${CHANGE_ID}" ]; then
     echo "Change-Id: ${CHANGE_ID}" >> ${COMMIT_TEXT}
   fi
-  git -C "${aosp_dir}" commit --quiet -s -F ${COMMIT_TEXT} -- android/
-  if [[ "$?" != 0 ]] && [[ ${aosp_dir} =~ "aosp-" ]]; then
+  git -C "${KERNEL_DIR}" commit --quiet -s -F ${COMMIT_TEXT} -- android/
+  if [[ "$?" != 0 ]]; then
     rm -f ${COMMIT_TEXT}
-    echo "No symbol list changes detected in ${aosp_dir}."
+    echo "No symbol list changes detected in ${KERNEL_DIR}."
     exit 0
   fi
+  git -C "${KERNEL_DIR}" checkout --quiet -b ${FOR_AOSP_PUSH_BRANCH}
   echo "done..."
   rm -f ${COMMIT_TEXT}
-}
-
-function update_aosp_to_tot {
-
-  # Rebase to ${GKI_REMOTE}/${GKI_BRANCH} ToT before copying over the symbol list
-  pushd aosp/ >/dev/null
-    if [ "${CONTINUE_AFTER_REBASE}" = "0" ]; then
-      git checkout --quiet -b ${FOR_AOSP_PUSH_BRANCH}
-    fi
-    git fetch --quiet ${GKI_REMOTE} ${GKI_BRANCH} && git rebase --quiet FETCH_HEAD
-    err=$?
-    if [ "${err}" != "0" ]; then
-      echo "ERROR: Failed to rebase your aosp/ change(s) to the AOSP ToT." >&2
-      echo "To resolve this, please manually resolve the rebase conflicts" >&2
-      echo "and run: git rebase --continue. Then resume this script" >&2
-      echo "using the command:" >&2
-      echo >&2
-      echo "  $0 --bug ${BUG} --continue" >&2
-      echo >&2
-      echo "To return to your original tree in aosp/ after finishing the" >&2
-      echo "symbol list update, run this git command:" >&2
-      echo >&2
-      echo "  git checkout ${AOSP_CUR_BRANCH_OR_SHA1}" >&2
-      echo >&2
-      exit 1
-    fi
-  popd >/dev/null
-
-  if [[ "${KERNEL_DIR}" != "aosp" ]]; then
-    # Since we are using aosp-staging, we need to update the AOSP symbol list
-    # too.
-    #
-    # First, rollback any symbol list changes in aosp/ and then apply the
-    # aosp-staging symbol list diff to the aosp version of the pixel symbol
-    # list. This ensures that we only add symbols needed based on the current
-    # pixel changes.
-    #
-    # Note: we are NOT copying over the aosp-staging/ symbol list to the aosp/
-    # symbol list in order to avoid pulling in symbols that only exist on the
-    # aosp-staging branch.
-    git -C aosp show --quiet ${GKI_REMOTE}/${GKI_BRANCH}:"${PIXEL_SYMBOL_LIST}" \
-      > aosp/"${PIXEL_SYMBOL_LIST}"
-    apply_to_aosp_symbol_list ${KERNEL_DIR} "aosp/${PIXEL_SYMBOL_LIST}"
-    # Sometimes protected exports are not up to date, which blocks abi update.
-    bazel_run //aosp:kernel_aarch64_abi_update_protected_exports
-    # Update abi in aosp, return 0: no update, 4: updated
-    bazel_run //aosp:kernel_aarch64_abi_update
-    ret="$?"
-    if (( ret != 4 )); then
-      exit_if_error ${ret} "Failed to update abi_gki_aarch64.stg"
-    fi
-
-    # Create the AOSP symbol list commit
-    commit_the_symbol_list "aosp"
-  fi
 }
 
 
@@ -322,11 +239,6 @@ if [ "${CONTINUE_AFTER_REBASE}" = "0" ]; then
   fi
 
   commit_the_symbol_list ${KERNEL_DIR}
-fi
-
-# Rebase the symbol list change to the AOSP ToT
-if [ -z "$BUILD_ON_BUILD_BOT" ]; then
-  update_aosp_to_tot
 fi
 
 print_final_message

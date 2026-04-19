@@ -18,6 +18,7 @@
 #include <gcip/gcip-image-config.h>
 #include <gcip/gcip-iommu-reserve.h>
 #include <gcip/gcip-iommu.h>
+#include <gcip/gcip-mapping.h>
 #include <gcip/gcip-memory.h>
 #include <gcip/gcip-status-code.h>
 
@@ -86,7 +87,7 @@ static int map_ns_region(struct gxp_virtual_device *vd, dma_addr_t daddr,
 	struct sg_table *sgt;
 	size_t idx;
 	const size_t n_reg = ARRAY_SIZE(vd->ns_regions);
-	u64 gcip_map_flags = GCIP_MAP_FLAGS_DMA_RW;
+	u64 gcip_map_flags = gcip_iommu_map_flags_dma_rw();
 
 	for (idx = 0; idx < n_reg; idx++) {
 		if (!vd->ns_regions[idx].sgt)
@@ -117,6 +118,7 @@ static void unmap_ns_region(struct gxp_virtual_device *vd, dma_addr_t daddr)
 	struct sg_table *sgt;
 	size_t idx;
 	const size_t n_reg = ARRAY_SIZE(vd->ns_regions);
+	u64 gcip_map_flags = gcip_iommu_map_flags_dma_rw();
 
 	for (idx = 0; idx < n_reg; idx++) {
 		if (daddr == vd->ns_regions[idx].daddr)
@@ -130,7 +132,7 @@ static void unmap_ns_region(struct gxp_virtual_device *vd, dma_addr_t daddr)
 	sgt = vd->ns_regions[idx].sgt;
 	vd->ns_regions[idx].sgt = NULL;
 	vd->ns_regions[idx].daddr = 0;
-	gcip_iommu_domain_unmap_sgt_from_iova(vd->domain, sgt, GCIP_MAP_FLAGS_DMA_RW);
+	gcip_iommu_domain_unmap_sgt_from_iova(vd->domain, sgt, gcip_map_flags);
 	gcip_free_noncontiguous(sgt);
 }
 
@@ -139,12 +141,13 @@ static int map_core_shared_buffer(struct gxp_virtual_device *vd)
 {
 	struct gxp_dev *gxp = vd->gxp;
 	const size_t shared_size = GXP_SHARED_SLICE_SIZE;
+	u64 gcip_map_flags = gcip_iommu_map_flags_dma_rw();
 
 	if (!gxp->shared_buf.phys_addr)
 		return 0;
 	return gcip_iommu_map(vd->domain, gxp->shared_buf.dma_addr,
 			      gxp->shared_buf.phys_addr + shared_size * vd->slice_index,
-			      shared_size, GCIP_MAP_FLAGS_DMA_RW);
+			      shared_size, gcip_map_flags);
 }
 
 /* Reverts map_core_shared_buffer. */
@@ -161,10 +164,12 @@ static void unmap_core_shared_buffer(struct gxp_virtual_device *vd)
 /* Maps @res->dma_addr to @res->phys_addr to @vd->domain. */
 static int map_resource(struct gxp_virtual_device *vd, struct gcip_memory *res)
 {
+	u64 gcip_map_flags = gcip_iommu_map_flags_dma_rw();
+
 	if (res->dma_addr == 0)
 		return 0;
-	return gcip_iommu_map(vd->domain, res->dma_addr, res->phys_addr, res->size,
-			      GCIP_MAP_FLAGS_DMA_RW);
+
+	return gcip_iommu_map(vd->domain, res->dma_addr, res->phys_addr, res->size, gcip_map_flags);
 }
 
 /* Reverts map_resource. */
@@ -185,6 +190,7 @@ static int map_sys_cfg_resource(struct gxp_virtual_device *vd, struct gcip_memor
 	struct gxp_dev *gxp = vd->gxp;
 	int ret;
 	const size_t ro_size = res->size / 2;
+	u64 gcip_map_flags;
 
 	if (res->dma_addr == 0)
 		return 0;
@@ -192,12 +198,15 @@ static int map_sys_cfg_resource(struct gxp_virtual_device *vd, struct gcip_memor
 		dev_err(gxp->dev, "invalid system cfg size: %#lx", res->size);
 		return -EINVAL;
 	}
-	ret = gcip_iommu_map(vd->domain, res->dma_addr, res->phys_addr, ro_size,
-			     GCIP_MAP_FLAGS_DMA_RO);
+
+	gcip_map_flags = gcip_iommu_map_flags_dma_ro();
+	ret = gcip_iommu_map(vd->domain, res->dma_addr, res->phys_addr, ro_size, gcip_map_flags);
 	if (ret)
 		return ret;
+
+	gcip_map_flags = gcip_iommu_map_flags_dma_rw();
 	ret = gcip_iommu_map(vd->domain, res->dma_addr + ro_size, res->phys_addr + ro_size,
-			     res->size - ro_size, GCIP_MAP_FLAGS_DMA_RW);
+			     res->size - ro_size, gcip_map_flags);
 	if (ret) {
 		gcip_iommu_unmap(vd->domain, res->dma_addr, ro_size);
 		return ret;
@@ -436,9 +445,11 @@ static void unmap_fw_image_config(struct gxp_dev *gxp,
 
 static int map_fw_image(struct gxp_dev *gxp, struct gxp_virtual_device *vd)
 {
+	u64 gcip_map_flags = gcip_iommu_map_flags_dma_ro();
+
 	/* Maps all FW regions together. */
 	return gcip_iommu_map(vd->domain, gxp->fwbufs[0].dma_addr, gxp->fwbufs[0].phys_addr,
-			      gxp->fwbufs[0].size * GXP_NUM_CORES, GCIP_MAP_FLAGS_DMA_RO);
+			      gxp->fwbufs[0].size * GXP_NUM_CORES, gcip_map_flags);
 }
 
 static void unmap_fw_image(struct gxp_dev *gxp, struct gxp_virtual_device *vd)

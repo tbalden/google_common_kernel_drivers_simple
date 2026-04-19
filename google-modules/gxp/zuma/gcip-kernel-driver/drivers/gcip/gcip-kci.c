@@ -269,12 +269,11 @@ int gcip_kci_send_cmd_return_resp(struct gcip_kci *kci, struct gcip_kci_command_
 				  struct gcip_kci_response_element *resp)
 {
 	int ret;
-	gcip_mailbox_cmd_flags_t flags = 0;
 
-	if (cmd->seq & GCIP_KCI_REVERSE_FLAG)
-		flags |= GCIP_MAILBOX_CMD_FLAGS_SKIP_ASSIGN_SEQ;
+	if (!(cmd->seq & GCIP_KCI_REVERSE_FLAG))
+		cmd->seq = atomic64_add_return(1, &kci->cur_seq);
 
-	ret = gcip_mailbox_send_cmd(&kci->mailbox, cmd, resp, flags);
+	ret = gcip_mailbox_send_cmd(&kci->mailbox, cmd, resp, 0);
 	if (ret) {
 		dev_err(kci->dev, "Sending KCI command %d returned error: %d", cmd->code, ret);
 		return ret;
@@ -446,7 +445,7 @@ static inline void gcip_kci_set_data(struct gcip_kci *kci, void *data)
 int gcip_kci_init(struct gcip_kci *kci, const struct gcip_kci_args *args)
 {
 	int ret;
-	struct gcip_mailbox_args mailbox_args;
+	struct gcip_mailbox_args mailbox_args = {};
 
 	if (kci->ops)
 		return 0;
@@ -463,7 +462,7 @@ int gcip_kci_init(struct gcip_kci *kci, const struct gcip_kci_args *args)
 		goto err_unset_ops;
 
 	mailbox_args.dev = args->dev;
-	mailbox_args.mode = GCIP_MAILBOX_MODE_ALL;
+	mailbox_args.mode = GCIP_MAILBOX_MODE_BIDIRECTIONAL | GCIP_MAILBOX_MODE_SEQ_EXTERNAL;
 	mailbox_args.queue_wrap_bit = args->queue_wrap_bit;
 	mailbox_args.tx_queue = args->cmd_queue;
 	mailbox_args.tx_elem_size = sizeof(struct gcip_kci_command_element);
@@ -477,6 +476,7 @@ int gcip_kci_init(struct gcip_kci *kci, const struct gcip_kci_args *args)
 	if (ret)
 		goto err_unset_ops;
 
+	atomic64_set(&kci->cur_seq, 0);
 	mutex_init(&kci->cmd_queue_lock);
 	spin_lock_init(&kci->resp_queue_lock);
 	init_waitqueue_head(&kci->resp_doorbell_waitq);

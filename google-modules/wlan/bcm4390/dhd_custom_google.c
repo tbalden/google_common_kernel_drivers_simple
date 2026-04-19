@@ -39,9 +39,18 @@
 #include <dhd_dbg.h>
 #include <dhd.h>
 
-#if defined(CONFIG_SOC_GOOGLE)
+#if IS_ENABLED(CONFIG_SOC_GOOGLE)
+#if IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
 #include <linux/exynos-pci-ctrl.h>
+#include <linux/exynos-pci-noti.h>
+#else
+#include <linux/pcie_google_if.h>
+#endif  /* CONFIG_PCI_EXYNOS_GS */
 #endif /* CONFIG_SOC_GOOGLE */
+
+#if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
+#include <soc/google/google-cdd.h>
+#endif /* CONFIG_GOOGLE_CRASH_DEBUG_DUMP */
 
 #ifdef DHD_COREDUMP
 #include <linux/platform_data/sscoredump.h>
@@ -51,11 +60,46 @@
 #include <linux/cpufreq.h>
 #endif /* DHD_HOST_CPUFREQ_BOOST */
 
-#define EXYNOS_PCIE_VENDOR_ID 0x144d
-#if defined(CONFIG_SOC_GOOGLE)
-#define EXYNOS_PCIE_DEVICE_ID 0xecec
-#define EXYNOS_PCIE_CH_NUM 0
+#ifdef DHD_ART
+#include <linux/nl80211.h>
+#include <net/mac80211.h>
+#include <dhd_linux_priv.h>
+#include "wl_cfg80211.h"
+#include "bcmwifi_rates.h"
+#include "wldev_common.h"
+#endif /* DHD_ART */
+#ifdef WONDERTAP
+#include <wonder/wondertap.h>
+#include <linux/component.h>
+#endif /* WONDERTAP */
+
+#if IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
+#define GOOGLE_PCIE_VENDOR_ID 0x144d
+#define GOOGLE_PCIE_DEVICE_ID 0xecec
+#define GOOGLE_PCIE_CH_NUM 0
 #else
+#define GOOGLE_PCIE_VENDOR_ID 0x1ae0
+#define GOOGLE_PCIE_DEVICE_ID 0xc001
+#define GOOGLE_PCIE_CH_NUM 0
+#endif /* CONFIG_PCI_EXYNOS_GS */
+
+#if IS_ENABLED(CONFIG_SOC_LGA)
+#define MSI_MASK_REG 0x3c80082c
+#define MSI_STAT_REG 0x3c800830
+#define PCI_ICDS_REG 0x3c009554
+#endif
+
+#if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
+#define CDD_WIFI_STAT_PCIE_LINK_UP BIT(0)
+uint32_t gcdd_wifi_stat;
+#endif /* CONFIG_GOOGLE_CRASH_DEBUG_DUMP */
+
+#if !IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
+uint32 support_l1ss;
+module_param(support_l1ss, uint, 0660);
+#endif /* !IS_ENABLED(CONFIG_PCI_EXYNOS_GS) */
+
+#ifndef CONFIG_SOC_GOOGLE
 #error "Not supported platform"
 #endif /* CONFIG_SOC_GOOGLE */
 
@@ -73,45 +117,50 @@ static int wlan_reg_on = -1;
 
 static int wlan_host_wake_up = -1;
 #ifdef CONFIG_BCMDHD_OOB_HOST_WAKE
-static int wlan_host_wake_irq = 0;
+static int wlan_host_wake_irq;
 #endif /* CONFIG_BCMDHD_OOB_HOST_WAKE */
 #define WIFI_WLAN_HOST_WAKE_PROPNAME    "wl_host_wake"
 
-static uint64 tx_pkt_cnt = 0;
-static uint64 rx_pkt_cnt = 0;
-static uint64 tx_pkt_timestamp = 0;
-static uint64 rx_pkt_timestamp = 0;
-static uint64 tx_pkt_delta = 0;
-static uint64 rx_pkt_delta = 0;
+static uint64 tx_pkt_cnt;
+static uint64 rx_pkt_cnt;
+static uint64 tx_pkt_timestamp;
+static uint64 rx_pkt_timestamp;
+static uint64 tx_pkt_delta;
+static uint64 rx_pkt_delta;
 
-static uint64 last_resched_cnt_check_time_ns = 0;
-static uint64 last_affinity_update_time_ns = 0;
-static uint hw_stage_val = 0;
+static uint64 last_resched_cnt_check_time_ns;
+static uint64 last_affinity_update_time_ns;
+static uint hw_stage_val;
 /* force to switch to small core at beginning */
 static bool is_irq_on_big_core = TRUE;
 static bool is_plat_pcie_resume = FALSE;
 
-uint affinity_big_core = 0;
-uint affinity_small_core = 0;
-
-static int pcie_ch_num = EXYNOS_PCIE_CH_NUM;
-#if defined(CONFIG_SOC_GOOGLE)
+uint affinity_big_core;
+uint affinity_small_core;
+#if IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
+extern int exynos_pcie_register_event(struct exynos_pcie_register_event *reg);
+extern int exynos_pcie_deregister_event(struct exynos_pcie_register_event *reg);
 #define EXYNOS_PCIE_RC_ONOFF
 extern int exynos_pcie_pm_resume(int);
 extern void exynos_pcie_pm_suspend(int);
 extern int exynos_pcie_l1_exit(int ch_num);
-#endif /* CONFIG_SOC_GOOGLE */
+extern int exynos_pcie_rc_l1ss_ctrl(int enable, int id, int ch_num);
 
 #ifdef EXYNOS_PCIE_DEBUG
 extern void exynos_pcie_register_dump(int ch_num);
 #endif /* EXYNOS_PCIE_DEBUG */
 #ifdef PRINT_WAKEUP_GPIO_STATUS
-extern void exynos_pin_dbg_show(unsigned int pin, const char* str);
+extern void exynos_pin_dbg_show(unsigned int pin, const char *str);
 #endif /* PRINT_WAKEUP_GPIO_STATUS */
 
 #ifdef DHD_TREAT_D3ACKTO_AS_LINKDWN
 extern void exynos_pcie_set_skip_config(int ch_num, bool val);
 #endif /* DHD_TREAT_D3ACKTO_AS_LINKDWN */
+#endif /* CONFIG_PCI_EXYNOS_GS */
+
+#if IS_ENABLED(CONFIG_SOC_LGA)
+extern void google_pcie_dump_debug(int num);
+#endif /* CONFIG_SOC_LGA */
 
 #ifdef DHD_COREDUMP
 #define DEVICE_NAME "wlan"
@@ -128,9 +177,185 @@ static struct platform_device sscd_dev = {
 		},
 };
 
+/* Google PCIe interface */
+static int pcie_ch_num = GOOGLE_PCIE_CH_NUM;
+static dhd_pcie_event_cb_t g_pfn;
+
+typedef struct dhd_plat_info {
+#if IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
+	struct exynos_pcie_register_event pcie_event;
+	struct exynos_pcie_notify pcie_notify;
+#endif	/* CONFIG_PCI_EXYNOS_GS */
+	u32 cb_events;
+	struct pci_dev *pdev;
+} dhd_plat_info_t;
+
+#define PCIE_DUMMY() \
+	do { \
+		DHD_TRACE(("%s(): not implemented\n", __func__)); \
+	} while (0);
+
+int pcie_dummy_return(const char *s)
+{
+	DHD_TRACE(("%s(): not implemented\n", s));
+
+	return 0;
+}
+
+#if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
+void update_google_cdd_wifi_stat(uint32_t cdd_wifi_bitmap, bool enable)
+{
+	uint32_t value = gcdd_wifi_stat;
+
+	if (enable)
+		value |= cdd_wifi_bitmap;
+	else
+		value &= ~cdd_wifi_bitmap;
+
+	if (value == gcdd_wifi_stat)
+		return;
+
+	gcdd_wifi_stat = value;
+
+	google_cdd_set_system_dev_stat(CDD_SYSTEM_DEVICE_WIFI, gcdd_wifi_stat);
+}
+#else
+#define update_google_cdd_wifi_stat(bitmap, enable)
+#endif /* CONFIG_GOOGLE_CRASH_DEBUG_DUMP */
+
+#if IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
+#define _pcie_pm_resume(ch) exynos_pcie_pm_resume(ch)
+#define _pcie_pm_suspend(ch) exynos_pcie_pm_suspend(ch)
+#define _pcie_l1_exit(ch) exynos_pcie_l1_exit(ch)
+#define _pcie_rc_l1ss_ctrl(enable, id, ch) exynos_pcie_rc_l1ss_ctrl(enable, id, 1)
+#ifdef EXYNOS_PCIE_DEBUG
+#define _pcie_register_dump(ch) exynos_pcie_register_dump(ch)
+#endif /* EXYNOS_PCIE_DEBUG */
+#ifdef PRINT_WAKEUP_GPIO_STATUS
+#define _pcie_pin_dbg_show(pin, str) exynos_pin_dbg_show(pin, str)
+#endif /* PRINT_WAKEUP_GPIO_STATUS */
+#ifdef DHD_TREAT_D3ACKTO_AS_LINKDWN
+#define _pcie_set_skip_config(ch, val)	exynos_pcie_set_skip_config(ch, val)
+#endif /* DHD_TREAT_D3ACKTO_AS_LINKDWN */
+
+static void
+_pcie_notify_cb(struct exynos_pcie_notify *pcie_notify)
+{
+	struct pci_dev *pdev;
+
+	if (pcie_notify == NULL) {
+		DHD_ERROR(("%s(): Invalid argument to Platform layer call back \r\n", __func__));
+		return;
+	}
+
+	if (g_pfn) {
+		pdev = (struct pci_dev *)pcie_notify->user;
+		DHD_ERROR(("%s(): Invoking DHD call back with pdev %p \r\n",
+			__func__, pdev));
+		(*(g_pfn))(pdev);
+	} else {
+		DHD_ERROR(("%s(): Driver Call back pointer is NULL \r\n", __func__));
+	}
+}
+
+static int
+_pcie_register_event(struct dhd_plat_info *p, struct pci_dev *pdev, dhd_pcie_event_cb_t pfn)
+{
+#ifdef PCIE_CPL_TIMEOUT_RECOVERY
+	p->pcie_event.events = EXYNOS_PCIE_EVENT_LINKDOWN | EXYNOS_PCIE_EVENT_CPL_TIMEOUT;
+#else
+	p->pcie_event.events = EXYNOS_PCIE_EVENT_LINKDOWN;
+#endif /* PCIE_CPL_TIMEOUT_RECOVERY */
+	p->pcie_event.user = pdev;
+	p->pcie_event.mode = EXYNOS_PCIE_TRIGGER_CALLBACK;
+	p->pcie_event.callback = _pcie_notify_cb;
+	exynos_pcie_register_event(&p->pcie_event);
+	DHD_TRACE(("%s(): Registered Event PCIe event pdev %p \r\n", __func__, pdev));
+	return 0;
+}
+
+static void
+_pcie_deregister_event(struct dhd_plat_info *p)
+{
+	if (p) {
+		exynos_pcie_deregister_event(&p->pcie_event);
+	}
+}
+#else /* !IS_ENABLED(CONFIG_PCI_EXYNOS_GS) */
+#define PCI_EXP_LINKCAP2_SPEED_MASK (PCI_EXP_LNKCAP2_SLS_2_5GB | PCI_EXP_LNKCAP2_SLS_5_0GB  | \
+				     PCI_EXP_LNKCAP2_SLS_8_0GB | PCI_EXP_LNKCAP2_SLS_16_0GB | \
+				     PCI_EXP_LNKCAP2_SLS_32_0GB | PCI_EXP_LNKCAP2_SLS_64_0GB)
+static int dhd_pcie_poweron(int ch_num);
+#define _pcie_pm_resume(ch) dhd_pcie_poweron(ch)
+#define _pcie_pm_suspend(ch) google_pcie_rc_poweroff(ch)
+static int dhd_pcie_l1_exit(int ch_num);
+static int dhd_pcie_l1ss_ctrl(int enable, int ch_num);
+#define _pcie_l1_exit(ch) dhd_pcie_l1_exit(ch)
+#define _pcie_rc_l1ss_ctrl(enable, id, ch) dhd_pcie_l1ss_ctrl(enable, ch)
+#ifdef EXYNOS_PCIE_DEBUG
+#define _pcie_register_dump(ch) PCIE_DUMMY()
+#endif /* EXYNOS_PCIE_DEBUG */
+#ifdef PRINT_WAKEUP_GPIO_STATUS
+#define _pcie_pin_dbg_show(pin, str) PCIE_DUMMY()
+#endif /* PRINT_WAKEUP_GPIO_STATUS */
+#ifdef DHD_TREAT_D3ACKTO_AS_LINKDWN
+#define _pcie_set_skip_config(ch, val) PCIE_DUMMY()
+#endif /* DHD_TREAT_D3ACKTO_AS_LINKDWN */
+
+static void google_pcie_event_cb(enum google_pcie_callback_type type, void *priv)
+{
+	dhd_plat_info_t *p = (dhd_plat_info_t *)priv;
+	struct pci_dev *pdev;
+
+	if (p == NULL) {
+		DHD_ERROR(("%s(): Invalid argument to platform layer call back \r\n", __func__));
+		return;
+	}
+
+	if (g_pfn && (p->cb_events & BIT(type))) {
+		pdev = p->pdev;
+		DHD_ERROR(("%s(): Invoking DHD call back with pdev %p for event 0x%x\r\n",
+				__func__, pdev, type));
+		(*(g_pfn))(pdev);
+
+	} else {
+		DHD_ERROR(("%s(): Skip callback for event 0x%x \r\n", __func__, type));
+	}
+
+}
+
+int _pcie_register_event(void *plat_info, struct pci_dev *pdev, dhd_pcie_event_cb_t pfn)
+{
+	dhd_plat_info_t *p = plat_info;
+
+	if ((p == NULL) || (pdev == NULL) || (pdev->bus == NULL)) {
+		DHD_ERROR(("%s(): Unable to register PCIE events \r\n", __func__));
+		return -EINVAL;
+	}
+
+	p->cb_events = BIT(GPCIE_CB_LINK_DOWN);
+#ifdef PCIE_CPL_TIMEOUT_RECOVERY
+	p->cb_events |= BIT(GPCIE_CB_CPL_TIMEOUT);
+#endif /* PCIE_CPL_TIMEOUT_RECOVERY */
+	DHD_TRACE(("%s(): Registering for PCIe events 0x%x with plat_info %p\r\n",
+			__func__, p->cb_events, p));
+	return google_pcie_register_callback(pdev->bus->domain_nr,
+			google_pcie_event_cb, p);
+}
+
+void _pcie_deregister_event(void *plat_info)
+{
+	dhd_plat_info_t *p = plat_info;
+
+	if (p && p->pdev && p->pdev->bus) {
+		google_pcie_unregister_callback(p->pdev->bus->domain_nr);
+	}
+}
+#endif /* !IS_ENABLED(CONFIG_PCI_EXYNOS_GS) */
+
 static void sscd_release(struct device *dev)
 {
-	DHD_INFO(("%s: enter\n", __FUNCTION__));
+	DHD_INFO(("%s: enter\n", __func__));
 }
 
 /* trigger coredump */
@@ -173,6 +398,9 @@ sku_info_t sku_table[] = {
 	{ {"GR83Y"}, {"MMW"} },
 	{ {"GGX8B"}, {"MMW"} },
 	{ {"G2YBB"}, {"MMW"} },
+	{ {"GUL82"}, {"MMW"} },
+	{ {"G4QUR"}, {"MMW"} },
+	{ {"GU0NP"}, {"MMW"} },
 	{ {"GB7N6"}, {"ROW"} },
 	{ {"GLU0G"}, {"ROW"} },
 	{ {"GNA8F"}, {"ROW"} },
@@ -184,6 +412,8 @@ sku_info_t sku_table[] = {
 	{ {"GEC77"}, {"ROW"} },
 	{ {"GZC4K"}, {"ROW"} },
 	{ {"GUR25"}, {"ROW"} },
+	{ {"G45RY"}, {"ROW"} },
+	{ {"GEHN3"}, {"ROW"} },
 	{ {"GR1YH"}, {"JPN"} },
 	{ {"GF5KQ"}, {"JPN"} },
 	{ {"GPQ72"}, {"JPN"} },
@@ -195,8 +425,13 @@ sku_info_t sku_table[] = {
 	{ {"GWVK6"}, {"JP"} },
 	{ {"GQ57S"}, {"JP"} },
 	{ {"G1B60"}, {"JP"} },
+	{ {"GYPW4"}, {"JP"} },
+	{ {"GN4F5"}, {"JP"} },
+	{ {"GM66V"}, {"JP"} },
 	{ {"G1AZG"}, {"EU"} },
-	{ {"G9BQD"}, {"NA"} }
+	{ {"G9BQD"}, {"NA"} },
+	{ {"G45RY"}, {"NA"} },
+	{ {"GEHN3"}, {"NA"} }
 };
 
 static int
@@ -311,7 +546,7 @@ typedef struct platform_hw_info {
 platform_hw_info_t platform_hw_info;
 
 static void
-dhd_set_platform_ext_name(char *hw_rev, char* hw_sku)
+dhd_set_platform_ext_name(char *hw_rev, char *hw_sku)
 {
 	bzero(&platform_hw_info, sizeof(platform_hw_info_t));
 
@@ -338,7 +573,7 @@ dhd_set_platform_ext_name(char *hw_rev, char* hw_sku)
 }
 
 void
-dhd_set_platform_ext_name_for_chip_version(char* chip_version)
+dhd_set_platform_ext_name_for_chip_version(char *chip_version)
 {
 	if (strncmp(val_revision, DEFAULT_VAL, MAX_HW_INFO_LEN) != 0) {
 		if (strncmp(val_sku, DEFAULT_VAL, MAX_HW_INFO_LEN) != 0) {
@@ -364,7 +599,7 @@ dhd_set_platform_ext_name_for_chip_version(char* chip_version)
 }
 
 static int
-dhd_check_file_exist(char* fname)
+dhd_check_file_exist(char *fname)
 {
 	int err = BCME_OK;
 #ifdef DHD_LINUX_STD_FW_API
@@ -375,7 +610,7 @@ dhd_check_file_exist(char* fname)
 #endif /* DHD_LINUX_STD_FW_API */
 
 	if (fname == NULL) {
-		DHD_ERROR(("%s: ERROR fname is NULL \n", __FUNCTION__));
+		DHD_ERROR(("%s: ERROR fname is NULL\n", __func__));
 		return BCME_ERROR;
 	}
 
@@ -391,7 +626,7 @@ dhd_check_file_exist(char* fname)
 
 	filep = dhd_filp_open(fname, O_RDONLY, 0);
 	if (IS_ERR(filep) || (filep == NULL)) {
-		DHD_LOG_MEM(("%s: Failed to open %s \n",  __FUNCTION__, fname));
+		DHD_LOG_MEM(("%s: Failed to open %s\n",  __func__, fname));
 		err = BCME_NOTFOUND;
 		goto fail;
 	}
@@ -434,15 +669,13 @@ dhd_get_platform_naming_for_nvram_clmblob_file(download_type_t component, char *
 #else
 		nvram_clmblob_file = CONFIG_BCMDHD_NVRAM_PATH;
 #endif /* DHD_LINUX_STD_FW_API */
-	}
-	else if (component == CLM_BLOB) {
+	} else if (component == CLM_BLOB) {
 #ifdef DHD_LINUX_STD_FW_API
 		nvram_clmblob_file = DHD_CLM_NAME;
 #else
 		nvram_clmblob_file = VENDOR_PATH CONFIG_BCMDHD_CLM_PATH;
 #endif /* DHD_LINUX_STD_FW_API */
-	}
-	else if (component == TXCAP_BLOB) {
+	} else if (component == TXCAP_BLOB) {
 #ifdef DHD_LINUX_STD_FW_API
 		nvram_clmblob_file = DHD_TXCAP_NAME;
 #else
@@ -485,48 +718,48 @@ dhd_wlan_init_hardware_info(void)
 	} else {
 
 		if (of_property_read_u32(node, HW_STAGE, &hw_stage)) {
-			DHD_ERROR(("%s: Failed to get hw stage\n", __FUNCTION__));
+			DHD_ERROR(("%s: Failed to get hw stage\n", __func__));
 			goto exit;
 		}
 
 		if (of_property_read_u32(node, HW_MAJOR, &hw_major)) {
-			DHD_ERROR(("%s: Failed to get hw major\n", __FUNCTION__));
+			DHD_ERROR(("%s: Failed to get hw major\n", __func__));
 			goto exit;
 		}
 
 		if (of_property_read_u32(node, HW_MINOR, &hw_minor)) {
-			DHD_ERROR(("%s: Failed to get hw minor\n", __FUNCTION__));
+			DHD_ERROR(("%s: Failed to get hw minor\n", __func__));
 			goto exit;
 		}
 		hw_stage_val = hw_stage;
 		switch (hw_stage) {
-			case DEV:
-				snprintf(val_revision, MAX_HW_INFO_LEN, "DEV%d.%d",
-					hw_major, hw_minor);
-				break;
-			case PROTO:
-				snprintf(val_revision, MAX_HW_INFO_LEN, "PROTO%d.%d",
-					hw_major, hw_minor);
-				break;
-			case EVT:
-				snprintf(val_revision, MAX_HW_INFO_LEN, "EVT%d.%d",
-					hw_major, hw_minor);
-				break;
-			case DVT:
-				snprintf(val_revision, MAX_HW_INFO_LEN, "DVT%d.%d",
-					hw_major, hw_minor);
-				break;
-			case PVT:
-				snprintf(val_revision, MAX_HW_INFO_LEN, "PVT%d.%d",
-					hw_major, hw_minor);
-				break;
-			case MP:
-				snprintf(val_revision, MAX_HW_INFO_LEN, "MP%d.%d",
-					hw_major, hw_minor);
-				break;
-			default:
-				strcpy(val_revision, DEFAULT_VAL);
-				break;
+		case DEV:
+			snprintf(val_revision, MAX_HW_INFO_LEN, "DEV%d.%d",
+				hw_major, hw_minor);
+			break;
+		case PROTO:
+			snprintf(val_revision, MAX_HW_INFO_LEN, "PROTO%d.%d",
+				hw_major, hw_minor);
+			break;
+		case EVT:
+			snprintf(val_revision, MAX_HW_INFO_LEN, "EVT%d.%d",
+				hw_major, hw_minor);
+			break;
+		case DVT:
+			snprintf(val_revision, MAX_HW_INFO_LEN, "DVT%d.%d",
+				hw_major, hw_minor);
+			break;
+		case PVT:
+			snprintf(val_revision, MAX_HW_INFO_LEN, "PVT%d.%d",
+				hw_major, hw_minor);
+			break;
+		case MP:
+			snprintf(val_revision, MAX_HW_INFO_LEN, "MP%d.%d",
+				hw_major, hw_minor);
+			break;
+		default:
+			strcpy(val_revision, DEFAULT_VAL);
+			break;
 		}
 	}
 
@@ -537,17 +770,17 @@ dhd_wlan_init_hardware_info(void)
 	} else {
 
 		if (of_property_read_string(node, HW_SKU, &hw_sku)) {
-			DHD_ERROR(("%s: Failed to get hw sku\n", __FUNCTION__));
+			DHD_ERROR(("%s: Failed to get hw sku\n", __func__));
 			goto exit;
 		}
 
-		for (i = 0; i < ARRAYSIZE(sku_table); i ++) {
+		for (i = 0; i < ARRAYSIZE(sku_table); i++) {
 			if (strcmp(hw_sku, sku_table[i].hw_id) == 0) {
 				strcpy(val_sku, sku_table[i].sku);
 				break;
 			}
 		}
-		DHD_PRINT(("%s: hw_sku is %s, val_sku is %s\n", __FUNCTION__, hw_sku, val_sku));
+		DHD_PRINT(("%s: hw_sku is %s, val_sku is %s\n", __func__, hw_sku, val_sku));
 	}
 
 exit:
@@ -578,7 +811,7 @@ dhd_wifi_init_gpio(void)
 	}
 
 	/* ========== WLAN_PWR_EN ============ */
-	DHD_INFO(("%s: gpio_wlan_power : %d\n", __FUNCTION__, wlan_reg_on));
+	DHD_INFO(("%s: gpio_wlan_power : %d\n", __func__, wlan_reg_on));
 
 	/*
 	 * For reg_on, gpio_request will fail if the gpio is configured to output-high
@@ -586,26 +819,25 @@ dhd_wifi_init_gpio(void)
 	 */
 	if (gpio_request_one(wlan_reg_on, GPIOF_OUT_INIT_HIGH, "WL_REG_ON")) {
 		DHD_ERROR(("%s: Failed to request gpio %d for WL_REG_ON, "
-			"might have configured in the dts\n",
-			__FUNCTION__, wlan_reg_on));
+			"might have configured in the dts\n", __func__, wlan_reg_on));
 	} else {
 		DHD_ERROR(("%s: gpio_request WL_REG_ON done - WLAN_EN: GPIO %d\n",
-			__FUNCTION__, wlan_reg_on));
+			__func__, wlan_reg_on));
 	}
 
 	gpio_reg_on_val = gpio_get_value(wlan_reg_on);
 	DHD_INFO(("%s: Initial WL_REG_ON: [%d]\n",
-		__FUNCTION__, gpio_get_value(wlan_reg_on)));
+		__func__, gpio_get_value(wlan_reg_on)));
 
 	if (gpio_reg_on_val == 0) {
-		DHD_INFO(("%s: WL_REG_ON is LOW, drive it HIGH\n", __FUNCTION__));
+		DHD_INFO(("%s: WL_REG_ON is LOW, drive it HIGH\n", __func__));
 		if (gpio_direction_output(wlan_reg_on, 1)) {
-			DHD_ERROR(("%s: WL_REG_ON is failed to pull up\n", __FUNCTION__));
+			DHD_ERROR(("%s: WL_REG_ON is failed to pull up\n", __func__));
 			return -EIO;
 		}
 	}
 
-	DHD_PRINT(("%s: WL_REG_ON is pulled up\n", __FUNCTION__));
+	DHD_PRINT(("%s: WL_REG_ON is pulled up\n", __func__));
 
 	/* Wait for WIFI_TURNON_DELAY due to power stability */
 	msleep(WIFI_TURNON_DELAY);
@@ -614,20 +846,19 @@ dhd_wifi_init_gpio(void)
 	/* ========== WLAN_HOST_WAKE ============ */
 	wlan_host_wake_up = of_get_named_gpio(root_node,
 		WIFI_WLAN_HOST_WAKE_PROPNAME, 0);
-	DHD_INFO(("%s: gpio_wlan_host_wake : %d\n", __FUNCTION__, wlan_host_wake_up));
+	DHD_INFO(("%s: gpio_wlan_host_wake : %d\n", __func__, wlan_host_wake_up));
 
 	if (gpio_request_one(wlan_host_wake_up, GPIOF_IN, "WLAN_HOST_WAKE")) {
 		DHD_ERROR(("%s: Failed to request gpio %d for WLAN_HOST_WAKE\n",
-			__FUNCTION__, wlan_host_wake_up));
+			__func__, wlan_host_wake_up));
 			return -ENODEV;
 	} else {
-		DHD_ERROR(("%s: gpio_request WLAN_HOST_WAKE done"
-			" - WLAN_HOST_WAKE: GPIO %d\n",
-			__FUNCTION__, wlan_host_wake_up));
+		DHD_ERROR(("%s: gpio_request WLAN_HOST_WAKE done - WLAN_HOST_WAKE: GPIO %d\n",
+			__func__, wlan_host_wake_up));
 	}
 
 	if (gpio_direction_input(wlan_host_wake_up)) {
-		DHD_ERROR(("%s: Failed to set WL_HOST_WAKE gpio direction\n", __FUNCTION__));
+		DHD_ERROR(("%s: Failed to set WL_HOST_WAKE gpio direction\n", __func__));
 	}
 
 	wlan_host_wake_irq = gpio_to_irq(wlan_host_wake_up);
@@ -640,11 +871,11 @@ dhd_wlan_power(int onoff)
 {
 	DHD_INFO(("------------------------------------------------\n"));
 	DHD_INFO(("------------------------------------------------\n"));
-	DHD_INFO(("%s Enter: power %s\n", __func__, onoff ? "on" : "off"));
+	DHD_PRINT(("%s Enter: WL_REG_ON %s\n", __func__, onoff ? "pull up" : "pull down"));
 
 	if (onoff) {
 		if (gpio_direction_output(wlan_reg_on, 1)) {
-			DHD_ERROR(("%s: WL_REG_ON is failed to pull up\n", __FUNCTION__));
+			DHD_ERROR(("%s: WL_REG_ON is failed to pull up\n", __func__));
 			return -EIO;
 		}
 		if (gpio_get_value(wlan_reg_on)) {
@@ -653,13 +884,13 @@ dhd_wlan_power(int onoff)
 		} else {
 			DHD_ERROR(("[%s] gpio value is 0. We need reinit.\n", __func__));
 			if (gpio_direction_output(wlan_reg_on, 1)) {
-				DHD_ERROR(("%s: WL_REG_ON is "
-					"failed to pull up\n", __func__));
+				DHD_ERROR(("%s: WL_REG_ON is failed to pull up\n",
+					__func__));
 			}
 		}
 	} else {
 		if (gpio_direction_output(wlan_reg_on, 0)) {
-			DHD_ERROR(("%s: WL_REG_ON is failed to pull up\n", __FUNCTION__));
+			DHD_ERROR(("%s: WL_REG_ON is failed to pull up\n", __func__));
 			return -EIO;
 		}
 		if (gpio_get_value(wlan_reg_on)) {
@@ -679,7 +910,6 @@ dhd_wlan_reset(int onoff)
 static int
 dhd_wlan_set_carddetect(int val)
 {
-#ifdef EXYNOS_PCIE_RC_ONOFF
 	struct device_node *root_node = NULL;
 	char *wlan_node = DHD_DT_COMPAT_ENTRY;
 
@@ -690,91 +920,43 @@ dhd_wlan_set_carddetect(int val)
 	}
 
 	if (of_property_read_u32(root_node, "ch-num", &pcie_ch_num)) {
-		DHD_INFO(("%s: Failed to parse the channel number\n", __FUNCTION__));
+		DHD_INFO(("%s: Failed to parse the channel number\n", __func__));
 		return -EINVAL;
 	}
 	/* ========== WLAN_PCIE_NUM ============ */
-	DHD_INFO(("%s: pcie_ch_num : %d\n", __FUNCTION__, pcie_ch_num));
-#endif /* EXYNOS_PCIE_RC_ONOFF */
+	DHD_INFO(("%s: pcie_ch_num : %d\n", __func__, pcie_ch_num));
 
 	if (val) {
-		exynos_pcie_pm_resume(pcie_ch_num);
+		_pcie_pm_resume(pcie_ch_num);
 	} else {
-		printk(KERN_INFO "%s Ignore carddetect: %d\n", __FUNCTION__, val);
+		printk(KERN_INFO "%s Ignore carddetect: %d\n", __func__, val);
 	}
 	return 0;
 }
-
-#include <linux/exynos-pci-noti.h>
-extern int exynos_pcie_register_event(struct exynos_pcie_register_event *reg);
-extern int exynos_pcie_deregister_event(struct exynos_pcie_register_event *reg);
-
-#include <dhd_plat.h>
-
-typedef struct dhd_plat_info {
-	struct exynos_pcie_register_event pcie_event;
-	struct exynos_pcie_notify pcie_notify;
-	struct pci_dev *pdev;
-} dhd_plat_info_t;
-
-static dhd_pcie_event_cb_t g_pfn = NULL;
 
 uint32 dhd_plat_get_info_size(void)
 {
 	return sizeof(dhd_plat_info_t);
 }
 
-void plat_pcie_notify_cb(struct exynos_pcie_notify *pcie_notify)
-{
-	struct pci_dev *pdev;
-
-	if (pcie_notify == NULL) {
-		pr_err("%s(): Invalid argument to Platform layer call back \r\n", __func__);
-		return;
-	}
-
-	if (g_pfn) {
-		pdev = (struct pci_dev *)pcie_notify->user;
-		pr_err("%s(): Invoking DHD call back with pdev %p \r\n",
-				__func__, pdev);
-		(*(g_pfn))(pdev);
-	} else {
-		pr_err("%s(): Driver Call back pointer is NULL \r\n", __func__);
-	}
-	return;
-}
-
 int dhd_plat_pcie_register_event(void *plat_info, struct pci_dev *pdev, dhd_pcie_event_cb_t pfn)
 {
-		dhd_plat_info_t *p = plat_info;
+	dhd_plat_info_t *p = plat_info;
 
-		if ((p == NULL) || (pdev == NULL) || (pfn == NULL)) {
-			pr_err("%s(): Invalid argument p %p, pdev %p, pfn %p\r\n",
-				__func__, p, pdev, pfn);
-			return -1;
-		}
-		g_pfn = pfn;
-		p->pdev = pdev;
-#ifdef PCIE_CPL_TIMEOUT_RECOVERY
-		p->pcie_event.events = EXYNOS_PCIE_EVENT_LINKDOWN | EXYNOS_PCIE_EVENT_CPL_TIMEOUT;
-#else
-		p->pcie_event.events = EXYNOS_PCIE_EVENT_LINKDOWN;
-#endif /* PCIE_CPL_TIMEOUT_RECOVERY */
-		p->pcie_event.user = pdev;
-		p->pcie_event.mode = EXYNOS_PCIE_TRIGGER_CALLBACK;
-		p->pcie_event.callback = plat_pcie_notify_cb;
-		exynos_pcie_register_event(&p->pcie_event);
-		pr_err("%s(): Registered Event PCIe event pdev %p \r\n", __func__, pdev);
-		return 0;
+	if ((p == NULL) || (pdev == NULL) || (pfn == NULL)) {
+		pr_err("%s(): Invalid argument p %p, pdev %p, pfn %p\r\n",
+			__func__, p, pdev, pfn);
+		return -1;
+	}
+	g_pfn = pfn;
+	p->pdev = pdev;
+
+	return _pcie_register_event(p, pdev, pfn);
 }
 
 void dhd_plat_pcie_deregister_event(void *plat_info)
 {
-	dhd_plat_info_t *p = plat_info;
-	if (p) {
-		exynos_pcie_deregister_event(&p->pcie_event);
-	}
-	return;
+	_pcie_deregister_event(plat_info);
 }
 
 static int
@@ -791,16 +973,28 @@ set_affinity(unsigned int irq, const struct cpumask *cpumask)
 #ifdef DHD_HOST_CPUFREQ_BOOST_DEFAULT_ENAB
 uint32 dhd_cpufreq_boost = true;
 #else
-uint32 dhd_cpufreq_boost = false;
+uint32 dhd_cpufreq_boost;
 #endif /* DHD_HOST_CPUFREQ_BOOST_DEFAULT_ENAB */
 module_param(dhd_cpufreq_boost, uint, 0660);
 
 #define DHD_CPUFREQ_LITTLE      0u
+#if IS_ENABLED(CONFIG_SOC_LGA)
+#define DHD_CPUFREQ_BIG         4u
+#define DHD_CPUFREQ_BIGGER      5u
+#else
 #define DHD_CPUFREQ_BIG         4u
 #define DHD_CPUFREQ_BIGGER      7u
+#endif
+
+#if IS_ENABLED(CONFIG_SOC_LGA)
+#define DHD_LITTLE_CORE_PERF_FREQ   2016000u
+#define DHD_MID_CORE_PERF_FREQ      2092000u
+#define DHD_BIG_CORE_PERF_FREQ      2092000u
+#else
 #define DHD_LITTLE_CORE_PERF_FREQ   1548000u
 #define DHD_MID_CORE_PERF_FREQ      1549000u
 #define DHD_BIG_CORE_PERF_FREQ      2363000u
+#endif
 
 enum core_idx {
 	LITTLE = 0,
@@ -815,8 +1009,7 @@ typedef struct _dhd_host_cpufreq {
 	uint32 target_freq;
 } dhd_host_cpufreq;
 
-static dhd_host_cpufreq dhd_host_cpufreq_tbl [] =
-{
+static dhd_host_cpufreq dhd_host_cpufreq_tbl[] = {
 	/* Little Core, 0-3 */
 	{DHD_CPUFREQ_LITTLE, 0, DHD_LITTLE_CORE_PERF_FREQ},
 	/* Big Core, 4-7 */
@@ -831,11 +1024,11 @@ static dhd_host_cpufreq dhd_host_cpufreq_tbl [] =
  * set to zero when boost mode is disabled.
  * If any cpufreq policy is in boost mode, returns TRUE
  */
-bool dhd_is_cpufreq_boosted(void)
+static bool dhd_is_cpufreq_boosted(void)
 {
 	int i, arr_len;
 
-	arr_len = sizeof(dhd_host_cpufreq_tbl) / sizeof(dhd_host_cpufreq_tbl[0]);
+	arr_len = ARRAY_SIZE(dhd_host_cpufreq_tbl);
 	for (i = 0; i < arr_len; i++) {
 		if (dhd_host_cpufreq_tbl[i].orig_min_freq != 0) {
 			return TRUE;
@@ -851,7 +1044,7 @@ void dhd_restore_cpufreq(void)
 	int num_cpus = num_possible_cpus();
 	uint32 cpuid, orig_min_freq;
 
-	arr_len = sizeof(dhd_host_cpufreq_tbl) / sizeof(dhd_host_cpufreq_tbl[0]);
+	arr_len = ARRAY_SIZE(dhd_host_cpufreq_tbl);
 
 	for (i = 0; i < arr_len; i++) {
 		cpuid = dhd_host_cpufreq_tbl[i].cpuid;
@@ -871,7 +1064,7 @@ void dhd_restore_cpufreq(void)
 		if (policy) {
 			policy->min = orig_min_freq;
 			DHD_PRINT(("%s: restore cpufreq policy%d cur:%u min:%u max:%u\n",
-				__FUNCTION__, cpuid, policy->cur, policy->min, policy->max));
+				__func__, cpuid, policy->cur, policy->min, policy->max));
 			cpufreq_cpu_put(policy);
 
 			/* initialize */
@@ -887,8 +1080,8 @@ void dhd_set_max_cpufreq(void)
 	int num_cpus = num_possible_cpus();
 	uint32 cpuid, orig_min_freq;
 
-	DHD_PRINT(("%s: Sets cpufreq boost mode num_cpus:%d\n", __FUNCTION__, num_cpus));
-	arr_len = sizeof(dhd_host_cpufreq_tbl) / sizeof(dhd_host_cpufreq_tbl[0]);
+	DHD_PRINT(("%s: Sets cpufreq boost mode num_cpus:%d\n", __func__, num_cpus));
+	arr_len = ARRAY_SIZE(dhd_host_cpufreq_tbl);
 
 	for (i = 0; i < arr_len; i++) {
 		cpuid = dhd_host_cpufreq_tbl[i].cpuid;
@@ -897,7 +1090,7 @@ void dhd_set_max_cpufreq(void)
 		/* cpuid check logic */
 		if (cpuid >= num_cpus) {
 			DHD_ERROR(("%s: cpuid not available cpuid:%d num_cpus:%d\n",
-				__FUNCTION__, cpuid, num_cpus));
+				__func__, cpuid, num_cpus));
 			continue;
 		}
 
@@ -912,7 +1105,7 @@ void dhd_set_max_cpufreq(void)
 			dhd_host_cpufreq_tbl[i].orig_min_freq = policy->min;
 			policy->min = policy->max;
 			DHD_PRINT(("%s: min to max. policy%d cur:%u orig_min:%u min:%u max:%u\n",
-				__FUNCTION__, cpuid, policy->cur,
+				__func__, cpuid, policy->cur,
 				dhd_host_cpufreq_tbl[i].orig_min_freq,
 				policy->min, policy->max));
 			cpufreq_cpu_put(policy);
@@ -927,7 +1120,7 @@ void dhd_set_all_cpufreq(void)
 	int num_cpus = num_possible_cpus();
 	uint32 cpuid, orig_min_freq;
 
-	arr_len = sizeof(dhd_host_cpufreq_tbl) / sizeof(dhd_host_cpufreq_tbl[0]);
+	arr_len = ARRAY_SIZE(dhd_host_cpufreq_tbl);
 
 	for (i = 0; i < arr_len; i++) {
 		cpuid = dhd_host_cpufreq_tbl[i].cpuid;
@@ -936,7 +1129,7 @@ void dhd_set_all_cpufreq(void)
 		/* cpuid check logic */
 		if (cpuid >= num_cpus) {
 			DHD_ERROR(("%s: cpuid not available cpuid:%d num_cpus:%d\n",
-				__FUNCTION__, cpuid, num_cpus));
+				__func__, cpuid, num_cpus));
 			continue;
 		}
 
@@ -956,7 +1149,7 @@ void dhd_set_all_cpufreq(void)
 				policy->min = dhd_host_cpufreq_tbl[i].target_freq;
 			}
 			DHD_PRINT(("%s: min to max. policy%d cur:%u orig_min:%u min:%u max:%u\n",
-				__FUNCTION__, cpuid, policy->cur,
+				__func__, cpuid, policy->cur,
 				dhd_host_cpufreq_tbl[i].orig_min_freq,
 				policy->min, policy->max));
 			cpufreq_cpu_put(policy);
@@ -971,10 +1164,10 @@ void dhd_set_cpufreq(enum core_idx idx)
 	int num_cpus = num_possible_cpus();
 	uint32 cpuid, orig_min_freq;
 
-	arr_len = sizeof(dhd_host_cpufreq_tbl) / sizeof(dhd_host_cpufreq_tbl[0]);
+	arr_len = ARRAY_SIZE(dhd_host_cpufreq_tbl);
 
 	if (idx >= arr_len) {
-		DHD_ERROR(("%s: Invalid core index(%d)\n", __FUNCTION__, idx));
+		DHD_ERROR(("%s: Invalid core index(%d)\n", __func__, idx));
 	}
 
 	cpuid = dhd_host_cpufreq_tbl[idx].cpuid;
@@ -983,7 +1176,7 @@ void dhd_set_cpufreq(enum core_idx idx)
 	/* cpuid check logic */
 	if (cpuid >= num_cpus) {
 		DHD_ERROR(("%s: cpuid not available cpuid:%d num_cpus:%d\n",
-		__FUNCTION__, cpuid, num_cpus));
+		__func__, cpuid, num_cpus));
 		return;
 	}
 
@@ -1003,7 +1196,7 @@ void dhd_set_cpufreq(enum core_idx idx)
 			policy->min = dhd_host_cpufreq_tbl[idx].target_freq;
 		}
 		DHD_PRINT(("%s: min to max. policy%d cur:%u orig_min:%u min:%u max:%u\n",
-			__FUNCTION__, cpuid, policy->cur,
+			__func__, cpuid, policy->cur,
 			dhd_host_cpufreq_tbl[idx].orig_min_freq,
 			policy->min, policy->max));
 		cpufreq_cpu_put(policy);
@@ -1019,6 +1212,11 @@ void dhd_plat_reset_trx_pktcount(void)
 	tx_pkt_delta = 0;
 	rx_pkt_delta = 0;
 }
+#else
+static bool dhd_is_cpufreq_boosted(void)
+{
+	return FALSE;
+}
 #endif /* DHD_HOST_CPUFREQ_BOOST */
 
 static void
@@ -1030,7 +1228,7 @@ irq_affinity_hysteresis_control(struct pci_dev *pdev,
 	bool has_recent_affinity_update = (curr_time_ns - last_affinity_update_time_ns)
 		< (AFFINITY_UPDATE_MIN_PERIOD_SEC * NSEC_PER_SEC);
 	if (!pdev) {
-		DHD_ERROR(("%s : pdev is NULL\n", __FUNCTION__));
+		DHD_ERROR(("%s : pdev is NULL\n", __func__));
 		return;
 	}
 
@@ -1045,7 +1243,7 @@ irq_affinity_hysteresis_control(struct pci_dev *pdev,
 #endif /* DHD_HOST_CPUFREQ_BOOST */
 
 	if (!is_irq_on_big_core &&
-	   ((tx_pkt_delta > PKT_COUNT_HIGH)||(rx_pkt_delta > PKT_COUNT_HIGH))) {
+	   ((tx_pkt_delta > PKT_COUNT_HIGH) || (rx_pkt_delta > PKT_COUNT_HIGH))) {
 		err = set_affinity(pdev->irq, cpumask_of(affinity_big_core));
 		if (!err) {
 			is_irq_on_big_core = TRUE;
@@ -1056,14 +1254,14 @@ irq_affinity_hysteresis_control(struct pci_dev *pdev,
 			}
 #endif /* DHD_HOST_CPUFREQ_BOOST */
 			DHD_INFO(("%s switches to big core %u successfully\n",
-				__FUNCTION__, affinity_big_core));
+				__func__, affinity_big_core));
 		} else {
-			DHD_ERROR(("%s switches to big core unsuccessfully!\n", __FUNCTION__));
+			DHD_ERROR(("%s switches to big core unsuccessfully!\n", __func__));
 		}
 	}
 	if (is_plat_pcie_resume ||
-		(is_irq_on_big_core &&
-		((tx_pkt_delta < PKT_COUNT_LOW)&&(rx_pkt_delta < PKT_COUNT_LOW)) &&
+		((is_irq_on_big_core || dhd_is_cpufreq_boosted()) &&
+		((tx_pkt_delta < PKT_COUNT_LOW) && (rx_pkt_delta < PKT_COUNT_LOW)) &&
 		!has_recent_affinity_update)) {
 		err = set_affinity(pdev->irq, cpumask_of(affinity_small_core));
 		if (!err) {
@@ -1076,9 +1274,9 @@ irq_affinity_hysteresis_control(struct pci_dev *pdev,
 			}
 #endif /* DHD_HOST_CPUFREQ_BOOST */
 			DHD_INFO(("%s switches to small core %u successfully\n",
-				__FUNCTION__, affinity_small_core));
+				__func__, affinity_small_core));
 		} else {
-			DHD_ERROR(("%s switches to all cores unsuccessfully\n", __FUNCTION__));
+			DHD_ERROR(("%s switches to all cores unsuccessfully\n", __func__));
 		}
 	}
 }
@@ -1100,9 +1298,9 @@ static void dhd_force_affinity_cpufreq(struct pci_dev *pdev)
 			}
 #endif /* DHD_HOST_CPUFREQ_BOOST */
 			DHD_PRINT(("%s switches to big core %u successfully\n",
-				__FUNCTION__, affinity_big_core));
+				__func__, affinity_big_core));
 		} else {
-			DHD_ERROR(("%s switches to big core unsuccessfully!\n", __FUNCTION__));
+			DHD_ERROR(("%s switches to big core unsuccessfully!\n", __func__));
 		}
 	}
 
@@ -1131,7 +1329,7 @@ void dhd_plat_tx_pktcount(void *plat_info, uint cnt)
 	 * we only update intr_freq every 2 sec
 	 * So we divide pkt_delta by 2 and shift 1 bit right
 	 * When Tput is low, then time_delta_s might be longer than 2 sec
-	 * Which means pkt_delta won't reach reach PKT_COUNT_HIGH anyway
+	 * Which means pkt_delta won't reach PKT_COUNT_HIGH anyway
 	 * In this case, we don't need the actual pkt_delta,
 	 * so if we keep pkt_delta divided by 2 for simplicity
 	 *
@@ -1165,7 +1363,7 @@ void dhd_plat_rx_pktcount(void *plat_info, uint cnt)
 	 * we only update intr_freq every 2 sec
 	 * So we divide pkt_delta by 2 and shift 1 bit right
 	 * When Tput is low, then time_delta_s might be longer than 2 sec
-	 * Which means pkt_delta won't reach reach PKT_COUNT_HIGH anyway
+	 * Which means pkt_delta won't reach PKT_COUNT_HIGH anyway
 	 * In this case, we don't need the actual pkt_delta,
 	 * so if we keep pkt_delta divided by 2 for simplicity
 	 *
@@ -1253,18 +1451,22 @@ struct wifi_platform_data dhd_wlan_control = {
 #endif // endif
 };
 
+#ifdef WONDERTAP
+static struct platform_driver dhd_wonder_driver;
+#endif /* WONDERTAP */
+
 int
 dhd_wlan_init(void)
 {
 	int ret;
 
-	DHD_INFO(("%s: START.......\n", __FUNCTION__));
+	DHD_INFO(("%s: START.......\n", __func__));
 
 #ifdef CONFIG_BROADCOM_WIFI_RESERVED_MEM
 	ret = dhd_init_wlan_mem();
 	if (ret < 0) {
-		DHD_ERROR(("%s: failed to alloc reserved memory,"
-					" ret=%d\n", __FUNCTION__, ret));
+		DHD_ERROR(("%s: failed to alloc reserved memory, ret=%d\n",
+			__FUNCTION__, ret));
 		goto fail;
 	}
 #endif /* CONFIG_BROADCOM_WIFI_RESERVED_MEM */
@@ -1272,7 +1474,7 @@ dhd_wlan_init(void)
 	ret = dhd_wifi_init_gpio();
 	if (ret < 0) {
 		DHD_ERROR(("%s: failed to initiate GPIO, ret=%d\n",
-			__FUNCTION__, ret));
+			__func__, ret));
 		goto fail;
 	}
 #ifdef CONFIG_BCMDHD_OOB_HOST_WAKE
@@ -1303,27 +1505,59 @@ dhd_wlan_init(void)
 		} else {
 			affinity_small_core = affinity_big_core;
 		}
-		DHD_ERROR(("%s: IRQ_AFFINITY_SMALL_CORE=%u, affinity_big_core=%u, so set "
-			"affinity_small_core=%u\n", __FUNCTION__, IRQ_AFFINITY_SMALL_CORE,
+		DHD_ERROR(("%s: IRQ_AFFINITY_SMALL_CORE=%u, affinity_big_core=%u, "
+			"so set affinity_small_core=%u\n", __FUNCTION__, IRQ_AFFINITY_SMALL_CORE,
 			affinity_big_core, affinity_small_core));
 	}
-	DHD_INFO(("%s: affinity_big_core=%u affinity_small_core=%u\n", __FUNCTION__,
+	DHD_INFO(("%s: affinity_big_core=%u affinity_small_core=%u\n", __func__,
 		affinity_big_core, affinity_small_core));
 
+#if !IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
+#ifdef DHD_SUPPORT_L1SS
+	support_l1ss = TRUE;
+#else
+	support_l1ss = FALSE;
+#endif /* DHD_SUPPORT_L1SS */
+#endif /* !IS_ENABLED(CONFIG_PCI_EXYNOS_GS) */
+
+#ifdef WONDERTAP
+	platform_driver_register(&dhd_wonder_driver);
+#endif /* WONDERTAP */
+
 fail:
-	DHD_PRINT(("%s: FINISH.......\n", __FUNCTION__));
+	DHD_PRINT(("%s: FINISH.......\n", __func__));
 	return ret;
 }
+
+uint16 ep_device_id;
+#ifndef PCI_CFG_DID
+#define PCI_CFG_DID             2u
+#endif
 
 int
 dhd_wlan_deinit(void)
 {
+#ifdef WONDERTAP
+	platform_driver_unregister(&dhd_wonder_driver);
+#endif /* WONDERTAP */
+
 	if (gpio_is_valid(wlan_host_wake_up)) {
 		gpio_free(wlan_host_wake_up);
 	}
-
-	/* drive wl_reg_on low before freeing gpio */
-	dhd_wlan_power(0);
+	/* drive wl_reg_on low before freeing gpio only if the ep_device_id
+	 * read from config space matches with the BCMPCI_DEV_ID(the device id
+	 * for which the dhd is built for).
+	 * When WL_REG_ON is pulled down enumaration space is lost.
+	 * Later when the right dhd is loaded i.e ep_device_id and BCMPCI_DEV_ID matches,
+	 * RC doesnot re-enumarate the EP. So skip WL_REG_ON pull down if ep_device_id and
+	 * BCMPCI_DEV_ID doesnot match.
+	 */
+	if (ep_device_id == BCMPCI_DEV_ID) {
+		dhd_wlan_power(0);
+	} else {
+		DHD_PRINT(("%s skip WL_REG_ON pull down, devid mismatch(0x%x:0x%x)\n",
+			__func__, ep_device_id, BCMPCI_DEV_ID));
+	}
 	if (gpio_is_valid(wlan_reg_on)) {
 		gpio_free(wlan_reg_on);
 	}
@@ -1334,8 +1568,8 @@ dhd_wlan_deinit(void)
 void dhd_plat_l1ss_ctrl(bool ctrl)
 {
 #if defined(CONFIG_SOC_GOOGLE)
-	DHD_CONS_ONLY(("%s: Control L1ss RC side %d \n", __FUNCTION__, ctrl));
-	exynos_pcie_rc_l1ss_ctrl(ctrl, PCIE_L1SS_CTRL_WIFI, 1);
+	DHD_CONS_ONLY(("%s: Control L1ss RC side %d\n", __func__, ctrl));
+	_pcie_rc_l1ss_ctrl(ctrl, PCIE_L1SS_CTRL_WIFI, pcie_ch_num);
 #endif /* CONFIG_SOC_GOOGLE */
 	return;
 }
@@ -1343,54 +1577,122 @@ void dhd_plat_l1ss_ctrl(bool ctrl)
 void dhd_plat_l1_exit_io(void)
 {
 #if defined(DHD_PCIE_L1_EXIT_DURING_IO)
-	exynos_pcie_l1_exit(pcie_ch_num);
+	_pcie_l1_exit(pcie_ch_num);
 #endif /* DHD_PCIE_L1_EXIT_DURING_IO */
 	return;
 }
 
 void dhd_plat_l1_exit(void)
 {
-	exynos_pcie_l1_exit(pcie_ch_num);
+	_pcie_l1_exit(pcie_ch_num);
 	return;
 }
 
 int dhd_plat_pcie_suspend(void *plat_info)
 {
-	exynos_pcie_pm_suspend(pcie_ch_num);
+	_pcie_pm_suspend(pcie_ch_num);
+#if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
+	update_google_cdd_wifi_stat(CDD_WIFI_STAT_PCIE_LINK_UP, false);
+#endif /* CONFIG_GOOGLE_CRASH_DEBUG_DUMP */
 	return 0;
 }
 
 int dhd_plat_pcie_resume(void *plat_info)
 {
 	int ret = 0;
-	ret = exynos_pcie_pm_resume(pcie_ch_num);
+
+	ret = _pcie_pm_resume(pcie_ch_num);
 	is_plat_pcie_resume = TRUE;
+#ifdef DHD_HOST_CPUFREQ_BOOST
 	dhd_plat_reset_trx_pktcount();
+#endif	/* DHD_HOST_CPUFREQ_BOOST */
 	return ret;
 }
 
 void dhd_plat_pin_dbg_show(void *plat_info)
 {
 #ifdef PRINT_WAKEUP_GPIO_STATUS
-	exynos_pin_dbg_show(dhd_get_wlan_oob_gpio_number(), "gpa0");
+	_pcie_pin_dbg_show(dhd_get_wlan_oob_gpio_number(), "gpa0");
 #endif /* PRINT_WAKEUP_GPIO_STATUS */
 }
 
 void dhd_plat_pcie_register_dump(void *plat_info)
 {
 #ifdef EXYNOS_PCIE_DEBUG
-	exynos_pcie_register_dump(1);
+	_pcie_register_dump(pcie_ch_num);
 #endif /* EXYNOS_PCIE_DEBUG */
 }
 
 uint32 dhd_plat_get_rc_vendor_id(void)
 {
-	return EXYNOS_PCIE_VENDOR_ID;
+	return GOOGLE_PCIE_VENDOR_ID;
 }
 
 uint32 dhd_plat_get_rc_device_id(void)
 {
-	return EXYNOS_PCIE_DEVICE_ID;
+	return GOOGLE_PCIE_DEVICE_ID;
+}
+
+int dhd_plat_check_pcie_state(void)
+{
+#if IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
+	return 1;
+#else
+	int ret = 0;
+
+	DHD_PRINT(("%s: Function In\n", __func__));
+
+	ret = google_pcie_link_status(pcie_ch_num);
+#if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
+	if (ret)
+		update_google_cdd_wifi_stat(CDD_WIFI_STAT_PCIE_LINK_UP, true);
+	else
+		update_google_cdd_wifi_stat(CDD_WIFI_STAT_PCIE_LINK_UP, false);
+#endif /* CONFIG_GOOGLE_CRASH_DEBUG_DUMP */
+	DHD_PRINT(("%s: Function Out, ret = %d\n", __func__, ret));
+	return ret;
+#endif /* CONFIG_PCI_EXYNOS_GS */
+}
+
+void dhd_plat_check_msi(void)
+{
+#if IS_ENABLED(CONFIG_SOC_LGA)
+	u32 __iomem  *reg_ptr;
+	u32 val;
+
+	if (in_interrupt()) {
+		DHD_ERROR(("don't iomap in interrupt context"));
+		return;
+	}
+
+	reg_ptr = ioremap(MSI_MASK_REG, SZ_4);
+	if (!reg_ptr) {
+		DHD_ERROR(("reg_ptr is NULL"));
+		return;
+	}
+	val = ioread32(reg_ptr);
+	DHD_PRINT(("MSI Mask=%#08x\n", val));
+	iounmap(reg_ptr);
+
+	reg_ptr = ioremap(MSI_STAT_REG, SZ_4);
+	if (!reg_ptr) {
+		DHD_ERROR(("reg_ptr is NULL"));
+		return;
+	}
+	val = ioread32(reg_ptr);
+	DHD_PRINT(("MSI Status=%#08x\n", val));
+	iounmap(reg_ptr);
+
+	reg_ptr = ioremap(PCI_ICDS_REG, SZ_4);
+	if (!reg_ptr) {
+		DHD_ERROR(("reg_ptr is NULL"));
+		return;
+	}
+	val = ioread32(reg_ptr);
+	DHD_PRINT(("ICD Status=%#08x\n", val));
+	iounmap(reg_ptr);
+
+#endif /* CONFIG_SOC_LGA */
 }
 
 #define RXBUF_ALLOC_PAGE_SIZE
@@ -1415,8 +1717,8 @@ uint16 dhd_plat_align_rxbuf_size(uint16 rxbufpost_sz)
 void dhd_plat_pcie_skip_config_set(bool val)
 {
 #ifdef DHD_TREAT_D3ACKTO_AS_LINKDWN
-	DHD_PRINT(("%s: set skip config\n", __FUNCTION__));
-	exynos_pcie_set_skip_config(pcie_ch_num, val);
+	DHD_PRINT(("%s: set skip config\n", __func__));
+	_pcie_set_skip_config(pcie_ch_num, val);
 #endif /* DHD_TREAT_D3ACKTO_AS_LINKDWN */
 }
 
@@ -1446,7 +1748,474 @@ dhd_plat_get_wlan_reg_on_gpio(void)
 		gpio_get_value(wlan_reg_on) : -1;
 }
 
+void dhd_plat_pcie_dump_debug(void)
+{
+#if IS_ENABLED(CONFIG_SOC_LGA)
+	google_pcie_dump_debug(pcie_ch_num);
+#endif
+}
+
 #ifndef BCMDHD_MODULAR
 /* Required only for Built-in DHD */
 device_initcall(dhd_wlan_init);
 #endif /* BCMDHD_MODULAR */
+
+#if !IS_ENABLED(CONFIG_PCI_EXYNOS_GS)
+static struct pci_dev *
+dhd_get_pcidev(int ch_num)
+{
+	struct pci_bus *pci_bus;
+	struct pci_dev *pci_dev = NULL;
+
+	pci_bus = pci_find_bus(ch_num, 1);
+	if (pci_bus) {
+		pci_dev = pci_get_slot(pci_bus, PCI_DEVFN(0, 0));
+		if (!pci_dev)
+			pr_err("Endpoint device for channel %d not found\n", ch_num);
+	} else
+		pr_err("Child bus-1 for channel %d not found\n", ch_num);
+
+	return pci_dev;
+}
+
+static int
+dhd_pcie_l1ss_ctrl(int enable, int ch_num)
+{
+	int ret;
+	int aspm_state = 0;
+	struct pci_dev *pci_dev = dhd_get_pcidev(ch_num);
+
+	if (!pci_dev) {
+		pr_err("Endpoint device for channel %d not found\n", ch_num);
+		return -ENODEV;
+	}
+
+	/* TODO: enable PCIE_LINK_STATE_CLKPM */
+	if (support_l1ss & enable) {
+		aspm_state = PCIE_LINK_STATE_L1 | PCIE_LINK_STATE_CLKPM |
+				PCIE_LINK_STATE_L1_1 | PCIE_LINK_STATE_L1_2;
+	}
+
+	DHD_PRINT(("%s: Set aspm link state %x (support_l1ss = %d)\n",
+		__func__, aspm_state, support_l1ss));
+	ret = pci_enable_link_state(pci_dev, aspm_state);
+	pci_dev_put(pci_dev);
+	return ret;
+}
+
+static int
+dhd_pcie_poweron(int ch_num)
+{
+	int ret;
+	u16 val;
+	static u8 speed;
+	struct pci_dev *pci_dev;
+	u16 ltr = 0x1003;	/* 3145728 ns */
+	u32 ltr_reg;
+	int pos;
+
+	/*
+	 * First poweron will happen at the controller's max-link-speed as
+	 * configured in device tree.  Once link is up, EP will be queried
+	 * for max link speed which is used for subsequent poweron events
+	 */
+	if (!speed) {
+		ret = google_pcie_rc_poweron(ch_num);
+		if (ret) {
+			DHD_ERROR(("%s rc poweron failed: %d\n", __func__, ret));
+			return ret;
+		}
+
+		pci_dev = dhd_get_pcidev(ch_num);
+		if (pci_dev == NULL) {
+			DHD_ERROR(("%s failed to get pci_dev\n", __func__));
+			return 0;
+		}
+
+		if (pcie_capability_read_word(pci_dev, PCI_EXP_LNKCAP2, &val) != 0) {
+			DHD_ERROR(("%s failed to read PCI_EXP_LNKCAP2\n", __func__));
+			return 0;
+		}
+		val &= PCI_EXP_LINKCAP2_SPEED_MASK;
+		if (fls(val) >= 2) {
+			speed = fls(val) - 1;
+			DHD_INFO(("%s: Using GEN%d link speed\n", __func__, speed));
+		}
+
+		if (pci_read_config_word(pci_dev, PCI_CFG_DID, &ep_device_id) != 0) {
+			DHD_ERROR(("%s failed to read PCI_CFG_DID\n", __func__));
+			return 0;
+		}
+		pos = pci_find_ext_capability(pci_dev, PCI_EXT_CAP_ID_LTR);
+		if (!pos)
+			return 0;
+
+		pci_read_config_dword(pci_dev, pos + PCI_LTR_MAX_SNOOP_LAT, &ltr_reg);
+
+		ltr_reg = (ltr << 16) | ltr;
+		pci_write_config_dword(pci_dev, pos + PCI_LTR_MAX_SNOOP_LAT, ltr_reg);
+		DHD_INFO(("%s: Default LTR value set to 3ms\n", __func__));
+
+		return 0;
+	}
+
+#if IS_ENABLED(CONFIG_GOOGLE_CRASH_DEBUG_DUMP)
+	update_google_cdd_wifi_stat(CDD_WIFI_STAT_PCIE_LINK_UP, true);
+#endif /* CONFIG_GOOGLE_CRASH_DEBUG_DUMP */
+
+	return google_pcie_poweron_withspeed(ch_num, speed);
+}
+
+static int
+dhd_pcie_l1_exit(int ch_num)
+{
+	return dhd_pcie_l1ss_ctrl(0, ch_num);
+}
+#endif /* !IS_ENABLED(CONFIG_PCI_EXYNOS_GS) */
+
+#ifdef WONDERTAP
+
+static int dhd_wondertap_set_reg(void *vendor_handle, const char *country_code);
+static int dhd_wondertap_set_fixed_tx_rate(void *vendor_handle,
+	const struct wondertap_fixed_tx_rate_params *params);
+
+static enum
+nl80211_band dhd_freq_to_band(int freq)
+{
+	/* See 5.1.2.2 of IEEE 802.11-2016 */
+	if (freq >= 2401 && freq <= 2495)
+		return NL80211_BAND_2GHZ;
+
+	if (freq >= 4900 && freq < 5925)
+		return NL80211_BAND_5GHZ;
+
+	/* See 27.2.2 of IEEE 802.11ax-2021 */
+	if (freq >= 5925 && freq <= 7125)
+		return NL80211_BAND_6GHZ;
+
+	if (freq >= 58320 && freq <= 70200)
+		return NL80211_BAND_60GHZ;
+
+	return NUM_NL80211_BANDS;
+}
+
+static s32
+dhd_get_chspec_bw_from_wondertap_bw(u16 bw)
+{
+	switch (bw) {
+	case WONDERTAP_RATE_BW_20:
+		return WL_CHANSPEC_BW_20;
+	case WONDERTAP_RATE_BW_40:
+		return WL_CHANSPEC_BW_40;
+	case WONDERTAP_RATE_BW_80:
+		return WL_CHANSPEC_BW_80;
+	case WONDERTAP_RATE_BW_160:
+		return WL_CHANSPEC_BW_160;
+	case WONDERTAP_RATE_BW_320:
+		return WL_CHANSPEC_BW_320;
+	default:
+		DHD_ERROR(("unsupported BW\n"));
+	}
+
+	return BCME_ERROR;
+}
+
+extern dhd_pub_t *g_dhd_pub;
+static int
+dhd_wondertap_ops_set_freq(void *handle, const struct wondertap_set_freq_params *params)
+{
+	dhd_pub_t *dhdp = (dhd_pub_t *)g_dhd_pub;
+	u32 band;
+	int channel = ieee80211_frequency_to_channel(params->freq);
+	u32 chspec_bw = dhd_get_chspec_bw_from_wondertap_bw(params->bandwidth);
+	chanspec_t chanspec = {0};
+
+	if (dhdp->usr_art_enabled == TRUE) {
+		DHD_ERROR(("%s cannot set frequency when ART is enabled\n", __func__));
+		return -EINVAL;
+	}
+	switch (dhd_freq_to_band(params->freq)) {
+
+	case NL80211_BAND_2GHZ:
+		band = WL_CHANSPEC_BAND_2G;
+		break;
+	case NL80211_BAND_5GHZ:
+		band = WL_CHANSPEC_BAND_5G;
+		break;
+	default:
+		DHD_ERROR(("unsupported band. Expected 2g/5g.\n"));
+		return -EINVAL;
+	}
+
+	DHD_ERROR(("chan:%d band:%d chspec_bw:0x%x\n",
+			channel, band, chspec_bw));
+
+	chanspec = wf_create_chspec_from_primary(channel,
+			chspec_bw, band, 0);
+	if (!wf_chspec_valid(chanspec)) {
+		DHD_ERROR(("chanspec not valid chanspec:%x0x\n", chanspec));
+		return -EINVAL;
+	}
+
+	DHD_INFO(("user enforced chspec:0x%x\n", chanspec));
+	dhd_set_monitor_chspec(dhdp, chanspec);
+
+	return 0;
+}
+
+static int
+dhd_wondertap_ops_init(void **handle, const struct wondertap_init_params *params)
+{
+	dhd_pub_t *dhdp = g_dhd_pub;
+	struct net_device *monitor_dev;
+
+	*handle = (void *)(dhdp);
+	dhd_wondertap_set_reg(*handle, params->country_code);
+	monitor_dev = dhd_get_monitor_ndev(dhdp);
+	if (!monitor_dev) {
+		DHD_ERROR(("monitor_dev is null\n"));
+	} else {
+		dhd_wondertap_ops_set_freq(*handle, &params->channel);
+		eacopy(params->bssid, dhdp->art_bssid);
+		eacopy(params->mac_addr, dhdp->art_mac_addr);
+		int ret = dev_open(monitor_dev, NULL);
+
+		if (ret) {
+			DHD_ERROR(("wondertap: Failed to open interface: %d\n", ret));
+			return ret;
+		}
+		dhd_wondertap_set_fixed_tx_rate(*handle, &params->tx_rate);
+	}
+
+	return 0;
+}
+
+static void
+dhd_wondertap_ops_deinit(void *vendor_handle, const struct wondertap_deinit_params *params)
+{
+	dhd_pub_t *dhdp = (dhd_pub_t *)g_dhd_pub;
+	struct net_device *monitor_dev;
+
+	monitor_dev = dhd_get_monitor_ndev(dhdp);
+	if (!monitor_dev) {
+		DHD_ERROR(("monitor_dev is null\n"));
+	} else {
+		dev_close(monitor_dev);
+		bzero(dhdp->art_mac_addr, sizeof(u8) * ETHER_ADDR_LEN);
+	}
+	dhd_wondertap_set_reg(vendor_handle, params->country_code);
+}
+
+static int
+dhd_wondertap_set_filter(void *vendor_handle, enum wondertap_filter_type filter_type,
+	const void *params)
+{
+	dhd_pub_t *dhdp = (dhd_pub_t *)g_dhd_pub;
+	struct net_device *monitor_dev;
+
+	monitor_dev = dhd_get_monitor_ndev(dhdp);
+	if (!monitor_dev) {
+		DHD_ERROR(("monitor_dev is null\n"));
+		return -ENODEV;
+	}
+
+	switch (filter_type) {
+	default:
+		DHD_ERROR(("Unknown filter type: %u.\n", filter_type));
+		break;
+	}
+
+	return -ENOTSUPP;
+}
+
+#define MAX_VHT_MCS	9u
+static int
+dhd_wondertap_set_fixed_tx_rate(void *vendor_handle,
+	const struct wondertap_fixed_tx_rate_params *params)
+{
+	dhd_pub_t *dhdp = (dhd_pub_t *)g_dhd_pub;
+	int mcs = params->mcs;
+	int nss = params->nss;
+	enum wondertap_rate_preamble preamble = params->preamble;
+	bool ht_set = FALSE;
+	int error = 0;
+	uint32 rspec = 0;
+	chanspec_t chanspec;
+	struct net_device *monitor_dev;
+
+	monitor_dev = dhd_get_monitor_ndev(dhdp);
+	if (!monitor_dev) {
+		DHD_ERROR(("monitor_dev is null\n"));
+		return -ENODEV;
+	}
+
+	WL_INFORM(("%s: Request to set TX rate: preamble=%d, mcs=%d, nss=%d\n",
+		__func__, preamble, mcs, nss));
+
+	if (preamble == WONDERTAP_RATE_PREAMBLE_HT) {
+		rspec = WL_RSPEC_ENCODE_HT;	/* 11n HT */
+		ht_set = TRUE;
+	} else if (preamble == WONDERTAP_RATE_PREAMBLE_VHT) {
+		rspec = WL_RSPEC_ENCODE_VHT;	/* 11ac VHT */
+		if (mcs > MAX_VHT_MCS) {
+			WL_ERR(("VHT supports only max:%d mcs\n", MAX_VHT_MCS));
+			return -EINVAL;
+		}
+	} else if (preamble == WONDERTAP_RATE_PREAMBLE_HE) {
+		rspec = WL_RSPEC_ENCODE_HE;	/* 11ax HE */
+	}
+#ifdef NOT_YET
+	else if (preamble == WONDERTAP_RATE_PREAMBLE_EHT) {
+		rspec = WL_RSPEC_ENCODE_EHT;	/* 11be EHT */
+	}
+#endif /* NOT_YET */
+	if (ht_set) {
+		rspec |= mcs;
+	} else {
+		rspec |= (nss << WL_RSPEC_NSS_SHIFT);
+		rspec |= mcs;
+	}
+
+	chanspec = dhd_get_monitor_chspec(dhdp);
+	if (chanspec == 0) {
+		DHD_ERROR(("%s ART_SET_CHAN is not set\n", __func__));
+		return -EINVAL;
+	}
+
+	if (CHSPEC_BAND(chanspec) == WL_CHANSPEC_BAND_5G) {
+		rspec |= WL_RSPEC_LDPC;
+		error = wldev_iovar_setint(monitor_dev, "5g_rate", rspec);
+		if (error != BCME_OK) {
+			DHD_ERROR(("%s: failed to set 5g_rate error:%d rspec:0x%x\n",
+				__func__, error, rspec));
+			return error;
+		}
+	} else if (CHSPEC_BAND(chanspec) == WL_CHANSPEC_BAND_2G) {
+		error = wldev_iovar_setint(monitor_dev, "2g_rate", rspec);
+		if (error != BCME_OK) {
+			DHD_ERROR(("%s: failed to set 2g_rate error:%d rspec:0x%x\n",
+				__func__, error, rspec));
+			return error;
+		}
+	} else {
+		DHD_ERROR(("%s neither 5G nor 2G chanspec: 0x%x\n", __func__, chanspec));
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int
+dhd_wondertap_set_reg(void *vendor_handle, const char *country_code)
+{
+	dhd_pub_t *dhdp = (dhd_pub_t *)g_dhd_pub;
+	struct bcm_cfg80211 *cfg;
+	struct net_device *monitor_dev;
+	struct net_device *primary_ndev;
+	char local_country_code[3];
+	int err;
+
+	monitor_dev = dhd_get_monitor_ndev(dhdp);
+	if (!monitor_dev) {
+		DHD_ERROR(("monitor_dev is null\n"));
+		return -ENODEV;
+	}
+	if (dhdp->usr_art_enabled == TRUE) {
+		DHD_ERROR(("%s cannot set regulatory when ART is enabled\n", __func__));
+		return -EINVAL;
+	}
+
+	cfg = wl_get_cfg(monitor_dev);
+	primary_ndev = bcmcfg_to_prmry_ndev(cfg);
+
+	memcpy_s(local_country_code, sizeof(local_country_code),
+		country_code, sizeof(local_country_code));
+	local_country_code[2] = '\0';
+	err = wl_cfg80211_set_country_code(primary_ndev, local_country_code, true, true, 0);
+	if (err < 0) {
+		DHD_ERROR(("%s: Set country failed ret:%d\n", __func__, err));
+		return err;
+	}
+
+	return 0;
+}
+
+static int
+dhd_wondertap_get_capabilities(void *vendor_handle, struct wondertap_capability *capabilities)
+{
+	capabilities->version = 0;
+	bzero(&capabilities->bits, sizeof(capabilities->bits));
+	capabilities->bits.amsdu_aggregation = 1;
+	return 0;
+}
+
+static const struct wondertap_ops wondertap_ops = {
+	.init = dhd_wondertap_ops_init,
+	.deinit = dhd_wondertap_ops_deinit,
+	.set_freq = NULL,
+	.set_filter = dhd_wondertap_set_filter,
+	.set_fixed_tx_rate = NULL,
+	.set_tx_rate_mask = NULL,
+	.get_capabilities = dhd_wondertap_get_capabilities,
+};
+
+static const struct wondertap_priv dhd_wonder_priv = {
+	.ver = WONDER_VERSION_1_4,
+	.wonder_ops = &wondertap_ops,
+};
+
+static int dhd_wondertap_bind(struct device *dev, struct device *master, void *data)
+{
+	dev_info(dev, "%s(): Bound to master %s\n", __func__, dev_name(master));
+	return 0;
+}
+
+static void dhd_wondertap_unbind(struct device *dev, struct device *master, void *data)
+{
+	dev_info(dev, "%s(): Unbound\n", __func__);
+}
+
+static const struct component_ops dhd_wifi_comp_ops = {
+	.bind = dhd_wondertap_bind,
+	.unbind = dhd_wondertap_unbind,
+};
+
+static int dhd_wonder_probe(struct platform_device *pdev)
+{
+	dev_info(&pdev->dev, "%s()\n", __func__);
+	/* wondertap */
+	platform_set_drvdata(pdev, (void *)&dhd_wonder_priv);
+	component_add(&pdev->dev, &dhd_wifi_comp_ops);
+	return 0;
+}
+
+static void dhd_wonder_remove(struct platform_device *pdev)
+{
+	dev_info(&pdev->dev, "%s()\n", __func__);
+	component_del(&pdev->dev, &dhd_wifi_comp_ops);
+}
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
+static int dhd_wonder_remove_wrapper(struct platform_device *pdev)
+{
+	dhd_wonder_remove(pdev);
+	return 0;
+}
+#define dhd_wonder_remove dhd_wonder_remove_wrapper
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0) */
+
+static const struct of_device_id dhd_wonder_dt_ids[] = {
+	{ .compatible = "android,bcmdhd_wlan-wonder" },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, dhd_wonder_dt_ids);
+
+static struct platform_driver dhd_wonder_driver = {
+	.probe = dhd_wonder_probe,
+	.remove = dhd_wonder_remove,
+	.driver = {
+		.name = "dhd_wonder_dev",
+		.of_match_table = dhd_wonder_dt_ids,
+	},
+};
+#endif /* WONDERTAP */

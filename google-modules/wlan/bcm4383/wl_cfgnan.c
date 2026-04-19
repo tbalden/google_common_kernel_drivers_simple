@@ -6959,6 +6959,11 @@ wl_cfgnan_get_capablities_handler(struct net_device *ndev,
 	} else {
 		/* Initialize NAN before sending iovar */
 		WL_ERR(("Initializing NAN\n"));
+		if (FW_SUPPORTED(dhdp, sdb_modesw)) {
+			/* cancel scan to sync the mode for 4383 */
+			WL_DBG_MEM(("sdb_modesw: Aborting Scan for initializing NAN\n"));
+			wl_cfgscan_cancel_scan(cfg);
+		}
 		ret = wl_cfgnan_init(cfg);
 		if (ret != BCME_OK) {
 			WL_ERR(("failed to initialize NAN[%d]\n", ret));

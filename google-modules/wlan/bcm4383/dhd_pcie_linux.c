@@ -1938,8 +1938,6 @@ dhdpcie_request_irq(dhdpcie_info_t *dhdpcie_info)
 		DHD_ERROR(("%s: PCI IRQ is already registered\n", __FUNCTION__));
 	}
 
-	dhdpcie_enable_irq_loop(bus);
-
 	DHD_TRACE(("%s %s\n", __FUNCTION__, dhdpcie_info->pciname));
 
 	return 0; /* SUCCESS */
@@ -2620,16 +2618,6 @@ dhdpcie_enable_irq(dhd_bus_t *bus)
 	dev = bus->dev;
 	enable_irq(dev->irq);
 	return BCME_OK;
-}
-
-void
-dhdpcie_enable_irq_loop(dhd_bus_t *bus)
-{
-	/* Enable IRQ in a loop till host_irq_disable_count becomes 0 */
-	uint host_irq_disable_count = dhdpcie_irq_disabled(bus);
-	while (host_irq_disable_count--) {
-		dhdpcie_enable_irq(bus); /* Enable back interrupt!! */
-	}
 }
 
 int
@@ -3516,12 +3504,6 @@ bool dhd_runtimepm_state(dhd_pub_t *dhd)
 				/* It can make stuck NET TX Queue without below */
 				dhd_bus_start_queue(bus);
 				DHD_GENERAL_UNLOCK(dhd, flags);
-				if (bus->dhd->rx_pending_due_to_rpm) {
-					/* Reschedule tasklet to process Rx frames */
-					DHD_PRINT(("%s: Schedule DPC to process pending"
-						" Rx packets\n", __FUNCTION__));
-					dhd_schedule_delayed_dpc_on_dpc_cpu(bus->dhd, 0);
-				}
 				smp_wmb();
 				wake_up(&bus->rpm_queue);
 				return FALSE;
@@ -3589,15 +3571,6 @@ bool dhd_runtimepm_state(dhd_pub_t *dhd)
 			/* For making sure NET TX Queue active  */
 			dhd_bus_start_queue(bus);
 			DHD_GENERAL_UNLOCK(dhd, flags);
-
-			if (bus->dhd->rx_pending_due_to_rpm) {
-				/* Reschedule tasklet to process Rx frames */
-				DHD_PRINT(("%s: Schedule DPC to process pending Rx packets\n",
-					__FUNCTION__));
-				bus->rpm_sched_dpc_time = OSL_LOCALTIME_NS();
-				dhd_schedule_delayed_dpc_on_dpc_cpu(bus->dhd, 0);
-			}
-
 			smp_wmb();
 			wake_up(&bus->rpm_queue);
 			DHD_RPM(("%s : runtime resume ended \n", __FUNCTION__));

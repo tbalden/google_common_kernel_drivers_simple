@@ -70,6 +70,7 @@
 				cpu1_cluster = <4>;
 				cpu2_cluster = <8>;
 				usb_otg_conf;
+				smpl_ctrl = <0xA8>; /* 3.1V, 200mV HYS, 0us Debounce */
 				batoilo_det = <0x1>;   /* 30us */
 				uvlo1_det = <0x0>;   /* 0us */
 				uvlo2_det = <0x0>;   /* 0us */

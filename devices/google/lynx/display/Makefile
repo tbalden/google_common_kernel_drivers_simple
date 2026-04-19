@@ -6,15 +6,15 @@ KBUILD_OPTIONS += CONFIG_DRM_PANEL_SAMSUNG_S6E3FC3_L10=m
 KBUILD_OPTIONS += CONFIG_DRM_PANEL_SAMSUNG_S6E3FC5=m
 
 EXTRA_CFLAGS += -DDYNAMIC_DEBUG_MODULE=1
-EXTRA_CFLAGS += -I$(KERNEL_SRC)/../private/google-modules/display/common/include
-EXTRA_CFLAGS += -I$(KERNEL_SRC)/../private/google-modules/display/samsung
-EXTRA_CFLAGS += -I$(KERNEL_SRC)/../private/google-modules/display/samsung/include/uapi
+EXTRA_CFLAGS += -I$(ROOT_DIR)/private/google-modules/display/common/include
+EXTRA_CFLAGS += -I$(ROOT_DIR)/private/google-modules/display/samsung
+EXTRA_CFLAGS += -I$(ROOT_DIR)/private/google-modules/display/samsung/include/uapi
 EXTRA_CFLAGS += -Werror
 
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/display/common/gs_panel/Module.symvers
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/display/samsung/Module.symvers
+EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/display/common/gs_panel/Module.symvers
+EXTRA_SYMBOLS += $(COMMON_OUT_DIR)/private/google-modules/display/samsung/Module.symvers
 
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 
 modules modules_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) W=1 \
