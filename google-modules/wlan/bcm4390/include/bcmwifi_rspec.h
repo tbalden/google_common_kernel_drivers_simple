@@ -25,6 +25,11 @@
 #define _bcmwifi_rspec_h_
 
 #include <typedefs.h>
+#ifndef MOVE_WF_EHT_RXH_TO_RSPEC_TO_BCMWIFI_UTILS
+#if defined(BCMDRIVER) && (defined(DONGLEBUILD) || defined(WLC_SIGB_RX_11BE_RATE_DECODE))
+#include <hndd11.h>
+#endif /* BCMDRIVER && DONGLEBUILD */
+#endif /* MOVE_WF_EHT_RXH_TO_RSPEC_TO_BCMWIFI_UTILS */
 
 #ifdef BCMDRIVER
 #define BCMWIFI_RSPEC_BW_COND	/* Conditional channel width support */
@@ -335,8 +340,7 @@ ratespec_t wf_he_plcp_to_rspec(const uint8 *plcp);
 ratespec_t wf_ht_plcp_to_rspec(const uint8 *plcp);
 #ifndef MOVE_WF_EHT_RXH_TO_RSPEC_TO_BCMWIFI_UTILS
 #if defined(BCMDRIVER) && (defined(DONGLEBUILD) || defined(WLC_SIGB_RX_11BE_RATE_DECODE))
-/* API to converting incoming RXH(ctx) to rspec based on corerev (minor/major) */
-ratespec_t wf_eht_rxh_to_rspec(d11rxhdr_t *rxh, uint corerev, uint corerev_minor);
+ratespec_t wf_eht_rxh_to_rspec(const wlc_d11rxhdr_t *wrxh, uint corerev, uint corerev_minor);
 #endif /* BCMDRIVER && DONGLEBUILD */
 #endif /* MOVE_WF_EHT_RXH_TO_RSPEC_TO_BCMWIFI_UTILS */
 

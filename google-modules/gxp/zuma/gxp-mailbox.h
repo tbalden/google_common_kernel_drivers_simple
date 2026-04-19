@@ -283,7 +283,7 @@ void gxp_mailbox_reinit(struct gxp_mailbox *mailbox);
  * for detail.
  */
 int gxp_mailbox_send_cmd(struct gxp_mailbox *mailbox, void *cmd, void *resp,
-			 gcip_mailbox_cmd_flags_t flags);
+			 u32 gcip_mailbox_cmd_flags);
 
 /*
  * Executes command asynchronously. The response will be written to @resp.
@@ -293,6 +293,6 @@ int gxp_mailbox_send_cmd(struct gxp_mailbox *mailbox, void *cmd, void *resp,
  */
 struct gcip_mailbox_resp_awaiter *gxp_mailbox_put_cmd(struct gxp_mailbox *mailbox, void *cmd,
 						      void *resp, void *data,
-						      gcip_mailbox_cmd_flags_t flags);
+						      u32 gcip_mailbox_cmd_flags);
 
 #endif /* __GXP_MAILBOX_H__ */

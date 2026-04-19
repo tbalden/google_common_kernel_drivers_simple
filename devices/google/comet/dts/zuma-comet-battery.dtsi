@@ -22,6 +22,9 @@
 				google,ttf-soc-table =  <63 83 94 96  99  100>;
 				google,ttf-elap-table = <37 64 92 142 247 90>;
 				google,ttf-tier-table = <0 68 81>;
+
+				google,bpst-enable;
+				google,bpst-dual-batt;
 			};
 
 			google_dual_batt_gauge: google,dual_batt_gauge {

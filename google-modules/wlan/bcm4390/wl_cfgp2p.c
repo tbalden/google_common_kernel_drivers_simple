@@ -1813,8 +1813,10 @@ wl_cfgp2p_action_tx_complete(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev
 						"status : %d\n", status));
 
 			cfg->randomized_gas_tx = FALSE;
-			if (wl_get_drv_status_all(cfg, SENDING_ACT_FRM))
-				complete(&cfg->send_af_done);
+			/* signal to interrupt event wait timer */
+			cfg->af_sent_channel = 0;
+			OSL_SMP_WMB();
+			wake_up_interruptible(&cfg->netif_change_event);
 		}
 	}
 	return ret;
@@ -1837,6 +1839,11 @@ wl_cfg80211_abort_action_frame(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	return ret;
 }
 
+static bool af_completion_condition(struct bcm_cfg80211 *cfg, struct net_device *ndev)
+{
+	return !cfg->af_sent_channel;
+}
+
 /* Send an action frame immediately without doing channel synchronization.
  *
  * This function does not wait for a completion event before returning.
@@ -1851,17 +1858,18 @@ wl_cfgp2p_tx_action_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 {
 	s32 ret = BCME_OK;
 	s32 evt_ret = BCME_OK;
-	s32 timeout = 0;
+	s32 dwell_time = 0;
 	wl_eventmsg_buf_t buf;
 	wl_af_params_v2_t *af_params_v2_p = NULL;
 	u8 *af_params_iov_p = NULL;
 	s32 af_params_iov_len = 0;
 	uint16 wl_af_params_size = 0;
+	long timeout = 0;
 
 	CFGP2P_DBG(("\n"));
-	CFGP2P_ACTION(("channel : %u(0x%04x) , dwell time : %u wait_afrx:%d\n",
+	CFGP2P_ACTION(("channel : %u(0x%04x) , dwell time : %u wait_afrx:%d pktid %x \n",
 		wf_chspec_center_channel(af_params->channel), af_params->channel,
-		af_params->dwell_time, cfg->need_wait_afrx));
+		af_params->dwell_time, cfg->need_wait_afrx, af_params->action_frame.packetId));
 
 	wl_clr_p2p_status(cfg, ACTION_TX_COMPLETED);
 	wl_clr_p2p_status(cfg, ACTION_TX_NOACK);
@@ -1913,37 +1921,65 @@ wl_cfgp2p_tx_action_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 
 	if (ret < 0) {
 		CFGP2P_ACTION(("TX actfrm : ERROR, %d\n", ret));
+		/* Reset af_sent_channel, so that we can skip aborting the actframe if FW is busy */
+		if ((ret == BCME_BUSY) && (af_params->flags & WL_ACT_FRAME_FLAG_NAN_USD)) {
+			cfg->af_sent_channel = 0;
+		}
 		goto exit;
 	}
 
-	timeout = wait_for_completion_timeout(&cfg->send_af_done,
-		msecs_to_jiffies(af_params->dwell_time + WL_AF_TX_EXTRA_TIME_MAX));
+	dwell_time = af_params->dwell_time + WL_AF_TX_EXTRA_TIME_MAX;
+	/* Wait for WLC_E_ACTION_FRAME_OFFCHAN_COMPLETE event */
+	timeout = wl_cfg80211_wait_interruptible(cfg, dev, af_completion_condition,
+			dwell_time);
 	if (timeout == 0) {
-		CFGP2P_DBG(("action frame dwell timeout completed\n"));
-		/* Call actframe_abort to cleanup FW state, when
-		 * dwell timeout occurs.
-		 */
-		ret = wl_cfg80211_abort_action_frame(cfg, dev, bssidx);
+		/* dwell time elapsed, check TX_COMPLETE */
+		if (!wl_get_p2p_status(cfg, ACTION_TX_COMPLETED)) {
+			/* Call actframe_abort to cleanup FW state, when
+			 * dwell timeout occurs.
+			 */
+			ret = wl_cfg80211_abort_action_frame(cfg, dev, bssidx);
+			/* Dwell time completed, but if TX_COMPLETE is
+			 * not received then return TXFAIL error
+			 * ACK=false will be returned to supplicant,
+			 * then supplicant can retry actframe
+			 */
+			if ((af_params->flags & WL_ACT_FRAME_FLAG_NAN_USD)) {
+				CFGP2P_DBG(("TXFAIL: No TX_COMPLETE after dwell timeout\n"));
+				ret = BCME_TXFAIL;
+			}
+		} else {
+			CFGP2P_DBG(("tx action frame operation is completed\n"));
+			ret = BCME_OK;
+		}
 	} else if (timeout > 0 && wl_get_p2p_status(cfg, ACTION_TX_COMPLETED)) {
 		CFGP2P_DBG(("tx action frame operation is completed\n"));
 		ret = BCME_OK;
-	} else if (ETHER_ISBCAST(&cfg->afx_hdl->tx_dst_addr)) {
-		CFGP2P_DBG(("bcast tx action frame operation is completed\n"));
+	} else if (ETHER_ISMULTI(&cfg->afx_hdl->tx_dst_addr)) {
+		CFGP2P_DBG(("bcast/multi cast tx action frame operation is completed\n"));
 		ret = BCME_OK;
 	} else {
-		ret = BCME_ERROR;
 		CFGP2P_DBG(("tx action frame operation is failed\n"));
+		ret = BCME_ERROR;
 	}
+
 	/* clear status bit for action tx */
 	wl_clr_p2p_status(cfg, ACTION_TX_COMPLETED);
 	wl_clr_p2p_status(cfg, ACTION_TX_NOACK);
 
+	/* af_sent_channel gives us info that current actframe is ongoing in FW in the channel
+	 * Based on this variable, next incoming USD actframe will know if previous actframe is
+	 * still in progress, if so then new actframe has to be returned busy to supplicant
+	 */
+	if (ret == BCME_OK) {
+		cfg->af_sent_channel = 0;
+	}
 exit:
 	if (af_params_v2_p) {
 		MFREE(cfg->osh, af_params_v2_p, wl_af_params_size);
 	}
 
-	CFGP2P_DBG((" via act frame iovar : status = %d\n", ret));
+	CFGP2P_DBG(("via act frame iovar: status = %d af_sent_ch %x\n", ret, cfg->af_sent_channel));
 	bzero(&buf, sizeof(wl_eventmsg_buf_t));
 	wl_cfg80211_add_to_eventbuffer(&buf, WLC_E_ACTION_FRAME_OFF_CHAN_COMPLETE, false);
 	wl_cfg80211_add_to_eventbuffer(&buf, WLC_E_ACTION_FRAME_COMPLETE, false);
@@ -2969,6 +3005,9 @@ wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
 
 	cfg->p2p_wdev = NULL;
 
+	if (cfg->vif_count) {
+		cfg->vif_count--;
+	}
 	CFGP2P_ERR(("P2P interface unregistered\n"));
 
 	return 0;
@@ -3023,20 +3062,26 @@ wl_cfgp2p_is_p2p_specific_scan(struct cfg80211_scan_request *request)
 	return false;
 }
 
+/* Wait for WLC_E_IF event with IF_ADD opcode */
+static bool if_add_condition(struct bcm_cfg80211 *cfg, struct net_device *ndev)
+{
+	return ((wl_get_p2p_status(cfg, IF_ADDING) == false) &&
+			(cfg->if_event_info.valid));
+}
+
 struct wireless_dev *
 wl_cfgp2p_if_add(struct bcm_cfg80211 *cfg, wl_iftype_t wl_iftype,
 	char const *name, u8 *mac_addr, s32 *ret_err)
 {
 	u16 chspec;
 	s16 cfg_type;
-	long timeout;
 	u16 p2p_iftype;
 	int dhd_mode;
 	struct net_device *new_ndev = NULL;
-	long time_to_wait = MAX_WAIT_TIME;
-	unsigned long start_wait_time;
+	ktime_t time_to_wait = MAX_WAIT_TIME;
 	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
 	struct ether_addr *p2p_addr;
+	long timeout = 0;
 
 	*ret_err = BCME_OK;
 	if (!cfg->p2p) {
@@ -3103,30 +3148,12 @@ wl_cfgp2p_if_add(struct bcm_cfg80211 *cfg, wl_iftype_t wl_iftype,
 		return NULL;
 	}
 
-	/* Wait for WLC_E_IF event with IF_ADD opcode */
-	while (TRUE) {
-		start_wait_time = get_jiffies_64();
-		timeout = wait_event_interruptible_timeout(cfg->netif_change_event,
-			((wl_get_p2p_status(cfg, IF_ADDING) == false) &&
-			(cfg->if_event_info.valid)),
-			msecs_to_jiffies(time_to_wait));
-		if (timeout == -ERESTARTSYS) {
-			WL_ERR(("waitqueue was interrupted by a signal\n"));
-			time_to_wait -= jiffies_to_msecs(get_jiffies_64() - start_wait_time);
-			if (time_to_wait <= 0) {
-				WL_ERR(("Timed out. time_to_wait:%ld, timeout:%ld\n",
-					time_to_wait, timeout));
-				goto fail;
-			}
-		} else if (timeout <= 0) {
-			WL_ERR(("ADD_IF event, didn't come. timeout:%ld\n", time_to_wait));
-			goto fail;
-		} else {
-			/* wait event interrupt, break and process */
-			break;
-		}
+	timeout = wl_cfg80211_wait_interruptible(cfg, bcmcfg_to_prmry_ndev(cfg),
+			if_add_condition, time_to_wait);
+	if (timeout <= 0) {
+		WL_ERR(("ADD_IF event, didn't come. timeout:%lld\n", time_to_wait));
+		goto fail;
 	}
-
 	if (!wl_get_p2p_status(cfg, IF_ADDING) && cfg->if_event_info.valid) {
 		wl_if_event_info *event = &cfg->if_event_info;
 		new_ndev = wl_cfg80211_post_ifcreate(bcmcfg_to_prmry_ndev(cfg), event,
@@ -3265,6 +3292,9 @@ wl_cfgp2p_if_del(struct wiphy *wiphy, struct wireless_dev *wdev)
 		if (timeout > 0 && !wl_get_p2p_status(cfg, IF_DELETING) &&
 			cfg->if_event_info.valid) {
 			WL_ERR(("P2P IFDEL operation done\n"));
+			if (cfg->vif_count) {
+				cfg->vif_count--;
+			}
 			err = BCME_OK;
 		} else {
 			WL_ERR(("IFDEL didn't complete properly\n"));

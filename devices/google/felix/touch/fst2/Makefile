@@ -5,9 +5,9 @@ KBUILD_OPTIONS	+= CONFIG_TOUCHSCREEN_FST2=m
 EXTRA_CFLAGS	+= -DDYNAMIC_DEBUG_MODULE
 EXTRA_CFLAGS	+= -DCONFIG_GOOG_TOUCH_INTERFACE
 
-EXTRA_SYMBOLS   += $(OUT_DIR)/../private/google-modules/touch/common/Module.symvers
+EXTRA_SYMBOLS   += $(COMMON_OUT_DIR)/private/google-modules/touch/common/Module.symvers
 
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 
 modules modules_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) \

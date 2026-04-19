@@ -215,17 +215,18 @@ TRACE_EVENT(gxp_vd_release_end,
 
 	    TP_printk("vdid = %d", __entry->vdid));
 
+/* Use a fake argument placeholder because the macro requires user to pass in some variables. */
 TRACE_EVENT(gxp_uci_cmd_start,
 
-	    TP_PROTO(u64 seq),
+	    TP_PROTO(int placeholder),
 
-	    TP_ARGS(seq),
+	    TP_ARGS(placeholder),
 
-	    TP_STRUCT__entry(__field(u64, seq)),
+	    TP_STRUCT__entry(),
 
-	    TP_fast_assign(__entry->seq = seq;),
+	    TP_fast_assign(),
 
-	    TP_printk("seq = %llu", __entry->seq));
+	    TP_printk("%s", "Start sending UCI comomand"));
 
 TRACE_EVENT(gxp_uci_cmd_end,
 

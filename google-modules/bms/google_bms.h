@@ -494,6 +494,10 @@ struct gbms_charging_event {
 	int aacc_chg_cc;
 	int max_charge_voltage;
 
+	int bpst_sbd_status;
+	int bpst_count;
+	int bpst_chg_rate;
+
 	/* health based charging */
 	struct batt_chg_health		ce_health;	/* updated on close */
 	struct gbms_ce_tier_stats	health_stats;	/* updated in HC */
@@ -684,7 +688,7 @@ int ttf_soc_cstr(char *buff, int size, const struct ttf_soc_stats *soc_stats,
 
 int ttf_soc_estimate(ktime_t *res, struct batt_ttf_stats *stats,
 		     const struct gbms_charging_event *ce_data,
-		     qnum_t soc, qnum_t last);
+		     qnum_t soc, qnum_t last, int tier_idx);
 
 void ttf_soc_init(struct ttf_soc_stats *dst);
 
@@ -711,8 +715,6 @@ void ttf_log(const struct batt_ttf_stats *stats, const char *fmt, ...);
 ssize_t ttf_dump_details(char *buf, int max_size,
 			 const struct batt_ttf_stats *ttf_stats,
 			 int last_soc);
-
-int ttf_pwr_vtier_idx(const struct batt_ttf_stats *stats, int soc);
 
 int ttf_ref_cc(const struct batt_ttf_stats *stats, int soc);
 
@@ -759,7 +761,15 @@ void gbms_log_cstr_handler(struct logbuffer *log, char *buf, int len);
 /* decode EEPROM serial number to readable string */
 int gbms_decode_eeprom_sn(char *decode_sn, const size_t max_len);
 
+#define FADE_RATE_OFFSET	0
+#define FADE_RATE_FCR_OFFSET	8
+#define FADE_RATE_SEC_OFFSET	16
+#define FADE_RATE_MIX_OFFSET	24
 
+#define get_fade_rate(fr)	((s8)((fr) >> FADE_RATE_OFFSET & 0xFF))
+#define get_fade_rate_fcr(fr)	((s8)((fr) >> FADE_RATE_FCR_OFFSET & 0xFF))
+#define get_fade_rate_sec(fr)	((s8)((fr) >> FADE_RATE_SEC_OFFSET & 0xFF))
+#define get_fade_rate_mix(fr)	((s8)((fr) >> FADE_RATE_MIX_OFFSET & 0xFF))
 
 /*
  * Charger modes
@@ -805,6 +815,8 @@ enum bhi_algo {
 	BHI_ALGO_DTOOL		=  9, /* diagnostics for Cavalry b/304878620 */
 	BHI_ALGO_ACHI_FCR	= 10, /* average of FCR from history b/310501655*/
 	BHI_ALGO_ACHI_CARETAKER	= 11, /* same as ACHI_B + caretaker */
+	BHI_ALGO_ACHI_SEC	= 12, /* same as ACHI_B report from secondary battery */
+	BHI_ALGO_ACHI_MIX	= 13, /* same as ACHI_B mix the capacity from both batteries */
 	BHI_ALGO_MAX,
 };
 
@@ -912,7 +924,7 @@ enum charging_state {
 };
 
 #define LONGLIFE_CHARGE_STOP_LEVEL 80
-#define LONGLIFE_CHARGE_START_LEVEL 79
+#define LONGLIFE_CHARGE_START_LEVEL 77
 #define ADAPTIVE_ALWAYS_ON_SOC 80
 
 enum charging_policy {
@@ -1028,6 +1040,25 @@ enum fg_log_event {
 	FG_LOG_CHG_DONE,
 	FG_LOG_REACHING_100,
 	FG_LOG_FALL_BELOW_10,
+};
+
+enum spoof_soc_reason {
+	SPOOF_SOC_NONE = 0,
+	SPOOF_SOC_CHARGING_POLICY,
+	SPOOF_SOC_ADAPTIVE_CHARGING,
+	SPOOF_SOC_TEMP_DEFEND,
+};
+
+enum bpst_batt_status {
+	BPST_BATT_UNKNOWN = 0,
+	BPST_BATT_CONNECT = 1,
+	BPST_BATT_DISCONNECT = 2,
+	BPST_BATT_CELL_FAULT = 3,
+	BPST_BATT_BASE_DC = 4,
+	BPST_BATT_SEC_DC = 5,
+	BPST_BATT_ALL_DC_ON_BOOT = 6,
+	BPST_BATT_BASE_DC_ON_BOOT = 7,
+	BPST_BATT_SEC_DC_ON_BOOT = 8,
 };
 
 #endif  /* __GOOGLE_BMS_H_ */

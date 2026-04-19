@@ -381,7 +381,9 @@
 					 0
 					 0
 					 1000
-					 0
+					 /* AF need 7.1ms (rounded to 8ms) before I2C stable,
+					    added the remaining here */
+					 8000
 					 0>;
 
 				power-down-seqs =

@@ -22,16 +22,16 @@ config RIO
 	  To compile this driver as a module, choose M here.  The module
 	  will be called "rio".
 
-config EDGETPU_TELEMETRY_TRACE
-	bool "Build EdgeTPU driver with firmware tracing support"
+config EDGETPU_FUZZ
+	bool "Build EdgeTPU driver for fuzz testing"
 	depends on EDGETPU_FRAMEWORK
-	default y
+	default n
 	help
-	  Say Y to have the driver handle the tracing events sent from the
-	  firmware. Enable this will increase the time for setup, suggest to
-	  disable this in production mode to reduce the software overhead.
+	  Enable this option to build the EdgeTPU driver with additional
+	  functionality specifically designed for fuzz testing.
 
-	  It's fine to have this enabled even the firmware doesn't send tracing
-	  events.
+	  When this flag is enabled, certain security checks may be disabled.
+	  This flag should only be enabled for development and testing purposes
+	  and must never be enabled in production kernels.
 
 endmenu

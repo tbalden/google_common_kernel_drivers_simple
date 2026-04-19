@@ -4787,8 +4787,10 @@ wl_cfgnan_terminate_all_obsolete_ranging_sessions(
 	for (i = 0; i < NAN_MAX_RANGING_INST; i++) {
 		ranging_inst = &cfg->nancfg->nan_ranging_info[i];
 		if (ranging_inst->in_use &&
-			ranging_inst->range_role == NAN_RANGING_ROLE_INITIATOR) {
-			wl_cfgnan_terminate_ranging_session(cfg, ranging_inst);
+			(ranging_inst->range_role == NAN_RANGING_ROLE_INITIATOR) &&
+			(ranging_inst->range_type == RTT_TYPE_NAN_GEOFENCE) &&
+			(ranging_inst->num_svc_ctx == 0)) {
+				wl_cfgnan_terminate_ranging_session(cfg, ranging_inst);
 		}
 	}
 

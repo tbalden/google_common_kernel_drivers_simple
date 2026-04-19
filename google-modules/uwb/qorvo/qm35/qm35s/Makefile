@@ -8,7 +8,7 @@ $(info *** Building Android in $O/$M )
 
 KBUILD_OPTIONS += CONFIG_QM35_SPI=m
 
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 
 modules modules_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) INSTALL_MOD_STRIP=1 \

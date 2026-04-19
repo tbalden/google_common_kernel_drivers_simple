@@ -73,6 +73,7 @@ enum iif_ip_type {
 	IIF_IP_GPU,
 	IIF_IP_AP,
 	IIF_IP_IRIS,
+	IIF_IP_AOC,
 	IIF_IP_NUM,
 
 	/* Reserve the number of IP type to expand the fence table easily in the future. */
@@ -90,6 +91,15 @@ enum iif_signal_table_flag_bits {
 	 * signals becomes 0.
 	 */
 	IIF_SIGNAL_TABLE_FLAG_ERROR_BIT,
+	/* We cannot define more than 8 flags. */
+	IIF_SIGNAL_TABLE_FLAG_MAX_BIT = 8,
+};
+
+enum iif_wait_table_flag_bits {
+	/* If this flag is set, the fence is a reusable fence. Otherwise, a single-shot fence. */
+	IIF_WAIT_TABLE_FLAG_REUSABLE_BIT,
+	/* We cannot define more than 8 flags. */
+	IIF_WAIT_TABLE_FLAG_MAX_BIT = 8,
 };
 
 /**
@@ -126,7 +136,7 @@ enum iif_signal_table_fence_error {
 
 /* Sync-point of reusable fences. */
 struct iif_wait_table_reusable_sync_point {
-	/* Marks BIT(0) to true if the fence is a reusable fence. */
+	/* The timeline value to start notifying waiters by this sync point. */
 	uint8_t start_timeline;
 	/*
 	 * Waiters will be notified @count times from @start_timeline.
@@ -141,8 +151,11 @@ struct iif_wait_table_reusable_sync_point {
 struct iif_wait_table_entry {
 	/* The waiters waiting on the fence unblock. */
 	uint8_t waiting_ips;
-	/* Marks BIT(0) if the fence is a reusable fence. */
-	uint8_t reusable;
+	/*
+	 * The flag of the fence.
+	 * See `enum iif_wait_table_flag_bits` to understand the meaning of each bit.
+	 */
+	uint8_t flag;
 	union {
 		/* Sync points for reusable fence. */
 		struct iif_wait_table_reusable_sync_point sync_points[IIF_NUM_SYNC_POINTS];

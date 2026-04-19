@@ -95,7 +95,7 @@ static int syna_tcm_v1_parse_idinfo(struct tcm_dev *tcm_dev,
 			sizeof(struct tcm_identification_info),
 			data,
 			size,
-			MIN(sizeof(*id_info), data_len));
+			min(sizeof(*id_info), data_len));
 	if (retval < 0) {
 		LOGE("Fail to copy identification info\n");
 		return retval;
@@ -104,7 +104,7 @@ static int syna_tcm_v1_parse_idinfo(struct tcm_dev *tcm_dev,
 	build_id = syna_pal_le4_to_uint(id_info->build_id);
 
 	wr_size = syna_pal_le2_to_uint(id_info->max_write_size);
-	tcm_dev->max_wr_size = MIN(wr_size, WR_CHUNK_SIZE);
+	tcm_dev->max_wr_size = min(wr_size, WR_CHUNK_SIZE);
 	if (tcm_dev->max_wr_size == 0) {
 		tcm_dev->max_wr_size = wr_size;
 		LOGD("max_wr_size = %d\n", tcm_dev->max_wr_size);
@@ -845,7 +845,7 @@ do_dispatch:
 		if (tcm_dev->max_rd_size < MESSAGE_HEADER_SIZE)
 			tcm_msg->predict_length = tcm_msg->payload_length;
 		else
-			tcm_msg->predict_length = MIN(tcm_msg->payload_length,
+			tcm_msg->predict_length = min(tcm_msg->payload_length,
 				tcm_dev->max_rd_size - MESSAGE_HEADER_SIZE - 1);
 
 		tcm_msg->predict_length += 1; /* padding byte */

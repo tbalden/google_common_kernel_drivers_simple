@@ -18,8 +18,11 @@
 //#define FTH_IOCTL_CONFIGURE_TOUCH_FD_V4    113
 //#define FTH_IOCTL_CONFIGURE_TOUCH_FD_V5    114
 #define FTH_IOCTL_CONFIGURE_TOUCH_FD_V6      115
+#define FTH_IOCTL_GET_TOUCH_DEVICE_STATUS    116
+#define FTH_IOCTL_CONFIGURE_TOUCH_FD_V7      117
 
 #define FTH_TOUCH_FD_VERSION_6 6
+#define FTH_TOUCH_FD_VERSION_7 7
 
 #define FTH_MAX_FD_EVENTS 128
 
@@ -28,16 +31,16 @@
 #define FTH_LPTW_FINGER_SLOT -1
 
 /*
- * enum fth_finger_events -
- *      enumeration of fth finger events
- * @FTH_EVENT_FINGER_UP - finger up detected
- * @FTH_EVENT_FINGER_DOWN - finger down detected
- * @FTH_EVENT_FINGER_MOVE - finger move detected
+ * enum fth_touch_state -
+ *      enumeration of fth touch states
+ * @FTH_STATE_UP - finger up detected
+ * @FTH_STATE_DOWN - finger down detected
+ * @FTH_STATE_MOVE - finger move detected
  */
-enum fth_finger_events {
-	FTH_EVENT_FINGER_UP,
-	FTH_EVENT_FINGER_DOWN,
-	FTH_EVENT_FINGER_MOVE
+enum fth_touch_state {
+	FTH_TOUCH_STATE_UP = 0,
+	FTH_TOUCH_STATE_DOWN = 1,
+	FTH_TOUCH_STATE_MOVE = 2,
 };
 
 /*
@@ -52,19 +55,58 @@ struct fth_touch_event_v6 {
 	__s32 minor;
 	__s32 orientation;
 	__s32 slot;
-	__s32 state;	// 0 = up, 1 = down, 2 = move.
+	__s32 state;
 	__s32 num_fingers;	// number of fingers
 	_Bool touch_valid;
 	_Bool updated[FTH_MAX_FINGERS];
+};
+
+/**
+ * struct fth_touch_event_v7 -
+ * @time_us: event time in monotonic micro-seconds
+ * @X: x co-ordinate of fingers
+ * @Y: y co-ordinate of fingers
+ * @major: major axis of contact
+ * @minor: minor axis of contact
+ * @orientation: orientation of contact
+ * @slot: current slot being reported
+ * @state: touch state, see enum fth_touch_state
+ * @num_fingers: number of fingers
+ * @touch_valid: is touch valid
+ * @updated: which slots have been updated
+ * @down_time_us: finger down time in monotonic micro-seconds
+ */
+struct fth_touch_event_v7 {
+	__s64 time_us;
+	__u16 X[FTH_MAX_FINGERS];
+	__u16 Y[FTH_MAX_FINGERS];
+	__s32 major;
+	__s32 minor;
+	__s32 orientation;
+	__s32 slot;
+	__s32 state;
+	__s32 num_fingers;	// number of fingers
+	_Bool touch_valid;
+	_Bool updated[FTH_MAX_FINGERS];
+	__u64 down_time_us[FTH_MAX_FINGERS];
 };
 
 /*
  * struct fth_fd_buf -
  *		used to send fd buf
  */
-struct fth_fd_buf {
+struct fth_fd_buf_v6 {
 	__u32 num_events;
 	struct fth_touch_event_v6 fd_events[FTH_MAX_FD_EVENTS];
+};
+
+/*
+ * struct fth_fd_buf_v7 -
+ *		used to send fd buf
+ */
+struct fth_fd_buf_v7 {
+	__u32 num_events;
+	struct fth_touch_event_v7 fd_events[FTH_MAX_FD_EVENTS];
 };
 
 /*
@@ -110,6 +152,15 @@ struct fth_touch_config_v6 {
 	__s32 bottom;
 	__s32 rad_x;
 	__s32 rad_y;
+};
+
+/*
+ * struct fth_touch_device_status -
+ *		used to get touch device connection status
+ * @is_connected: touch device connection status
+ */
+struct fth_touch_device_status {
+	_Bool is_connected;
 };
 
 #endif /* _UAPI_FTH_HANDLER_H_ */

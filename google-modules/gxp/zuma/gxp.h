@@ -13,7 +13,7 @@
 
 /* Interface Version */
 #define GXP_INTERFACE_VERSION_MAJOR 1
-#define GXP_INTERFACE_VERSION_MINOR 32
+#define GXP_INTERFACE_VERSION_MINOR 33
 #define GXP_INTERFACE_VERSION_BUILD 0
 
 /* mmap offsets for MCU logging and tracing buffers */
@@ -968,6 +968,8 @@ struct gxp_set_device_properties_ioctl {
 
 #define GXP_MAX_FENCES_PER_UCI_COMMAND 4
 
+#define GXP_MAX_MID_IN_OUT_FENCES_PER_UCI_COMMAND 2
+
 /*
  * Indicates the end of the fence FD array. This macro will be used by the
  * ioctls which receive multiple fence FDs as an array.
@@ -1028,8 +1030,22 @@ struct gxp_mailbox_uci_command_ioctl {
 	 * modification by the kernel driver.
 	 */
 	__u8 opaque[GXP_UCI_CMD_OPAQUE_SIZE];
+	/*
+	 * Input:
+	 * The FDs of mid-fences that this command will wait for. The kernel driver
+	 * will read FDs from this array until it meets `GXP_FENCE_ARRAY_TERMINATION` or
+	 * end-of-array.
+	 */
+	__u32 mid_in_fences[GXP_MAX_MID_IN_OUT_FENCES_PER_UCI_COMMAND];
+	/*
+	 * Input:
+	 * The FDs of mid-fences that this command will signal. The kernel driver
+	 * will read FDs from this array until it meets `GXP_FENCE_ARRAY_TERMINATION` or
+	 * end-of-array.
+	 */
+	__u32 mid_out_fences[GXP_MAX_MID_IN_OUT_FENCES_PER_UCI_COMMAND];
 	/* Reserved fields. */
-	__u8 reserved[32];
+	__u8 reserved[16];
 };
 
 /*

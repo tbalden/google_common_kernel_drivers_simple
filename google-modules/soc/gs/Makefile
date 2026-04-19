@@ -5,8 +5,8 @@ M ?= $(shell pwd)
 O ?= $(OUT_DIR)
 OBJTREE ?= $(O)/$(M)
 
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/bms/misc/Module.symvers
-EXTRA_SYMBOLS += $(OUT_DIR)/../private/google-modules/trusty/Module.symvers
+EXTRA_SYMBOLS += $(wildcard $(COMMON_OUT_DIR)/private/google-modules/bms/misc/Module.symvers)
+EXTRA_SYMBOLS += $(wildcard $(COMMON_OUT_DIR)/private/google-modules/trusty/Module.symvers)
 
 modules modules_install headers_install clean compile_commands.json:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) \

@@ -59,10 +59,14 @@
 
 #define FTS_CHIP_TYPE_MAPPING   {{0x90, 0x56, 0x72, 0x00, 0x00, 0x00, 0x00, 0x36, 0xB3}}
 
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 #define FTS_STTW_E5_BUF_LEN                 14
 #define FTS_LPTW_E3_BUF_LEN                 12
 #define FTS_LPTW_E4_BUF_LEN                 24
-#define FTS_LPTW_BUF_LEN                    (max(FTS_LPTW_E3_BUF_LEN, FTS_LPTW_E4_BUF_LEN))
+#define FTS_LPTW_BUF_LEN                    (MAX(FTS_LPTW_E3_BUF_LEN, FTS_LPTW_E4_BUF_LEN))
 
 #define FILE_NAME_LENGTH                    128
 #define FTS_MESSAGE_LENGTH                  128
@@ -235,6 +239,7 @@ enum FW_HEATMAP_MODE {
 #define FTS_FUNC_EXIT()
 #endif
 
+#define FTS_WARN(fmt, ...) pr_warn(fmt, ##__VA_ARGS__)
 #define FTS_INFO(fmt, ...) pr_info(fmt, ##__VA_ARGS__)
 #define FTS_ERROR(fmt, ...) pr_err(fmt, ##__VA_ARGS__)
 #define PR_LOGD(fmt, ...) pr_debug(fmt, ##__VA_ARGS__)

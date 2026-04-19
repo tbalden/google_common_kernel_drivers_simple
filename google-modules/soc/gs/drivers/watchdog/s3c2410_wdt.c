@@ -46,6 +46,10 @@
 #include <linux/sched/task.h>
 #include <soc/google/etm2dram.h>
 
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 #define S3C2410_WTCON		0x00
 #define S3C2410_WTDAT		0x04
 #define S3C2410_WTCNT		0x08
@@ -101,6 +105,13 @@
 #define WINDOW_MULTIPLIER			2
 
 #define PRINT_CPUS_LIMIT			(30)
+
+#ifndef MIN
+#define MIN(v1, v2) ((v1) < (v2) ? (v1) : (v2))
+#endif
+#ifndef MAX
+#define MAX(v1, v2) ((v1) < (v2) ? (v2) : (v1))
+#endif
 
 static bool nowayout	= WATCHDOG_NOWAYOUT;
 static int tmr_margin;
@@ -720,7 +731,7 @@ static int proportion_in_1_digit(u64 dividend, u64 divisor)
 void s3c2410wdt_print_schedstat(const char *loglvl)
 {
 	int cpu;
-	char buf[max(NR_CPUS, PRINT_CPUS_LIMIT)];
+	char buf[MAX(NR_CPUS, PRINT_CPUS_LIMIT)];
 	char *bufp;
 	u64 duration;
 	struct s3c2410_wdt *wdt = s3c_wdt[LITTLE_CLUSTER];

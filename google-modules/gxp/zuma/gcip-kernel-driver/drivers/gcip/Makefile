@@ -4,7 +4,7 @@
 #
 # Arguments
 #   GMODULE_SRC_PATH: The path of directory containing source of google-modules.
-#                     (default: $(KERNEL_SRC)/../private/google-modules)
+#                     (default: $(ROOT_DIR)/private/google-modules)
 
 CONFIG_GCIP		?= m
 obj-$(CONFIG_GCIP)	+= gcip.o
@@ -22,6 +22,7 @@ gcip-objs		:= gcip-alloc-helper.o \
 			   gcip-iommu.o \
 			   gcip-kci.o \
 			   gcip-mailbox.o \
+			   gcip-mapping.o \
 			   gcip-mem-pool.o \
 			   gcip-pm.o \
 			   gcip-resource-accessor.o \
@@ -47,7 +48,8 @@ ccflags-y	+= -I$(CURRENT_DIR)/../../include
 ccflags-y	+= -I$(CURRENT_DIR)/iif/include
 
 # Set the path of google-modules sources if not defined.
-GMODULE_SRC_PATH ?= $(KERNEL_SRC)/../private/google-modules
+ROOT_DIR ?= $(KERNEL_SRC)/..
+GMODULE_SRC_PATH ?= $(ROOT_DIR)/private/google-modules
 
 ifneq ($(wildcard $(GMODULE_SRC_PATH)/iif/include),)
 ccflags-y	+= -I$(GMODULE_SRC_PATH)/iif/include

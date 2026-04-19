@@ -8173,14 +8173,6 @@ BCMFASTPATH(dhd_prot_process_msgbuf_rxcpl)(dhd_pub_t *dhd, int ringtype, uint32 
 	/* must be the first check in this function */
 	(void)dhd_prot_lb_rxp_flow_ctrl(dhd);
 #endif /* DHD_LB_RXP */
-#ifdef DHD_PCIE_RUNTIMEPM
-	/* Set rx_pending_due_to_rpm if device is not in resume state */
-	if (dhdpcie_runtime_bus_wake(dhd, FALSE, dhd_prot_process_msgbuf_rxcpl)) {
-		dhd->rx_pending_due_to_rpm = TRUE;
-		return more;
-	}
-	dhd->rx_pending_due_to_rpm = FALSE;
-#endif /* DHD_PCIE_RUNTIMEPM */
 
 #ifdef DHD_HP2P
 	if (ringtype == DHD_HP2P_RING && prot->d2hring_hp2p_rxcpl)

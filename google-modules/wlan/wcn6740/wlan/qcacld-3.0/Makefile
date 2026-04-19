@@ -24,7 +24,7 @@ KBUILD_OPTIONS += CONFIG_QCA_WIFI_ISOC=0
 KBUILD_OPTIONS += CONFIG_QCA_WIFI_2_0=1
 KBUILD_OPTIONS += CONFIG_CNSS_OUT_OF_TREE=y
 #KBUILD_EXTRA := KBUILD_EXTRA_SYMBOLS=$(O)/../google-modules/wlan/wcn6740/cnss2/Module.symvers
-EXTRA_SYMBOLS +=$(OUT_DIR)/../private/google-modules/wlan/wcn6740/cnss2/Module.symvers
+EXTRA_SYMBOLS +=$(COMMON_OUT_DIR)/private/google-modules/wlan/wcn6740/cnss2/Module.symvers
 KBUILD_OPTIONS += CONFIG_ARCH_MSM=n
 KBUILD_OPTIONS += CONFIG_ARCH_QCOM=n
 KBUILD_OPTIONS += CONFIG_CNSS2=m

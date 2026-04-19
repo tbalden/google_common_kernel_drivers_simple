@@ -29,8 +29,6 @@ raw_spinlock_t vendor_sched_pixel_em_lock;
 EXPORT_SYMBOL_GPL(vendor_sched_pixel_em_lock);
 #endif
 
-extern inline void update_misfit_status(struct task_struct *p, struct rq *rq);
-
 #if IS_ENABLED(CONFIG_USE_VENDOR_GROUP_UTIL)
 extern int ___update_load_sum(u64 now, struct sched_avg *sa,
 			  unsigned long load, unsigned long runnable, int running);
@@ -2594,8 +2592,6 @@ void vh_sched_setscheduler_uclamp_pixel_mod(void *data, struct task_struct *tsk,
 			      sched_auto_uclamp_max[task_cpu(tsk)],
 			      true);
 	}
-
-	update_misfit_status(tsk, task_rq(tsk));
 }
 
 static inline void uclamp_fork_pixel_mod(struct task_struct *p, struct task_struct *orig)

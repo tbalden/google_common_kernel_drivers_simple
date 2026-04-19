@@ -108,7 +108,7 @@ static int syna_tcm_v2_set_max_rw_size(struct tcm_dev *tcm_dev)
 	if (tcm_dev->msg_data.legacy)
 		possible_rd_size = rd_size;
 
-	rd_size = MIN(rd_size, possible_rd_size);
+	rd_size = min(rd_size, possible_rd_size);
 
 	if ((wr_size == 0) || (rd_size == 0)) {
 		LOGE("Invalid max read:%d or write:%d size\n",
@@ -123,7 +123,7 @@ static int syna_tcm_v2_set_max_rw_size(struct tcm_dev *tcm_dev)
 			tcm_dev->max_wr_size = wr_size;
 		else
 			tcm_dev->max_wr_size =
-				MIN(wr_size, tcm_dev->max_wr_size);
+				min(wr_size, tcm_dev->max_wr_size);
 
 		LOGD("Set max write length to %d bytes\n",
 			tcm_dev->max_wr_size);
@@ -135,7 +135,7 @@ static int syna_tcm_v2_set_max_rw_size(struct tcm_dev *tcm_dev)
 			tcm_dev->max_rd_size = rd_size;
 		else
 			tcm_dev->max_rd_size =
-				MIN(rd_size, tcm_dev->max_rd_size);
+				min(rd_size, tcm_dev->max_rd_size);
 
 		data[0] = (unsigned char)tcm_dev->max_rd_size;
 		data[1] = (unsigned char)(tcm_dev->max_rd_size >> 8);
@@ -195,7 +195,7 @@ static int syna_tcm_v2_parse_idinfo(struct tcm_dev *tcm_dev,
 			sizeof(struct tcm_identification_info),
 			data,
 			size,
-			MIN(sizeof(*id_info), data_len));
+			min(sizeof(*id_info), data_len));
 	if (retval < 0) {
 		LOGE("Fail to copy identification info\n");
 		return retval;
@@ -673,7 +673,7 @@ static int syna_tcm_v2_write(struct tcm_dev *tcm_dev, unsigned char command,
 
 	/* update the length for predict reading */
 	if ((tcm_msg->predict_reads) && do_predict) {
-		tcm_msg->predict_length = MIN(tcm_msg->payload_length,
+		tcm_msg->predict_length = min(tcm_msg->payload_length,
 			tcm_dev->max_rd_size - MESSAGE_HEADER_SIZE - 2);
 	} else {
 		tcm_msg->predict_length = 0;

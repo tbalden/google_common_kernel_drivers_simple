@@ -397,6 +397,7 @@ static int parse_dt_ipc_region_pdata(struct device *dev, struct device_node *np,
 	mif_dt_read_u32_noerr(np, "offset_clk_table_offset", pdata->offset_clk_table_offset);
 	mif_dt_read_u32_noerr(np, "offset_buff_desc_offset", pdata->offset_buff_desc_offset);
 	mif_dt_read_u32_noerr(np, "offset_capability_offset", pdata->offset_capability_offset);
+	mif_dt_read_u32_noerr(np, "offset_boot_indicator", pdata->offset_boot_indicator);
 
 #if IS_ENABLED(CONFIG_MODEM_IF_LEGACY_QOS)
 	/* legacy priority queue setting */

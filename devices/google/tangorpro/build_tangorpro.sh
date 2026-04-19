@@ -14,6 +14,9 @@ if [ "${BUILD_STAGING_KERNEL}" = "1" ]; then
   parameters="--kernel_package=@//aosp-staging"
 fi
 
+source private/devices/google/common/shell_utils.sh
+setup_cog_env_if_needed
+
 exec tools/bazel run \
     ${parameters} \
     --config=stamp \

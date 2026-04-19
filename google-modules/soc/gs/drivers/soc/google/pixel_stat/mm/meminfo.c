@@ -64,6 +64,53 @@ void rvh_meminfo_proc_show(void *data, struct seq_file *m)
 	seq_printf(m, "Misc:           %8lld kB\n", misc_kb < 0 ? 0 : misc_kb);
 }
 
+/*
+ * Get memory information from registered items in meminfo_list,
+ * return size would be kB, this API does not use any lock in
+ * it's implementation. It is the caller's directive to ensure
+ * concurrency safety.
+ */
+static unsigned long __get_meminfo_item_size(const char *name)
+{
+	struct meminfo *meminfo;
+	unsigned long size = 0;
+	/*
+	 * We don't hold meminfo_lock intentionally here because
+	 * this function is called in irq context on crash and
+	 * it's unlikely to be race with unregister_meminfo.
+	 */
+	list_for_each_entry(meminfo, &meminfo_list, list) {
+		if (!strcmp(name, meminfo->name)) {
+			size = meminfo->size_kb(meminfo->private);
+			break;
+		}
+	}
+	return size;
+}
+
+/*
+ * Get memory dump information of pixel device, should be careful
+ * adding dump information since get_meminfo_item_size_no_lock
+ * could be executed in hardirq context, so items for querying
+ * should be atomic operation.
+ */
+void dump_pixel_meminfo(void)
+{
+	int i;
+	unsigned long tmp_query = 0;
+	static const char * const query_items[] = {"ION_heap", "ION_heap_pool", "Gpu"};
+
+	for (i = 0; i < ARRAY_SIZE(query_items); i++) {
+		/*
+		 * Use the no-lock API as this is designed for hardlockup
+		 * dumps and executes only once.
+		 */
+		tmp_query = __get_meminfo_item_size(query_items[i]);
+		pr_info("%s %lu kB", query_items[i], tmp_query);
+	}
+}
+EXPORT_SYMBOL_GPL(dump_pixel_meminfo);
+
 void register_meminfo(struct meminfo *info)
 {
 	mutex_lock(&meminfo_lock);

@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Include all configuration files for Rio.
  *
- * Copyright (C) 2021 Google, Inc.
+ * Copyright (C) 2021-2025 Google LLC
  */
 
 #ifndef __RIO_CONFIG_H__
@@ -40,6 +40,8 @@
 
 /* A special client ID for secure workloads pre-agreed with firmware (kTzRealmId). */
 #define EDGETPU_EXT_TZ_CONTEXT_ID 0x40000000
+
+#define EDGETPU_MMU_GRANULARITY_IS_PAGE 0
 
 #include "config-mailbox.h"
 #include "config-pwr-state.h"

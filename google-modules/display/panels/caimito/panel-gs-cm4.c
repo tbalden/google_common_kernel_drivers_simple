@@ -2272,11 +2272,11 @@ static const struct gs_panel_mode_array cm4_modes = {
 #ifdef PANEL_FACTORY_BUILD
 	.num_modes = 6,
 #else
-	.num_modes = 8,
+	.num_modes = 4,
 #endif
 	.modes = {
-		/* MRR modes */
 #ifdef PANEL_FACTORY_BUILD
+		/* MRR modes */
 		{
 			.mode = {
 				.name = "1280x2856x1@1",
@@ -2342,9 +2342,10 @@ static const struct gs_panel_mode_array cm4_modes = {
 		},
 		{
 			.mode = {
-				.name = "1280x2856x80@80",
-				DRM_MODE_TIMING(80, 1280, 80, 24, 46, 2856, 12, 4, 28),
-				.flags = 0,
+				/* 60Hz supports HS/NS, see cm4_get_te_usec for widths used */
+				.name = "1280x2856x60@60",
+				DRM_MODE_TIMING(60, 1280, 80, 24, 46, 2856, 12, 4, 28),
+				.flags = DRM_MODE_FLAG_BTS_OP_RATE,
 				.width_mm = WIDTH_MM,
 				.height_mm = HEIGHT_MM,
 			},
@@ -2361,14 +2362,11 @@ static const struct gs_panel_mode_array cm4_modes = {
 			},
 			.idle_mode = GIDLE_MODE_UNSUPPORTED,
 		},
-#endif /* PANEL_FACTORY_BUILD */
 		{
 			.mode = {
-				/* 60Hz supports HS/NS, see cm4_get_te_usec for widths used */
-				.name = "1280x2856x60@60",
-				DRM_MODE_TIMING(60, 1280, 80, 24, 46, 2856, 12, 4, 28),
-				.flags = DRM_MODE_FLAG_BTS_OP_RATE,
-				.type = DRM_MODE_TYPE_PREFERRED,
+				.name = "1280x2856x80@80",
+				DRM_MODE_TIMING(80, 1280, 80, 24, 46, 2856, 12, 4, 28),
+				.flags = 0,
 				.width_mm = WIDTH_MM,
 				.height_mm = HEIGHT_MM,
 			},
@@ -2407,51 +2405,7 @@ static const struct gs_panel_mode_array cm4_modes = {
 			},
 			.idle_mode = GIDLE_MODE_UNSUPPORTED,
 		},
-#ifndef PANEL_FACTORY_BUILD
-		{
-			.mode = {
-				/* 60Hz supports HS/NS, see cm4_get_te_usec for widths used */
-				.name = "960x2142x60@60",
-				DRM_MODE_TIMING(60, 960, 80, 24, 46, 2142, 12, 4, 32),
-				.flags = DRM_MODE_FLAG_BTS_OP_RATE,
-				.width_mm = WIDTH_MM,
-				.height_mm = HEIGHT_MM,
-			},
-			.gs_mode = {
-				.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
-				.vblank_usec = 120,
-				.bpc = 8,
-				.dsc = CM4_FHD_DSC,
-				.underrun_param = &underrun_param,
-			},
-			.te2_timing = {
-				.rising_edge = CM4_TE2_RISING_EDGE_OFFSET,
-				.falling_edge = CM4_TE2_FALLING_EDGE_OFFSET,
-			},
-			.idle_mode = GIDLE_MODE_UNSUPPORTED,
-		},
-		{
-			.mode = {
-				.name = "960x2142x120@120",
-				DRM_MODE_TIMING(120, 960, 80, 24, 46, 2142, 12, 4, 32),
-				.flags = DRM_MODE_FLAG_BTS_OP_RATE,
-				.width_mm = WIDTH_MM,
-				.height_mm = HEIGHT_MM,
-			},
-			.gs_mode = {
-				.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
-				.vblank_usec = 120,
-				.te_usec = CM4_TE_USEC_120HZ_HS,
-				.bpc = 8,
-				.dsc = CM4_FHD_DSC,
-				.underrun_param = &underrun_param,
-			},
-			.te2_timing = {
-				.rising_edge = CM4_TE2_RISING_EDGE_OFFSET,
-				.falling_edge = CM4_TE2_FALLING_EDGE_OFFSET,
-			},
-			.idle_mode = GIDLE_MODE_UNSUPPORTED,
-		},
+#else
 		/* VRR modes */
 		{
 			.mode = {

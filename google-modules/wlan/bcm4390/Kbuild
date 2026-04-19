@@ -20,6 +20,12 @@
 # <<Broadcom-WL-IPTag/Dual:>>
 #
 
+# include main kernel build env for BCMDHD if exists
+-include $(BCMDHD_ROOT)/BCMDHD.Kbuild
+ifeq ($(BCMDHD),)
+  GG_REF_PLATFORM=1
+endif
+
 # Path to the module source, KERNEL_SRC is defined for out-of-tree Kbuild
 # and BCMDHD_ROOT is passed as KBUILD_OPTIONS for out-of-tree Makefile
 ifeq ($(KERNEL_SRC),)
@@ -102,6 +108,11 @@ ifeq ($(CONFIG_BCMDHD),)
   DHDCFLAGS += -DCONFIG_BCMDHD_PREALLOC_MEMDUMP=$(CONFIG_BCMDHD_PREALLOC_MEMDUMP)
   DHDCFLAGS += -DCONFIG_BCMDHD_OOB_HOST_WAKE=$(CONFIG_BCMDHD_OOB_HOST_WAKE)
   DHDCFLAGS += -DCONFIG_BCMDHD_GET_OOB_STATE=$(CONFIG_BCMDHD_GET_OOB_STATE)
+  CONFIG_WONDERTAP=y
+  ifeq ($(CONFIG_WONDERTAP),y)
+    WONDER_DIR=$(BCMDHD_ROOT)/../wonder
+    DHDCFLAGS += -I$(WONDER_DIR)/include -DWONDERTAP
+  endif
 endif # CONFIG_BCMDHD
 
 DHDCFLAGS += \
@@ -150,6 +161,12 @@ DHDCFLAGS += \
   -Wno-parentheses-equality \
   -Wstrict-prototypes
 
+# Allow Zero-length and one-element arrays instead of forcing C99 FAM
+ifneq ($(CONFIG_SOC_GOOGLE),)
+  DHDCFLAGS += -fstrict-flex-arrays=0
+endif
+
+DHDCFLAGS += --std=gnu17
 DHDCFLAGS += -DOEM_ANDROID
 DHDCFLAGS += -DDHD_COREDUMP
 
@@ -218,6 +235,8 @@ DHDCFLAGS += -DWAIT_FOR_DISCONNECT_MAX=20
 
 #static if
 DHDCFLAGS += -DWL_STATIC_IF
+# static NMI interface support
+#DHDCFLAGS += -DWL_STATIC_NMI_IF
 
 # Wapi
 #DHDCFLAGS += -DBCMWAPI_WPI -DBCMWAPI_WAI
@@ -236,7 +255,8 @@ DHDCFLAGS += -DWL_IFACE_MGMT_CONF
 
 # Enable MLO related code. MLO functionality will be exercised
 # only if chip supports it.
-DHDCFLAGS += -DWL_MLO -DWL_MLO_AP
+DHDCFLAGS += -DWL_MLO
+#DHDCFLAGS += -DWL_MLO_AP
 
 #Debug flag
 DHDCFLAGS += -DRTT_GEOFENCE_INTERVAL
@@ -345,6 +365,7 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
   ifneq ($(CONFIG_ARCH_HISI),)
     DHDCFLAGS += -DDHD_PKTID_AUDIT_ENABLED
   endif
+
   # STBTPUT: Not enabled for the STB platform due to overhead
   ifeq ($(CONFIG_ARCH_BRCMSTB),)
     # Enable pktid logging
@@ -363,18 +384,13 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
 
   ifneq ($(CONFIG_ARCH_BRCMSTB),)
     DHDCFLAGS += -DDHD_LB_CPU_SET8=0x000 -DDHD_LB_CPU_SET4=0x000 -DDHD_LB_CPU_SET0=0x00E
-    # STBTPUT TODO review and fix this to SET0=0xF OR 0xE
+    DHDCFLAGS += -DDHD_LB_RXPOST -DDHD_LB_CANDIDACY_OVERRIDE
   else
     DHDCFLAGS += -DDHD_LB_CPU_SET8=0x100 -DDHD_LB_CPU_SET4=0x0F0 -DDHD_LB_CPU_SET0=0x00E
   endif
   # GRO (Generic Receive Offload) feature
   DHDCFLAGS += -DENABLE_DHD_GRO
 
-  #STBTPUT: Not enabled for the STB platform due to overhead
-  ifeq ($(CONFIG_ARCH_BRCMSTB),)
-    # Support Monitor Mode
-    DHDCFLAGS += -DWL_MONITOR
-  endif
   # WLAN-BT Regon coordinator
   DHDCFLAGS += -DWBRC
   DHDCFLAGS += -DWBRC_WLAN_ON_FIRST_ALWAYS
@@ -394,9 +410,17 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
     DHDCFLAGS += -DPKT_COUNT_MID=5000
     DHDCFLAGS += -DPKT_COUNT_LOW=3000
     DHDCFLAGS += -DCLEAN_IRQ_AFFINITY_HINT
-    DHDCFLAGS += -DIRQ_AFFINITY_SMALL_CORE=6
-    DHDCFLAGS += -DIRQ_AFFINITY_BIG_CORE=7
     DHDCFLAGS += -DWAKEUP_KSOFTIRQD_POST_NAPI_SCHEDULE
+    ifneq ($(CONFIG_PCI_EXYNOS_GS),)
+      DHDCFLAGS += -DIRQ_AFFINITY_SMALL_CORE=6
+      DHDCFLAGS += -DIRQ_AFFINITY_BIG_CORE=7
+    else ifneq ($(CONFIG_SOC_LGA),)
+	  DHDCFLAGS += -DIRQ_AFFINITY_SMALL_CORE=6
+	  DHDCFLAGS += -DIRQ_AFFINITY_BIG_CORE=7
+    else
+      DHDCFLAGS += -DIRQ_AFFINITY_SMALL_CORE=0
+      DHDCFLAGS += -DIRQ_AFFINITY_BIG_CORE=0
+    endif
     DHDCFLAGS += -DCPU_IRQ_AFFINITY
     DHDCFLAGS += -DDHD_BUS_BUSY_TIMEOUT=5000
     # MSI supported in GOOGLE SOC
@@ -418,31 +442,37 @@ ifneq ($(CONFIG_BCMDHD_PCIE),)
     DHDCFLAGS += -DDHD_FW_MEM_CORRUPTION
     # Recover timeouts
     DHDCFLAGS += -DDHD_RECOVER_TIMEOUT
-    ifeq ($(BCMDHD),4398)
+    ifneq ($(filter y, $(CONFIG_BCM4390) $(CONFIG_BCM4383)),)
       # PCIE CPL TIMEOUT WAR
-      # DHDCFLAGS += -DDHD_TREAT_D3ACKTO_AS_LINKDWN
+      DHDCFLAGS += -DDHD_TREAT_D3ACKTO_AS_LINKDWN
     endif
     # Skip xorcsum for high throughput case
     DHDCFLAGS += -DDHD_SKIP_XORCSUM_HIGH_TPUT
+    # Schedule NAPI directly on same cpu for Low TPUT
+    # Enable this only after next 4390 project tput is stabilized
+    # DHDCFLAGS += -DDHD_SCHED_NAPI_DIRECTLY_LOW_TPUT
     # Skip coredump for certain health check traps
     DHDCFLAGS += -DDHD_SKIP_COREDUMP_ON_HC
     # Skip coredump for older chip revs
     DHDCFLAGS += -DDHD_SKIP_COREDUMP_OLDER_CHIPS
     # Skip coredump for continousy pkt drop health check
     DHDCFLAGS += -DSKIP_COREDUMP_PKTDROP_RXHC
-    # Boost host cpufreq to max for peak tput. default is false
-    DHDCFLAGS += -DDHD_HOST_CPUFREQ_BOOST
-    # Boost host cpufreq to max for peak tput. default is true
-    DHDCFLAGS += -DDHD_HOST_CPUFREQ_BOOST_DEFAULT_ENAB
+    ifneq ($(filter y m, $(CONFIG_PCI_EXYNOS_GS) $(CONFIG_SOC_LGA)),)
+      # Boost host cpufreq to max for peak tput. default is false
+      DHDCFLAGS += -DDHD_HOST_CPUFREQ_BOOST
+      # Boost host cpufreq to max for peak tput. default is true
+      DHDCFLAGS += -DDHD_HOST_CPUFREQ_BOOST_DEFAULT_ENAB
+    endif
     # Force all CPUs to run at MAX frequencies
     #DHDCFLAGS += -DDHD_FORCE_MAX_CPU_FREQ
+    # Support L1SS
+    DHDCFLAGS += -DDHD_SUPPORT_L1SS
   endif
 endif # CONFIG_BCMDHD_PCIE
 
 ifneq ($(CONFIG_SOC_GOOGLE),)
   DHDCFLAGS += -DDHD_FILE_DUMP_EVENT
   DHDCFLAGS += -DDHD_HAL_RING_DUMP
-  DHDCFLAGS += -DDHD_HAL_RING_DUMP_MEMDUMP
   # Pixel platform only, to support ring data flushing properly
   DHDCFLAGS += -DDHD_DUMP_START_COMMAND
   # MLO related back port changes
@@ -453,6 +483,8 @@ ifneq ($(CONFIG_SOC_GOOGLE),)
   DHDCFLAGS += -DWL_CROSS_AKM_BKPORT
   # Avoid SSR dump on state mismatch
   DHDCFLAGS += -DDHD_AVOID_SSR_ON_STATE_MISMATCH
+  # Disable NAN pairing for rel builds till associated sec is supported
+  DHDCFLAGS += -DDISABLE_NAN_PAIRING
   ifeq ($(BCMDHD),4390)
     # ch_switch_notify back port changes
     DHDCFLAGS += -DWL_CH_SWITCH_BKPORT
@@ -470,10 +502,10 @@ DHDCFLAGS += -DUSE_WL_TXBF
 DHDCFLAGS += -DSOFTAP_UAPSD_OFF
 DHDCFLAGS += -DVSDB
 DHDCFLAGS += -DWL_CFG80211_STA_EVENT
-#STBTPUT: Disabled for tput in STB platform
-ifeq ($(CONFIG_ARCH_BRCMSTB),)
-  DHDCFLAGS += -DWL_CFG80211_MONITOR
-endif
+DHDCFLAGS += -DWL_MONITOR
+DHDCFLAGS += -DWL_CFG80211_MONITOR
+# Active Radio tap
+DHDCFLAGS += -DDHD_ART
 ifneq ($(CONFIG_CFG80211_FILS_BKPORT),)
   DHDCFLAGS += -DWL_FILS
 endif
@@ -625,6 +657,7 @@ DHDCFLAGS += -DDHD_POST_EAPOL_M1_AFTER_ROAM_EVT
 DHDCFLAGS += -DROAMEXP_SUPPORT
 DHDCFLAGS += -DCUSTOM_BSSID_BLACKLIST_NUM=16
 DHDCFLAGS += -DCUSTOM_SSID_WHITELIST_NUM=16
+DHDCFLAGS += -DDHD_FORCE_WLREGON_CTRL
 # Kind of WAR
 DHDCFLAGS += -DENABLE_TDLS_AUTO_MODE
 DHDCFLAGS += -DEXPLICIT_DISCIF_CLEANUP
@@ -766,6 +799,8 @@ DHDCFLAGS += -DDUAL_ESCAN_RESULT_BUFFER
 DHDCFLAGS += -DWL_NAN -DWL_NAN_DISC_CACHE -DWL_NANP2P -DNAN_DAM_ANDROID -DWL_NAN_6G
 # NAN 3.1 specific
 DHDCFLAGS += -DWL_NAN_INSTANT_MODE
+# NAN r5 GROUP security
+DHDCFLAGS += -DWL_NAN_GAF_PROTECT
 
 DHDCFLAGS += -DFTM
 
@@ -847,9 +882,6 @@ DHDCFLAGS += -DWL_DUAL_STA -DWL_DUAL_APSTA
 # Support to update clm/nvram through downloading OTA
 DHDCFLAGS += -DSUPPORT_OTA_UPDATE
 
-# TWT HAL
-DHDCFLAGS += -DWL_TWT_HAL_IF
-
 # RNR INCLUSION
 DHDCFLAGS += -DDHD_SCAN_INC_RNR
 
@@ -918,6 +950,9 @@ ifneq ($(CONFIG_OWE_CAP_BKPORT),)
   DHDCFLAGS += -DWL_OWE_OFFLD_BKPORT
   $(warning "OWE Backported kernel")
 endif
+
+# Target wake time android v
+  DHDCFLAGS += -DWL_TWT_HAL_IF
 
 ##########################
 # driver type
@@ -1090,7 +1125,7 @@ ifneq ($(CONFIG_SOC_GOOGLE),)
     endif
   endif
   ifneq ($(CONFIG_BCMDHD_PCIE),)
-    ifneq ($(filter y, $(CONFIG_SOC_GS201) $(CONFIG_SOC_ZUMA)),)
+    ifneq ($(filter y, $(CONFIG_SOC_GS201) $(CONFIG_SOC_ZUMA) $(CONFIG_SOC_LGA)),)
       DHDCFLAGS += -DPCIE_CPL_TIMEOUT_RECOVERY
     endif
   endif
@@ -1119,6 +1154,7 @@ else ifneq ($(CONFIG_ARCH_HISI),)
   DHDCFLAGS += -DDHD_SUPPORT_VFS_CALL
   DHDCFLAGS += -DDHD_IOVAR_LOG_FILTER_DUMP
   DHDCFLAGS += -DDHD_CAP_PLATFORM="\"hikey \""
+  DHDCFLAGS += -DDISABLE_L2_IN_D3
   DHDCFLAGS := $(filter-out -DSIMPLE_MAC_PRINT ,$(DHDCFLAGS))
 else ifneq ($(CONFIG_ARCH_BRCMSTB),)
   DHDCFLAGS += -DBOARD_STB -DBOARD_STB_HW2 -DBCMDEV
@@ -1148,6 +1184,8 @@ else ifneq ($(CONFIG_ARCH_BRCMSTB),)
   # TCP TPUT Enhancement, enable only for GS101
   DHDCFLAGS += -DDHD_TCP_LIMIT_OUTPUT
   DHDCFLAGS += -DDHD_TCP_PACING_SHIFT
+  DHDCFLAGS += -DDHDTCPACK_SUPPRESS
+
   ifneq ($(STB_ANDROIDVER),T)
     # ch_switch_notify back port changes
     DHDCFLAGS += -DWL_CH_SWITCH_BKPORT
@@ -1155,6 +1193,9 @@ else ifneq ($(CONFIG_ARCH_BRCMSTB),)
     # DHDCFLAGS += -DWL_EXT_AUTH_BKPORT
     # TDI policy kernel back port changes
     DHDCFLAGS += -DWL_MLO_BKPORT_NEW_PORT_AUTH
+    ifneq ($(STB_BOARD_VARIANT), A0)
+      DHDCFLAGS += -DWAKEUP_KSOFTIRQD_POST_NAPI_SCHEDULE
+    endif
   endif
   # STB supports MSI
   DHDCFLAGS += -DDHD_MSI_SUPPORT
@@ -1216,7 +1257,8 @@ DHDOFILES := \
   wl_cfgvif.o \
   wl_cfgvendor.o \
   wl_cfg_btcoex.o \
-  wl_linux_mon.o
+  wl_linux_mon.o \
+  wl_cfgtwt.o
 
 # This file will be here only for internal builds and sets flags which may
 # affect subsequent behavior. See extended comment within it for details.

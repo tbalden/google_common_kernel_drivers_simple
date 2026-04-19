@@ -46,6 +46,7 @@ device_build(
         "//private/google-modules/uwb/qorvo/qm35/qm35s:uwb.qm35",
         "//private/google-modules/wlan/bcm4390:bcmdhd4390",
         "//private/google-modules/wlan/wlan_ptracker",
+        "//private/google-modules/wlan/wonder:wonder",
     ],
     insmod_cfgs = glob(["insmod_cfg/*.cfg"]),
     kconfig_exts = ["Kconfig.ext.caimito"],

@@ -427,7 +427,7 @@ static int dock_get_property(struct power_supply *psy,
 	if (ret)
 		dev_dbg(dock->device, "Couldn't get prop %d, ret=%d\n", psp, ret);
 
-	return 0;
+	return ret;
 }
 
 static int dock_set_property(struct power_supply *psy,

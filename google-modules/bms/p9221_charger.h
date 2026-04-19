@@ -105,6 +105,8 @@
 #define DET_READY_DEBOUNCE_MS		(3 * 1000)
 
 #define I2C_LOG_NUM			128
+#define ICL_STABLE_TIME_MS		(30 * 1000)
+
 
 /*
  * P9221 common registers
@@ -899,6 +901,7 @@ struct p9221_charger_data {
 	struct delayed_work		chk_fod_work;
 	struct delayed_work		set_rf_work;
 	struct delayed_work		presence_check_work;
+	struct delayed_work		icl_stable_work;
 	struct work_struct		uevent_work;
 	struct work_struct		calibration_work;
 	struct work_struct		rtx_disable_work;
@@ -915,6 +918,7 @@ struct p9221_charger_data {
 	struct p9221_charger_cc_data_lock	cc_data_lock;
 	struct wakeup_source		*align_ws;
 	struct wakeup_source		*det_status_ws;
+	struct wakeup_source		*icl_stable_ws;
 	u16				chip_id;
 	int				online;
 	bool				enabled;
@@ -1039,6 +1043,8 @@ struct p9221_charger_data {
 	struct mutex			irq_det_lock;
 	struct mutex			icl_lock;
 	int				fan_last_level;
+	int				compatibility;
+	int				disconnect_total_count;
 
 #if IS_ENABLED(CONFIG_GPIOLIB)
 	struct gpio_chip gpio;
@@ -1205,6 +1211,22 @@ enum uevent_source {
 	UEVENT_WLC = 0,
 	UEVENT_FAN,
 	UEVENT_RTX,
+};
+
+#define INCOMPAT_COUNT 5
+
+enum compatibility_type {
+	COMPAT_UNKNOWN = 0,
+	COMPAT_GPP = 1,
+	COMPAT_HPP = 2,
+	COMPAT_BPP = 3,
+	COMPAT_EPP = 4,
+	COMPAT_MPP_RESTRICTED = 5,
+	COMPAT_MPP = 6,
+	COMPAT_MPP25 = 7,
+	COMPAT_FORCED_BPP = 127,
+	COMPAT_NOT_SUPPORTED = -1,
+	COMPAT_LOWPOWER = -2,
 };
 
 #define P9221_MA_TO_UA(ma)((ma) * 1000)

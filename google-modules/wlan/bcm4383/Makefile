@@ -29,12 +29,12 @@ ifneq ($(KERNEL_SRC),)
   # For distinguishing 4390 projects. CONFIG_PCI_EXYNOS_GS is not enabled for next 4390 proj.
   CONFIG_PCI_EXYNOS_GS := $(shell grep -w CONFIG_PCI_EXYNOS_GS $(O)/.config | cut -d'=' -f2)
   ifneq ($(CONFIG_PCI_EXYNOS_GS), )
-    -include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+    -include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
   else
-    KCFLAGS += -I$(dir $(KERNEL_SRC))private/google-modules/soc/rdo/include
+    KCFLAGS += -I$(ROOT_DIR)/private/google-modules/soc/rdo/include
     # For "include/linux/platform_data/sscoredump.h"
-    KCFLAGS += -I$(dir $(KERNEL_SRC))private/google-modules/soc/gs/include
-    EXTRA_SYMBOLS+= $(dir ${O})private/google-modules/soc/rdo/Module.symvers
+    KCFLAGS += -I$(ROOT_DIR)/private/google-modules/soc/gs/include
+    EXTRA_SYMBOLS+= $(wildcard $(COMMON_OUT_DIR)/private/google-modules/soc/rdo/Module.symvers)
   endif
   EXTRA_CFLAGS+="-Wno-missing-prototypes"
 endif

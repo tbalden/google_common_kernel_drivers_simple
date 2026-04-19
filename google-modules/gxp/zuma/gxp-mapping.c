@@ -17,6 +17,7 @@
 #include <linux/vmalloc.h>
 
 #include <gcip/gcip-iommu-reserve.h>
+#include <gcip/gcip-mapping.h>
 
 #include "gxp-client.h"
 #include "gxp-debug-dump.h"
@@ -68,7 +69,6 @@ static void destroy_mapping(struct gxp_mapping *mapping)
 	trace_gxp_mapping_destroy_start(device_address, size);
 
 	mutex_destroy(&mapping->vlock);
-	mutex_destroy(&mapping->sync_lock);
 
 	gcip_iommu_mapping_unmap(mapping->gcip_mapping);
 
@@ -122,7 +122,6 @@ struct gxp_mapping *gxp_mapping_create(struct gxp_dev *gxp, struct gcip_iommu_re
 			mapping->gcip_mapping->size);
 
 	refcount_set(&mapping->refcount, 1);
-	mutex_init(&mapping->sync_lock);
 	mutex_init(&mapping->vlock);
 
 	trace_gxp_mapping_create_end(user_address, size, mapping->gcip_mapping->sgt->nents);
@@ -149,106 +148,10 @@ void gxp_mapping_put(struct gxp_mapping *mapping)
 		mapping->destructor(mapping);
 }
 
-int gxp_mapping_sync(struct gxp_mapping *mapping, u32 offset, u32 size,
-		     bool for_cpu)
+int gxp_mapping_sync(struct gxp_mapping *mapping, u32 offset, u32 size, bool for_cpu)
 {
-	struct gxp_dev *gxp = mapping->gxp;
-	struct scatterlist *sg, *start_sg = NULL, *end_sg = NULL;
-	int nelems = 0, cur_offset = 0, ret = 0, i;
-	u64 start, end;
-	unsigned int start_diff = 0, end_diff = 0;
-
-	if (!gxp_mapping_get(mapping))
-		return -ENODEV;
-
-	/* Only mappings with valid `host_address`es can be synced */
-	if (!mapping->host_address) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	/*
-	 * Valid input requires
-	 * - size > 0 (offset + size != offset)
-	 * - offset + size does not overflow (offset + size > offset)
-	 * - the mapped range falls within [0 : mapping->size]
-	 */
-	if (offset + size <= offset || offset + size > mapping->gcip_mapping->size) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	/*
-	 * Since the scatter-gather list of the mapping is modified while it is
-	 * being synced, only one sync for a given mapping can occur at a time.
-	 * Rather than maintain a mutex for every mapping, lock the mapping list
-	 * mutex, making all syncs mutually exclusive.
-	 */
-	mutex_lock(&mapping->sync_lock);
-	/*
-	 * Mappings are created at a PAGE_SIZE granularity, however other data
-	 * which is not part of the mapped buffer may be present in the first
-	 * and last pages of the buffer's scattergather list.
-	 *
-	 * To ensure only the intended data is actually synced, iterate through
-	 * the scattergather list, to find the first and last `scatterlist`s
-	 * which contain the range of the buffer to sync.
-	 *
-	 * After those links are found, change their offset/lengths so that
-	 * `dma_map_sg_for_*()` will only sync the requested region.
-	 */
-	start = (mapping->host_address & ~PAGE_MASK) + offset;
-	end = start + size;
-	for_each_sg(mapping->gcip_mapping->sgt->sgl, sg, mapping->gcip_mapping->sgt->orig_nents,
-		    i) {
-		if (end <= cur_offset)
-			break;
-		if (cur_offset <= start && start < cur_offset + sg->length) {
-			start_sg = sg;
-			start_diff = start - cur_offset;
-		}
-		if (start_sg)
-			nelems++;
-		cur_offset += sg->length;
-		end_sg = sg;
-	}
-	end_diff = cur_offset - end;
-
-	/* Make sure a valid starting scatterlist was found for the start */
-	if (!start_sg) {
-		ret = -EINVAL;
-		goto out_unlock;
-	}
-
-	start_sg->offset += start_diff;
-	start_sg->dma_address += start_diff;
-	start_sg->length -= start_diff;
-	start_sg->dma_length -= start_diff;
-	end_sg->length -= end_diff;
-	end_sg->dma_length -= end_diff;
-
-	if (for_cpu)
-		gxp_dma_sync_sg_for_cpu(gxp, start_sg, nelems, mapping->gcip_mapping->dir);
-	else
-		gxp_dma_sync_sg_for_device(gxp, start_sg, nelems, mapping->gcip_mapping->dir);
-
-	/*
-	 * Return the start and end scatterlists' offset/lengths to their
-	 * original values for the next time they need to be synced/unmapped.
-	 */
-	end_sg->length += end_diff;
-	end_sg->dma_length += end_diff;
-	start_sg->offset -= start_diff;
-	start_sg->dma_address -= start_diff;
-	start_sg->length += start_diff;
-	start_sg->dma_length += start_diff;
-
-out_unlock:
-	mutex_unlock(&mapping->sync_lock);
-out:
-	gxp_mapping_put(mapping);
-
-	return ret;
+	return gcip_iommu_mapping_sync(mapping->gcip_mapping, mapping->gxp->dev, offset, size,
+				       for_cpu);
 }
 
 void *gxp_mapping_vmap(struct gxp_mapping *mapping, bool is_dmabuf)

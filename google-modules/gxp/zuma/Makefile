@@ -7,10 +7,10 @@
 #                     This directory is expected to contain *.ko and
 #                     Module.symvers files per module. If $(OUT_DIR) is
 #                     defined, it will be set to
-#                     "$(OUT_DIR)/../private/google-modules".
+#                     "$(COMMON_OUT_DIR)/private/google-modules".
 #
 #   GMODULE_SRC_PATH: The path of directory containing source of google-modules.
-#                     (default: $(KERNEL_SRC)/../private/google-modules)
+#                     (default: $(ROOT_DIR)/private/google-modules)
 
 GXP_CHIP := CALLISTO
 CONFIG_$(GXP_CHIP) ?= m
@@ -83,8 +83,10 @@ gxp-objs += $(GCIP_DIR)/gcip.o
 endif
 
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
+ROOT_DIR ?= $(KERNEL_SRC)/..
+COMMON_OUT_DIR ?= $(OUT_DIR)/..
 # TODO(b/368532067): Remove once tpu-ext.h is properly landed
--include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+-include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 M ?= $(shell pwd)
 
 # Obtain the current git commit hash for logging on probe
@@ -118,8 +120,8 @@ ccflags-y += -DCONFIG_GOOGLE_BCL
 KBUILD_OPTIONS += GXP_CHIP=$(GXP_CHIP) GXP_PLATFORM=$(GXP_PLATFORM)
 
 # Set google-modules source and out paths if not defined.
-GMODULE_SRC_PATH ?= $(KERNEL_SRC)/../private/google-modules
-GMODULE_OUT_PATH ?= $(OUT_DIR)/../private/google-modules
+GMODULE_SRC_PATH ?= $(ROOT_DIR)/private/google-modules
+GMODULE_OUT_PATH ?= $(COMMON_OUT_DIR)/private/google-modules
 
 ifneq ($(wildcard $(GMODULE_SRC_PATH)/edgetpu/$(EDGETPU_CHIP)/drivers/edgetpu/include),)
 ccflags-y     += -I$(GMODULE_SRC_PATH)/edgetpu/$(EDGETPU_CHIP)/drivers/edgetpu/include

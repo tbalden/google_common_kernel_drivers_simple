@@ -45,6 +45,8 @@
 #include <linux/kobject.h>
 #include <linux/module.h>
 #include <linux/nmi.h>
+#include <linux/pm.h>
+#include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/smp.h>
 #include <linux/sysfs.h>
@@ -461,6 +463,61 @@ static void simulate_suspend_hang(char *arg)
 	suspend_set_ops(&suspend_ops);
 }
 
+static int pixel_debug_probe(struct platform_device *pdev)
+{
+	pr_crit("called!\n");
+	device_enable_async_suspend(&pdev->dev);
+
+	return 0;
+}
+
+static int pixel_debug_suspend(struct device *dev)
+{
+	pr_crit("called!\n");
+	msleep(60 * 1000);
+	return 0;
+}
+
+static int pixel_debug_resume(struct device *dev)
+{
+	pr_crit("called!\n");
+	return 0;
+}
+
+#define PIXEL_DEBUG_DRIVER_NAME "pixel_debug_driver"
+
+static const struct dev_pm_ops pixel_debug_pm_ops = {
+	.suspend = pixel_debug_suspend,
+	.resume = pixel_debug_resume,
+};
+
+static struct platform_driver pixel_debug_driver = {
+	.probe = pixel_debug_probe,
+	.driver = {
+		.name = PIXEL_DEBUG_DRIVER_NAME,
+		.pm = &pixel_debug_pm_ops,
+	},
+};
+static struct platform_device *pdev;
+
+static void simulate_device_suspend_hang(char *arg)
+{
+	int ret;
+
+	ret = platform_driver_register(&pixel_debug_driver);
+	if (ret) {
+		pr_err("Failed to register pixel-debug-driver");
+		return;
+	}
+
+	pdev = platform_device_register_simple(PIXEL_DEBUG_DRIVER_NAME, -1, NULL, 0);
+	if (IS_ERR(pdev)) {
+		pr_err("Failed to register pixel-debug-device: %ld\n", PTR_ERR(pdev));
+		platform_driver_unregister(&pixel_debug_driver);
+		return;
+	}
+}
+
 /*
  * SOC dependent triggers
  */
@@ -656,6 +713,7 @@ static const struct force_error_item force_error_vector[] = {
 	{ "spabort",		&simulate_sp_abort },
 	{ "jumpzero",		&simulate_jump_zero },
 	{ "suspend_hang",	&simulate_suspend_hang },
+	{ "device_suspend_hang",&simulate_device_suspend_hang },
 	/* SOC dependent triggers */
 	{ "cold_reset",		&simulate_cold_reset },
 	{ "emerg_reset",	&simulate_watchdog_emergency_reset },

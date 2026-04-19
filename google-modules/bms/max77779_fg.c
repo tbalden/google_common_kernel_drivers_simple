@@ -53,14 +53,6 @@ enum max77779_fg_command_bits {
 /* No longer used in 79, used for taskperiod re-scaling in 59 */
 #define MAX77779_LSB 1
 
-#define MAX77779_FG_EVENT_FULLCAPNOM_LOW     BIT(0)
-#define MAX77779_FG_EVENT_FULLCAPNOM_HIGH    BIT(1)
-#define MAX77779_FG_EVENT_REPSOC_EDET        BIT(2)
-#define MAX77779_FG_EVENT_REPSOC_FDET        BIT(3)
-#define MAX77779_FG_EVENT_REPSOC             BIT(4)
-#define MAX77779_FG_EVENT_VFOCV              BIT(5)
-#define MAX77779_FG_EVENT_STUCK              BIT(6)
-
 #define MAX77779_FG_AAFV_DEFAULT_FULLSOCTHR  95
 #define MAX77779_FG_AAFV_DEFAULT_FUS         0x0
 #define MAX77779_FG_AAFV_RESTORE_FUS         0x3
@@ -1773,7 +1765,7 @@ static int max77779_fg_aafv_update(struct max77779_fg_chip *chip)
 	ret = maxfg_aafv_apply(mon, chip->dev, &chip->regmap, chip->aafv,
 			       chip->aafv_cfgs, chip->aafv_config_limits,
 			       MAX77779_FG_MiscCfg_FUS_CLEAR, MAX77779_FG_MiscCfg_FUS_SHIFT,
-			       &idx);
+			       &chip->aafv_modified_fus, &idx);
 	if (ret) {
 		dev_err(chip->dev, "failed to maxfg_aafv_apply (%d)\n", ret);
 		goto done;
@@ -1782,12 +1774,12 @@ static int max77779_fg_aafv_update(struct max77779_fg_chip *chip)
 	if (chip->aafv_cur_idx != idx) {
 		cfg = &chip->aafv_cfgs[idx];
 		chip->aafv_cur_idx = idx;
-		chip->aafv_modified_fus = true;
 
 		gbms_logbuffer_devlog(mon, chip->dev, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
-				      "%s with cycle_count:%d fullsoc:%d%% voffset:%dmV fus:%#x ichgterm:%duA",
+				      "%s with cycle_count:%d fullsoc:%d%% voffset:%dmV fus:%#x(%s) ichgterm:%duA",
 				      __func__, chip->cycle_count, cfg->fullsoc, cfg->voffset,
-				      cfg->fus, reg_to_micro_amp(cfg->ichgterm, chip->RSense));
+				      cfg->fus, chip->aafv_modified_fus ? "set" : "unset",
+				      reg_to_micro_amp(cfg->ichgterm, chip->RSense));
 	}
 
 done:
@@ -1844,8 +1836,7 @@ static int max77779_gbms_fg_get_property(struct power_supply *psy,
 		val->prop.intval = batt_ce_full_estimate(&chip->cap_estimate);
 		break;
 	case GBMS_PROP_CAPACITY_FADE_RATE:
-	case GBMS_PROP_CAPACITY_FADE_RATE_FCR:
-		err = maxfg_get_fade_rate(chip->dev, chip->bhi_fcn_count, &val->prop.intval, psp);
+		err = maxfg_get_fade_rate(chip->dev, chip->bhi_fcn_count, &val->prop.intval);
 		break;
 	case GBMS_PROP_BATT_ID:
 		val->prop.intval = chip->batt_id;
@@ -2061,11 +2052,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: next FullCapNom updated
 	 * start condition: FullCapNom < DesignCap x 60%
 	 */
-	if (curr_event & MAX77779_FG_EVENT_FULLCAPNOM_LOW) {
+	if (curr_event & MAXFG_EVENT_FULLCAPNOM_LOW) {
 		if (fullcapnom != chip->last_fullcapnom)
-			curr_event &= ~MAX77779_FG_EVENT_FULLCAPNOM_LOW;
+			curr_event &= ~MAXFG_EVENT_FULLCAPNOM_LOW;
 	} else if (fullcapnom < (designcap * 60 / 100)) {
-		curr_event |= MAX77779_FG_EVENT_FULLCAPNOM_LOW;
+		curr_event |= MAXFG_EVENT_FULLCAPNOM_LOW;
 		chip->last_fullcapnom = fullcapnom;
 	}
 
@@ -2074,11 +2065,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: next FullCapNom updated
 	 * start condition: FullCapNom > DesignCap x 115%
 	 */
-	if (curr_event & MAX77779_FG_EVENT_FULLCAPNOM_HIGH) {
+	if (curr_event & MAXFG_EVENT_FULLCAPNOM_HIGH) {
 		if (fullcapnom != chip->last_fullcapnom)
-			curr_event &= ~MAX77779_FG_EVENT_FULLCAPNOM_HIGH;
+			curr_event &= ~MAXFG_EVENT_FULLCAPNOM_HIGH;
 	} else if (fullcapnom > (designcap * 115 / 100)) {
-		curr_event |= MAX77779_FG_EVENT_FULLCAPNOM_HIGH;
+		curr_event |= MAXFG_EVENT_FULLCAPNOM_HIGH;
 		chip->last_fullcapnom = fullcapnom;
 	}
 
@@ -2087,11 +2078,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: RepSoC > 20%
 	 * start condition: RepSoC > 10% && Empty detection bit is set
 	 */
-	if (curr_event & MAX77779_FG_EVENT_REPSOC_EDET) {
+	if (curr_event & MAXFG_EVENT_REPSOC_EDET) {
 		if (repsoc > 20)
-			curr_event &= ~MAX77779_FG_EVENT_REPSOC_EDET;
+			curr_event &= ~MAXFG_EVENT_REPSOC_EDET;
 	} else if (repsoc > 10 && edet) {
-		curr_event |= MAX77779_FG_EVENT_REPSOC_EDET;
+		curr_event |= MAXFG_EVENT_REPSOC_EDET;
 	}
 
 	/*
@@ -2099,11 +2090,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: RepSoc < 80%
 	 * start condition: RepSoC < 90% && Full detection bit is set
 	 */
-	if (curr_event & MAX77779_FG_EVENT_REPSOC_FDET) {
+	if (curr_event & MAXFG_EVENT_REPSOC_FDET) {
 		if (repsoc < 80)
-			curr_event &= ~MAX77779_FG_EVENT_REPSOC_FDET;
+			curr_event &= ~MAXFG_EVENT_REPSOC_FDET;
 	} else if (repsoc < 90 && fdet) {
-		curr_event |= MAX77779_FG_EVENT_REPSOC_FDET;
+		curr_event |= MAXFG_EVENT_REPSOC_FDET;
 	}
 
 	/*
@@ -2111,11 +2102,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: abs(MixSoC - RepSoC) < 20%
 	 * start condition: abs(MixSoC - RepSoC) > 25%
 	 */
-	if (curr_event & MAX77779_FG_EVENT_REPSOC) {
+	if (curr_event & MAXFG_EVENT_REPSOC) {
 		if (abs(mixsoc - repsoc) < 20)
-			curr_event &= ~MAX77779_FG_EVENT_REPSOC;
+			curr_event &= ~MAXFG_EVENT_REPSOC;
 	} else if (abs(mixsoc - repsoc) > 25) {
-		curr_event |= MAX77779_FG_EVENT_REPSOC;
+		curr_event |= MAXFG_EVENT_REPSOC;
 	}
 
 	/*
@@ -2124,14 +2115,14 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * start condition: (VFOCV < (AvgVCell - 1V) || VFOCV > (AvgVCell + 1V))
 	 *		    && abs(Current) < 5A
 	 */
-	if (curr_event & MAX77779_FG_EVENT_VFOCV) {
+	if (curr_event & MAXFG_EVENT_VFOCV) {
 		if (reg_to_micro_volt(vfocv) < (reg_to_micro_volt(avgvcell) - 200000) ||
 		    reg_to_micro_volt(vfocv) > (reg_to_micro_volt(avgvcell) + 200000))
-			curr_event &= ~MAX77779_FG_EVENT_VFOCV;
+			curr_event &= ~MAXFG_EVENT_VFOCV;
 	} else if ((reg_to_micro_volt(vfocv) < (reg_to_micro_volt(avgvcell) - 1000000) ||
 		    reg_to_micro_volt(vfocv) > (reg_to_micro_volt(avgvcell) + 1000000)) &&
 		    abs(reg_to_micro_amp(ibat, chip->RSense)) < 5000000) {
-		curr_event |= MAX77779_FG_EVENT_VFOCV;
+		curr_event |= MAXFG_EVENT_VFOCV;
 	}
 
 	/* do nothing if no state change */
@@ -2302,7 +2293,7 @@ static int max77779_fg_log_stuck_event(struct max77779_fg_chip *chip)
 
 	gbms_logbuffer_devlog(chip->monitor_log, chip->dev, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
 			      "%#04X %d 1%s",
-			      MONITOR_TAG_AB, GET_BIT_POSITION(MAX77779_FG_EVENT_STUCK), buf);
+			      MONITOR_TAG_AB, GET_BIT_POSITION(MAXFG_EVENT_STUCK), buf);
 	chip->fg_stuck_count++;
 
 	return 0;
@@ -3601,7 +3592,7 @@ static int max77779_fg_init_model_data(struct max77779_fg_chip *chip)
 
 static int max77779_fg_init_chip(struct max77779_fg_chip *chip)
 {
-	int ret;
+	int ret, fus = 0;
 	u16 data = 0;
 	u16 misccfg;
 
@@ -3705,12 +3696,12 @@ static int max77779_fg_init_chip(struct max77779_fg_chip *chip)
 	if (ret < 0) {
 		dev_err(chip->dev, "Error reading misccfg reg (%d)\n", ret);
 	} else if (chip->aafv_config_limits != 0) {
-		int fus;
-
 		fus = _max77779_fg_misccfg_fus_get(misccfg);
 		chip->aafv_modified_fus = (fus == chip->aafv_cfgs[chip->aafv_cur_idx].fus);
 	}
-	dev_info(chip->dev, "aafv_modified_fus: %d\n", chip->aafv_modified_fus);
+	dev_info(chip->dev, "aafv_modified_fus:%d, misccfg:0x%x, idx:%d, fus:%d, cfgs:%d\n",
+		 chip->aafv_modified_fus, misccfg, chip->aafv_cur_idx, fus,
+		 chip->aafv_cfgs[chip->aafv_cur_idx].fus);
 
 	return 0;
 }

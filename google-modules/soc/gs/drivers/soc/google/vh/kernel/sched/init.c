@@ -72,6 +72,8 @@ extern void rvh_enqueue_task_fair_pixel_mod(void *data, struct rq *rq, struct ta
 					    int flags);
 extern void rvh_dequeue_task_fair_pixel_mod(void *data, struct rq *rq, struct task_struct *p,
 					    int flags);
+extern void rvh_after_enqueue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p,
+	int flags);
 extern void vh_binder_set_priority_pixel_mod(void *data, struct binder_transaction *t,
 	struct task_struct *task);
 extern void vh_binder_restore_priority_pixel_mod(void *data, struct binder_transaction *t,
@@ -407,6 +409,10 @@ static int vh_sched_init(void)
 		return ret;
 
 	ret = register_trace_android_rvh_dequeue_task_fair(rvh_dequeue_task_fair_pixel_mod, NULL);
+	if (ret)
+		return ret;
+
+	ret = register_trace_android_rvh_after_enqueue_task(rvh_after_enqueue_task_pixel_mod, NULL);
 	if (ret)
 		return ret;
 

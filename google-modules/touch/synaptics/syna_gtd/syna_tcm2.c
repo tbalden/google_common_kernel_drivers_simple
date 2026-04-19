@@ -1852,9 +1852,9 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 					ABS_MT_ORIENTATION, (s16) (((s8) angle) * 2048 / 45));
 #else
 			goog_input_report_abs(tcm->gti, input_dev,
-					ABS_MT_TOUCH_MAJOR, MAX(wx, wy));
+					ABS_MT_TOUCH_MAJOR, max(wx, wy));
 			goog_input_report_abs(tcm->gti, input_dev,
-					ABS_MT_TOUCH_MINOR, MIN(wx, wy));
+					ABS_MT_TOUCH_MINOR, min(wx, wy));
 #endif
 #else
 #ifdef TYPE_B_PROTOCOL
@@ -1890,9 +1890,9 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 					ABS_MT_ORIENTATION, (s16) (((s8) angle) * 2048 / 45));
 #else
 			input_report_abs(input_dev,
-					ABS_MT_TOUCH_MAJOR, MAX(wx, wy));
+					ABS_MT_TOUCH_MAJOR, max(wx, wy));
 			input_report_abs(input_dev,
-					ABS_MT_TOUCH_MINOR, MIN(wx, wy));
+					ABS_MT_TOUCH_MINOR, min(wx, wy));
 #endif
 #endif
 #ifndef TYPE_B_PROTOCOL

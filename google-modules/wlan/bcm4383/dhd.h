@@ -1997,7 +1997,6 @@ typedef struct dhd_pub {
 	} roam_evt;
 	bool ring_attached;
 #ifdef DHD_PCIE_RUNTIMEPM
-	bool rx_pending_due_to_rpm;
 #ifdef RPM_FAST_TRIGGER
 	bool rpm_fast_trigger;
 	bool rpm_fast_candidate;
@@ -2742,6 +2741,8 @@ extern void dhd_bus_wakeup_work(dhd_pub_t *dhdp);
 #define WIFI_FEATURE_SET_TX_POWER_LIMIT              0x4000000
 /* Support Body/Head Proximity SAR */
 #define WIFI_FEATURE_USE_BODY_HEAD_SAR               0x8000000
+/* Support changing MAC address without iface reset */
+#define WIFI_FEATURE_DYNAMIC_SET_MAC                 0x10000000
 /* Support Latency mode setting */
 #define WIFI_FEATURE_SET_LATENCY_MODE                0x40000000
 /* Support P2P MAC randomization */

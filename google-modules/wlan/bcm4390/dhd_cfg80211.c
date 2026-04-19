@@ -37,7 +37,7 @@
 #ifdef PKT_FILTER_SUPPORT
 extern uint dhd_pkt_filter_enable;
 extern uint dhd_master_mode;
-extern void dhd_pktfilter_offload_enable(dhd_pub_t * dhd, char *arg, int enable, int master_mode);
+extern void dhd_pktfilter_offload_enable(dhd_pub_t *dhd, char *arg, int enable, int master_mode);
 #endif
 
 static int dhd_dongle_up = FALSE;
@@ -125,20 +125,21 @@ wl_cfg80211_update_iflist_info(struct bcm_cfg80211 *cfg, struct net_device *ndev
 }
 #endif /* WL_STATIC_IF */
 
-struct net_device* wl_cfg80211_allocate_if(struct bcm_cfg80211 *cfg, int ifidx, const char *name,
-	uint8 *mac, uint8 bssidx, const char *dngl_name)
+struct net_device *
+dhd_cfg80211_allocate_if(struct bcm_cfg80211 *cfg, int ifidx, const char *name,
+	uint8 *mac, uint8 bssidx, const char *dngl_name, bool rtnl_lock_reqd)
 {
-	return dhd_allocate_if(cfg->pub, ifidx, name, mac, bssidx, FALSE, dngl_name);
+	return dhd_allocate_if(cfg->pub, ifidx, name, mac, bssidx, rtnl_lock_reqd, dngl_name);
 }
 
 int wl_cfg80211_register_if(struct bcm_cfg80211 *cfg,
-	int ifidx, struct net_device* ndev, bool rtnl_lock_reqd)
+	int ifidx, struct net_device *ndev, bool rtnl_lock_reqd)
 {
 	return dhd_register_if(cfg->pub, ifidx, rtnl_lock_reqd);
 }
 
 int wl_cfg80211_remove_if(struct bcm_cfg80211 *cfg,
-	int ifidx, struct net_device* ndev, bool rtnl_lock_reqd)
+	int ifidx, struct net_device *ndev, bool rtnl_lock_reqd)
 {
 #ifdef DHD_PCIE_RUNTIMEPM
 	dhdpcie_runtime_bus_wake(cfg->pub, CAN_SLEEP(), __builtin_return_address(0));
@@ -157,7 +158,8 @@ void wl_cfg80211_cleanup_if(struct net_device *net)
 	dhd_cleanup_if(net);
 }
 
-struct net_device * dhd_cfg80211_netdev_free(struct net_device *ndev)
+struct net_device *
+dhd_cfg80211_netdev_free(struct net_device *ndev)
 {
 	struct bcm_cfg80211 *cfg;
 
@@ -392,7 +394,8 @@ static s32 wl_pattern_atoh(s8 *src, s8 *dst)
 
 	for (i = 0; *src != '\0'; i++) {
 		char num[3];
-		if ((num[0] = src[0]) != '\0') {
+		num[0] = src[0];
+		if (num[0] != '\0') {
 			num[1] = src[1];
 		}
 		num[2] = '\0';
@@ -563,7 +566,7 @@ int dhd_cfgvendor_priv_string_handler(struct bcm_cfg80211 *cfg, struct wireless_
 	dhd_pub_t *dhd;
 	dhd_ioctl_t ioc = { 0, NULL, 0, 0, 0, 0, 0};
 	int ret = 0;
-	int8 index;
+	int index;
 
 	WL_TRACE(("entry: cmd = %d\n", nlioc->cmd));
 

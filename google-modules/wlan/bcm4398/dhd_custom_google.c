@@ -1129,7 +1129,8 @@ void dhd_plat_report_bh_sched(void *plat_info, int resched)
 	DHD_INFO(("%s resched_streak_max=%d\n",
 		__FUNCTION__, resched_streak_max));
 
-	irq_affinity_hysteresis_control(p->pdev, resched_streak_max, curr_time_ns);
+	irq_affinity_hysteresis_control(p->pdev,
+		resched_streak_max, curr_time_ns);
 
 	resched_streak_max = 0;
 	return;

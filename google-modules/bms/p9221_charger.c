@@ -1276,7 +1276,10 @@ static void p9221_set_offline(struct p9221_charger_data *charger)
 	logbuffer_log(charger->log, "offline\n");
 
 	p9221_wcin_inlim(charger);
-
+	if (charger->disconnect_total_count < 0xFFFF)
+		charger->disconnect_total_count++;
+	cancel_delayed_work_sync(&charger->icl_stable_work);
+	__pm_relax(charger->icl_stable_ws);
 }
 
 static void p9221_tx_work(struct work_struct *work)
@@ -1525,6 +1528,16 @@ static void p9221_power_mitigation_work(struct work_struct *work)
 			 "power_mitigate: power mitigation fail!\n");
 		charger->fod_cnt = 0;
 	}
+}
+
+static void p9221_icl_stable_work(struct work_struct *work)
+{
+	struct p9221_charger_data *charger = container_of(work,
+			struct p9221_charger_data, icl_stable_work.work);
+
+	dev_info(charger->dev, "icl stable");
+	charger->disconnect_total_count = 0;
+	__pm_relax(charger->icl_stable_ws);
 }
 
 static void p9221_init_align(struct p9221_charger_data *charger)
@@ -2552,6 +2565,15 @@ static int p9221_set_hpp_dc_icl(struct p9221_charger_data *charger, bool enable)
 				       enable);
 }
 
+static void p9221_check_icl_stable(struct p9221_charger_data *charger)
+{
+	if (charger->online && charger->disconnect_total_count > 0) {
+		__pm_stay_awake(charger->icl_stable_ws);
+		schedule_delayed_work(&charger->icl_stable_work,
+				      msecs_to_jiffies(ICL_STABLE_TIME_MS));
+	}
+}
+
 /*
  * Auth delay must be there for EPP until the timeout since we don't know
  * if the TX supports WPC1.3 Auth until the timeout expires (or until
@@ -2576,6 +2598,8 @@ int p9221_set_auth_dc_icl(struct p9221_charger_data *charger, bool enable)
 	if (enable && !charger->auth_delay) {
 		dev_info(&charger->client->dev, "Enable Auth ICL (%d)\n", ret);
 		charger->auth_delay = true;
+		cancel_delayed_work_sync(&charger->icl_stable_work);
+		__pm_relax(charger->icl_stable_ws);
 	} else if (!enable && charger->auth_delay) {
 		dev_info(&charger->client->dev, "Disable Auth ICL (%d)\n", ret);
 		charger->auth_delay = false;
@@ -2745,6 +2769,8 @@ static int p9221_enable_wlc_dc(struct p9221_charger_data *charger)
 		goto not_hpp;
 	}
 	set_renego_state(charger, P9XXX_AVAILABLE);
+
+	p9221_check_icl_stable(charger);
 
 	/* Only returns 1 for success */
 	if (ret != 1) {
@@ -3588,6 +3614,8 @@ static void p9221_icl_ramp_reset(struct p9221_charger_data *charger)
 	if (alarm_try_to_cancel(&charger->icl_ramp_alarm) < 0)
 		dev_warn(&charger->client->dev, "Couldn't cancel icl_ramp_alarm\n");
 	cancel_delayed_work(&charger->icl_ramp_work);
+
+	p9221_check_icl_stable(charger);
 }
 
 static void p9221_icl_ramp_start(struct p9221_charger_data *charger)
@@ -6100,6 +6128,40 @@ static ssize_t qispec_show(struct device *dev,
 
 static DEVICE_ATTR_RO(qispec);
 
+static ssize_t compatibility_show(struct device *dev,
+				  struct device_attribute *attr,
+				  char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct p9221_charger_data *charger = i2c_get_clientdata(client);
+	int ret, val = COMPAT_UNKNOWN;
+	uint8_t mode;
+
+	ret = charger->chip_get_sys_mode(charger, &mode);
+
+	if (ret == 0) {
+		if (mode == P9XXX_SYS_OP_MODE_WPC_BASIC) {
+			val = COMPAT_BPP;
+		} else if (charger->is_mfg_google) {
+			if (mode == P9XXX_SYS_OP_MODE_PROPRIETARY)
+				val = COMPAT_HPP;
+			else
+				val = COMPAT_GPP;
+		} else {
+			val = COMPAT_EPP;
+		}
+	}
+
+	if (charger->disconnect_total_count > INCOMPAT_COUNT)
+		val = COMPAT_NOT_SUPPORTED;
+
+	charger->compatibility = val;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", val);
+}
+
+static DEVICE_ATTR_RO(compatibility);
+
 static struct attribute *rtx_attributes[] = {
 	&dev_attr_rtx_sw.attr,
 	&dev_attr_rtx_boost.attr,
@@ -6154,6 +6216,7 @@ static struct attribute *p9221_attributes[] = {
 	&dev_attr_align_delta.attr,
 	&dev_attr_ldo_en.attr,
 	&dev_attr_qispec.attr,
+	&dev_attr_compatibility.attr,
 	NULL
 };
 
@@ -8253,6 +8316,7 @@ static int p9221_charger_probe(struct i2c_client *client,
 	INIT_WORK(&charger->rtx_reset_work, p9xxx_rtx_reset_work);
 	INIT_DELAYED_WORK(&charger->power_mitigation_work,
 			  p9221_power_mitigation_work);
+	INIT_DELAYED_WORK(&charger->icl_stable_work, p9221_icl_stable_work);
 	alarm_init(&charger->icl_ramp_alarm, ALARM_BOOTTIME,
 		   p9221_icl_ramp_alarm_cb);
 	alarm_init(&charger->auth_dc_icl_alarm, ALARM_BOOTTIME,
@@ -8264,6 +8328,7 @@ static int p9221_charger_probe(struct i2c_client *client,
 
 	charger->align_ws = wakeup_source_register(NULL, "p9221_align");
 	charger->det_status_ws = wakeup_source_register(NULL, "p9221_det_status");
+	charger->icl_stable_ws = wakeup_source_register(NULL, "p9221_icl_stable");
 
 	/* setup function pointers for platform */
 	/* first from *_charger.c -> *_chip.c */
@@ -8630,6 +8695,7 @@ static void p9221_charger_remove(struct i2c_client *client)
 	cancel_work_sync(&charger->rtx_disable_work);
 	cancel_work_sync(&charger->rtx_reset_work);
 	cancel_delayed_work_sync(&charger->power_mitigation_work);
+	cancel_delayed_work_sync(&charger->icl_stable_work);
 	alarm_try_to_cancel(&charger->icl_ramp_alarm);
 	alarm_try_to_cancel(&charger->auth_dc_icl_alarm);
 	del_timer_sync(&charger->vrect_timer);
@@ -8654,6 +8720,7 @@ static void p9221_charger_remove(struct i2c_client *client)
 
 	wakeup_source_unregister(charger->align_ws);
 	wakeup_source_unregister(charger->det_status_ws);
+	wakeup_source_unregister(charger->icl_stable_ws);
 	if (charger->i2c_rxdebug_buf)
 		kfree(charger->i2c_rxdebug_buf);
 	if (charger->i2c_txdebug_buf)

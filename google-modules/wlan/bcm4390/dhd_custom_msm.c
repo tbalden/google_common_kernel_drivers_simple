@@ -90,7 +90,7 @@ static int wlan_reg_on = -1;
 
 #ifdef CONFIG_BCMDHD_OOB_HOST_WAKE
 static int wlan_host_wake_up = -1;
-static int wlan_host_wake_irq = 0;
+static int wlan_host_wake_irq;
 
 #ifdef CUSTOMER_HW2
 #define WIFI_WLAN_HOST_WAKE_PROPNAME    "wl_host_wake"
@@ -109,9 +109,10 @@ typedef struct dhd_plat_info {
 	struct pci_dev *pdev;
 } dhd_plat_info_t;
 
-static dhd_pcie_event_cb_t g_pfn = NULL;
+static dhd_pcie_event_cb_t g_pfn;
 
-char* dhd_get_device_dt_name(void)
+char *
+dhd_get_device_dt_name(void)
 {
 	return DHD_DT_COMPAT_ENTRY;
 }

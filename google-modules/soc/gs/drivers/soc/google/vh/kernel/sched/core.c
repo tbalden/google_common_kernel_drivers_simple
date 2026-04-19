@@ -20,6 +20,7 @@ struct vendor_group_list vendor_group_list[VG_MAX];
 extern void update_uclamp_stats(int cpu, u64 time);
 #endif
 
+extern inline void update_misfit_status(struct task_struct *p, struct rq *rq);
 extern int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		cpumask_t *valid_mask);
 /*
@@ -194,6 +195,15 @@ void vh_sched_switch_pixel_mod(void *data, bool preempt, struct task_struct *pre
 	if (task_is_running(prev))
 		__update_util_est_invariance(rq, prev, rq->nr_running > 1);
 }
+
+void rvh_after_enqueue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p, int flags)
+{
+	if (p->prio < MAX_RT_PRIO)
+		return;
+
+	update_misfit_status(p, rq);
+}
+
 
 void rvh_enqueue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p, int flags)
 {

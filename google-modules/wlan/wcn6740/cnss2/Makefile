@@ -36,7 +36,7 @@ KBUILD_OPTIONS += CONFIG_QRTR_WAKEUP_MS=0
 # WLAN_MAC
 KBUILD_OPTIONS += CONFIG_GOOGLE_WLAN_MAC=m
 
-EXTRA_SYMBOLS +=$(OUT_DIR)/../private/google-modules/soc/gs/Module.symvers
+EXTRA_SYMBOLS +=$(COMMON_OUT_DIR)/private/google-modules/soc/gs/Module.symvers
 
 endif
 
