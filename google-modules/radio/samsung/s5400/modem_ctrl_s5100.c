@@ -2763,6 +2763,9 @@ int s5100_poweron_pcie(struct modem_ctl *mc, enum link_mode mode)
 	if (!boot_on)
 		mif_gpio_set_value(&mc->cp_gpio[CP_GPIO_AP2CP_WAKEUP], 1, 5);
 
+	if (!boot_on && mif_gpio_get_value(&mc->cp_gpio[CP_GPIO_AP2CP_WAKEUP], true) == 0)
+		mif_err("Cannot set AP2CP_WAKEUP\n");
+
 	print_mc_state(mc);
 
 	spin_lock_irqsave(&mc->pcie_tx_lock, flags);

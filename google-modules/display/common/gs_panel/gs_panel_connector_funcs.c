@@ -17,6 +17,7 @@
 #include <drm/drm_property.h>
 #include <drm/drm_vblank.h>
 
+#include "gs_drm/gs_fault_event.h"
 #include "gs_panel/gs_panel.h"
 #include "trace/panel_trace.h"
 
@@ -315,11 +316,14 @@ static void gs_panel_connector_print_state(struct drm_printer *p,
 	drm_printf(p, "\toperation_rate: %u\n", state->operation_rate);
 	drm_printf(p, "\tmipi_sync: 0x%lx\n", state->mipi_sync);
 	drm_printf(p, "\trefresh_ctl_min_refresh_rate: %u\n", state->min_refresh_rate);
-	drm_printf(p, "\tinsert_frames: %u\n", state->insert_frames);
+	drm_printf(p, "\trefresh_ctl_auto_frame_enabled: %u\n", state->auto_fi);
+	drm_printf(p, "\trefresh_ctl_early_exit: %u\n", state->early_exit);
+	drm_printf(p, "\trefresh_ctl_insert_frames: %u\n", state->insert_frames);
 	drm_printf(p, "\tframe_interval_us: %u us\n", state->frame_interval_us);
 	drm_printf(p, "\tpending_update_flags: 0x%x\n", state->pending_update_flags);
 	drm_printf(p, "\tdsi_errors: %*pb\n", GS_DSI_ERR_MAX, state->dsi_errors);
 	drm_printf(p, "\tpanel_errors: %*pb\n", GS_PANEL_ERR_MAX, state->panel_errors);
+	drm_printf(p, "\tirc_support_mode: 0x%x\n", desc->irc_support_mode);
 
 	/*TODO(b/267170999): MODE*/
 	mutex_unlock(&ctx->mode_lock);
@@ -330,6 +334,7 @@ static void gs_panel_update_connector_state(const struct gs_drm_connector *gs_co
 {
 	struct gs_panel *ctx = gs_connector_to_panel(gs_connector);
 
+	mutex_lock(&ctx->mode_lock);
 	state->brightness_level = ctx->bl->props.brightness;
 	state->global_hbm_mode = ctx->hbm_mode;
 	state->local_hbm_on = ctx->lhbm.effective_state;
@@ -343,6 +348,7 @@ static void gs_panel_update_connector_state(const struct gs_drm_connector *gs_co
 	state->frame_interval_us = ctx->frame_interval_us;
 	state->panel_power_state =  ctx->panel_power_state;
 	bitmap_copy(state->panel_errors, ctx->panel_errors, GS_PANEL_ERR_MAX);
+	mutex_unlock(&ctx->mode_lock);
 }
 
 static int gs_panel_connector_get_property(struct gs_drm_connector *gs_connector,
@@ -758,6 +764,10 @@ static int gs_panel_run_detect_fault(struct gs_panel *ctx)
 	}
 	trace_panel_errors(ctx->gs_connector->panel_index, ctx->panel_errors);
 
+	if (!bitmap_empty(ctx->panel_errors, GS_PANEL_ERR_MAX))
+		gs_fault_event_emit(ctx->dev, GS_FAULT_EVENT_TYPE_PANEL_ERROR,
+				    ctx->panel_errors[0]);
+
 	/* Update last fault check timestamp */
 	ctx->timestamps.last_panel_fault_check_ts = now;
 
@@ -885,39 +895,34 @@ static void gs_panel_commit_properties(struct gs_panel *ctx,
 		/*TODO(tknelms) DPU_ATRACE_END("dbv_wait");*/
 	}
 
-	if (gs_panel_has_func(ctx, refresh_ctrl)) {
-		bool update_refresh_ctrl = false;
+	if (gs_panel_has_func(ctx, refresh_ctrl) &&
+	    (conn_state->pending_update_flags & GS_FLAG_REFRESH_CTRL_UPDATE)) {
 		u32 refresh_ctrl;
 
 		mutex_lock(&ctx->mode_lock);
 		refresh_ctrl = ctx->refresh_ctrl;
 		if (conn_state->pending_update_flags & GS_FLAG_MIN_RR_UPDATE) {
-			update_refresh_ctrl = true;
 			GS_PANEL_REFRESH_CTRL_SET_MIN_REFRESH_RATE(refresh_ctrl,
 								   conn_state->min_refresh_rate);
 		}
 		if (conn_state->pending_update_flags & GS_FLAG_INSERT_FRAMES) {
-			update_refresh_ctrl = true;
 			GS_PANEL_REFRESH_CTRL_SET_FI_FRAME_COUNT(refresh_ctrl,
 								 conn_state->insert_frames);
 		}
 		if (conn_state->pending_update_flags & GS_FLAG_AUTO_FI_UPDATE) {
-			update_refresh_ctrl = true;
 			if (conn_state->auto_fi)
 				refresh_ctrl |= GS_PANEL_REFRESH_CTRL_FI_AUTO;
 			else
 				refresh_ctrl &= ~GS_PANEL_REFRESH_CTRL_FI_AUTO;
 		}
 		if (conn_state->pending_update_flags & GS_FLAG_EARLY_EXIT_UPDATE) {
-			update_refresh_ctrl = true;
 			if (conn_state->early_exit)
 				refresh_ctrl |= GS_PANEL_REFRESH_CTRL_EARLY_EXIT;
 			else
 				refresh_ctrl &= ~GS_PANEL_REFRESH_CTRL_EARLY_EXIT;
 		}
 
-		if (update_refresh_ctrl)
-			ctx->refresh_ctrl = refresh_ctrl;
+		ctx->refresh_ctrl = refresh_ctrl;
 		mutex_unlock(&ctx->mode_lock);
 	}
 
@@ -956,6 +961,7 @@ static void gs_panel_connector_atomic_commit(struct gs_drm_connector *gs_connect
 	mutex_lock(&ctx->mode_lock);
 	if (gs_panel_has_func(ctx, commit_done))
 		ctx->desc->gs_panel_func->commit_done(ctx);
+	/* TODO(b/461659134): add panel specific coredump for panel errors */
 	if (gs_panel_has_func(ctx, detect_fault))
 		gs_panel_run_detect_fault(ctx);
 
@@ -1044,6 +1050,7 @@ static int gs_panel_connector_attach_properties(struct gs_panel *ctx)
 	drm_object_attach_property(obj, p->dsi_errors, 0);
 	drm_object_attach_property(obj, p->panel_errors, 0);
 	drm_object_attach_property(obj, p->all_modes, 0);
+	drm_object_attach_property(obj, p->irc_support_mode, desc->irc_support_mode);
 
 	if (desc->brightness_desc->brt_capability) {
 		ret = gs_panel_attach_brightness_capability(ctx->gs_connector,

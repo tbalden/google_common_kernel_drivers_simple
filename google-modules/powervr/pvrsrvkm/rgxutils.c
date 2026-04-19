@@ -54,6 +54,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxlayer.h"
 #include "rgxmmudefs_km.h"
 #include "rgxta3d.h"
+#include "devicemem_server.h"
 
 PVRSRV_ERROR RGXQueryAPMState(const PVRSRV_DEVICE_NODE *psDeviceNode,
 	const void *pvPrivateData,
@@ -572,19 +573,17 @@ void UnrefAndReleaseCriticalBuffer(DEVMEMINT_RESERVATION* psReservation)
 {
 	PVRSRV_ERROR eError;
 	PMR* psPMR;
-	IMG_DEV_VIRTADDR sDummy;
+	IMG_DEV_VIRTADDR sUnused;
 	/* Skip error check. If this function is called it means we already
 	   Acquired a reservation and confirmed that mapping exists. */
-	eError = DevmemIntGetReservationData(psReservation, &psPMR, &sDummy);
-	PVR_LOG_IF_ERROR_VA(PVR_DBG_ERROR, eError,
-	    "Error when trying to obtain reservation data in %s", __func__);
+	eError = DevmemIntGetReservationData(psReservation, &psPMR, &sUnused);
+	PVR_LOG_IF_ERROR(eError, "DevmemIntGetReservationData");
 
 	/* Ignore return value. Clearing the flag cannot fail. */
 	PMR_SetExclusiveUse(psPMR, IMG_FALSE);
 
 	eError = PMRUnrefPMR(psPMR);
-	PVR_LOG_IF_ERROR_VA(PVR_DBG_ERROR, eError,
-	    "Error on PMR unref in %s", __func__);
+	PVR_LOG_IF_ERROR(eError, "PMRUnrefPMR");
 
 	DevmemIntUnLockReservationMapping(psReservation);
 	DevmemIntReservationRelease(psReservation);

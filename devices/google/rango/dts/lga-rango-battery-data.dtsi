@@ -52,6 +52,14 @@ max77779,config {
 			0xC8 0xC8FF	/* nThermCfg3 */
 			0xC9 0xC8FF	/* nThermCfg2 */
 		>;
+		max77779,fg-aafv = /bits/ 32 <
+			  0   95  0xf  0x00b4
+			 20   90  0xf  0x005a
+			 40   85  0xf  0x005a
+			 60   80  0xf  0x005a
+			 80   75  0xf  0x005a
+			100   70  0xf  0x005a
+		>;
 	};
 
 	/* B_COS_RC2_BC79_2mOhm_3520_1_090523_20240401.model.ini.txt, b/332397741#comment3 */
@@ -94,6 +102,14 @@ max77779,config {
 		>;
 		max77779,fg_n_regval = /bits/ 16 <
 			0xC9 0xC8FF    /* nThermCfg2 Register */
+		>;
+		max77779,fg-aafv = /bits/ 32 <
+			  0   95  0xf  0x0097
+			 20   90  0xf  0x004c
+			 40   85  0xf  0x004c
+			 60   80  0xf  0x004c
+			 80   75  0xf  0x004c
+			100   70  0xf  0x004c
 		>;
 	};
 
@@ -140,6 +156,14 @@ max77779,config {
 			0xB7 0x2240	/* nConvgCfg */
 			0xC8 0xC8FF	/* nThermCfg3 */
 			0xC9 0xC8FF	/* nThermCfg2 */
+		>;
+		max77779,fg-aafv = /bits/ 32 <
+			  0   95  0xf  0x00c5
+			 20   90  0xf  0x0063
+			 40   85  0xf  0x0063
+			 60   80  0xf  0x0063
+			 80   75  0xf  0x0063
+			100   70  0xf  0x0063
 		>;
 	};
 };

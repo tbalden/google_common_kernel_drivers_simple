@@ -1022,8 +1022,8 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 			tcm->offload.coords[idx].minor = minor;
 			tcm->offload.coords[idx].rotation = (s16) (((s8) angle) * 2048 / 45);
 #else
-			tcm->offload.coords[idx].major = MAX(wx, wy);
-			tcm->offload.coords[idx].minor = MIN(wx, wy);
+			tcm->offload.coords[idx].major = max(wx, wy);
+			tcm->offload.coords[idx].minor = min(wx, wy);
 #endif
 			if (!tcm->offload.offload_running) {
 #endif
@@ -1047,9 +1047,9 @@ static void syna_dev_report_input_events(struct syna_tcm *tcm)
 					ABS_MT_ORIENTATION, (s16) (((s8) angle) * 2048 / 45));
 #else
 			input_report_abs(input_dev,
-					ABS_MT_TOUCH_MAJOR, MAX(wx, wy));
+					ABS_MT_TOUCH_MAJOR, max(wx, wy));
 			input_report_abs(input_dev,
-					ABS_MT_TOUCH_MINOR, MIN(wx, wy));
+					ABS_MT_TOUCH_MINOR, min(wx, wy));
 #endif
 #endif
 #ifndef TYPE_B_PROTOCOL

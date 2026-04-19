@@ -911,35 +911,14 @@ static int handle_automated_test_request(struct dptx *dptx)
 int handle_sink_request(struct dptx *dptx)
 {
 	int retval;
-	u8 vector;
-	u32 reg;
-	struct ctrl_regfields *ctrl_fields;
+	u8 irq_vector = 0;
 
-	ctrl_fields = dptx->ctrl_fields;
-
-	retval = dptx_link_check_status(dptx);
+	retval = dptx_link_check_status(dptx, &irq_vector);
 	if (retval)
 		return retval;
 
-	retval = dptx_read_dpcd(dptx, DP_DEVICE_SERVICE_IRQ_VECTOR, &vector);
-	if (retval)
-		return retval;
-
-	dptx_dbg(dptx, "%s: IRQ_VECTOR: 0x%02x\n", __func__, vector);
-
-	/* TODO handle sink interrupts */
-	if (!vector)
-		return 0;
-
-	if (vector & DP_REMOTE_CONTROL_COMMAND_PENDING) {
-		/* TODO */
-		dptx_warn(dptx,
-			  "%s: DP_REMOTE_CONTROL_COMMAND_PENDING: Not yet implemented",
-			  __func__);
-	}
-
-	if (vector & DP_AUTOMATED_TEST_REQUEST) {
-		dptx_info(dptx, "%s: DP_AUTOMATED_TEST_REQUEST", __func__);
+	if (irq_vector & DP_AUTOMATED_TEST_REQUEST) {
+		dptx_info(dptx, "%s: DP_AUTOMATED_TEST_REQUEST\n", __func__);
 		retval = handle_automated_test_request(dptx);
 		if (retval) {
 			dptx_err(dptx, "Automated test request failed\n");
@@ -949,40 +928,13 @@ int handle_sink_request(struct dptx *dptx)
 	}
 
 #if IS_ENABLED(CONFIG_DWC_DPTX_HDCP)
-	if (vector & DP_CP_IRQ) {
-		dptx_warn(dptx, "%s: DP_CP_IRQ INTR", __func__);
+	if (irq_vector & DP_CP_IRQ) {
+		dptx_info(dptx, "%s: DP_CP_IRQ\n", __func__);
 		handle_cp_irq_set(dptx);
 	}
 #endif // CONFIG_DWC_DPTX_HDCP
-	if (vector & DP_MCCS_IRQ) {
-		/* TODO */
-		dptx_warn(dptx,
-			  "%s: DP_MCCS_IRQ: Not yet implemented", __func__);
-		retval = -ENOTSUPP;
-	}
 
-	if (vector & DP_DOWN_REP_MSG_RDY) {
-		/* TODO */
-		dptx_warn(dptx, "%s: DP_DOWN_REP_MSG_RDY: Not yet implemented",
-			  __func__);
-		retval = -ENOTSUPP;
-	}
-
-	if (vector & DP_UP_REQ_MSG_RDY) {
-		/* TODO */
-		dptx_warn(dptx, "%s: DP_UP_REQ_MSG_RDY: Not yet implemented",
-			  __func__);
-		retval = -ENOTSUPP;
-	}
-
-	if (vector & DP_SINK_SPECIFIC_IRQ) {
-		/* TODO */
-		dptx_warn(dptx, "%s: DP_SINK_SPECIFIC_IRQ: Not yet implemented",
-			  __func__);
-		retval = -ENOTSUPP;
-	}
-
-	return retval;
+	return 0;
 }
 
 static int dptx_audio_wait_for_disable_done(struct dptx *dptx)
@@ -2396,12 +2348,25 @@ static void dptx_stat_fec_dsc(struct dptx *dptx, bool dptx_fec, bool dptx_dsc)
 
 }
 
+static unsigned long dp_max_rate = DPTX_DEFAULT_LINK_RATE;
+module_param(dp_max_rate, ulong, 0664);
+MODULE_PARM_DESC(dp_max_rate, "maximum DP link rate");
+
+static unsigned long dp_max_lanes = DPTX_DEFAULT_LINK_LANES;
+module_param(dp_max_lanes, ulong, 0664);
+MODULE_PARM_DESC(dp_max_lanes, "maximum DP link lanes");
+
+static bool dp_fec;
+module_param(dp_fec, bool, 0664);
+MODULE_PARM_DESC(dp_fec, "Enable/disable DP FEC");
+
 int handle_hotplug_core(struct dptx *dptx)
 {
 	u8 byte;
 	int retval;
 	int alpm_availability;
 	struct edp_alpm *alpm;
+	u8 sink_max_lanes;
 	struct ctrl_regfields *ctrl_fields = dptx->ctrl_fields;
 
 	dptx->dptx_max_res_store.hdisplay = 0;
@@ -2447,6 +2412,34 @@ int handle_hotplug_core(struct dptx *dptx)
 	else
 		alpm->status = NOT_AVAILABLE;
 
+	/* Initialize max_rate and max_lanes */
+	if (dp_max_rate > DPTX_PHYIF_CTRL_RATE_HBR3)
+		dp_max_rate = DPTX_DEFAULT_LINK_RATE;
+	dptx->max_rate = dp_max_rate;
+
+	if (dp_max_lanes != 4 && dp_max_lanes != 2 && dp_max_lanes != 1)
+		dp_max_lanes = DPTX_DEFAULT_LINK_LANES;
+	dptx->max_lanes = dp_max_lanes;
+
+	/* Initialize fec_en */
+	dptx->fec_en = dp_fec;
+
+	/*
+	 * When the host is limited in software to HBR and the sink supports
+	 * only max 2 lanes, it leads to best-case link of HBR + 2 lanes.
+	 * Such link can only support 1920x1200/1920x1080 resolutions, which
+	 * is not an optimal experience.
+	 *
+	 * For max 2-lane devices, such as USB 3.0 hubs, let's bump the link
+	 * speed to HBR2, so we can get HBR2 + 2 lanes link for 3440x1440 and
+	 * 2560x1600/2560x1440 support.
+	 */
+	sink_max_lanes = drm_dp_max_lane_count(dptx->rx_caps);
+	if (sink_max_lanes < 4 && dptx->max_rate == DPTX_PHYIF_CTRL_RATE_HBR) {
+		dptx->max_rate = DPTX_PHYIF_CTRL_RATE_HBR2;
+		dptx->max_lanes = 2;
+	}
+
 	// Program Sink DPCD Link Configuration registers
 	retval = dptx_set_link_configs(dptx, dptx->max_rate, dptx->max_lanes);
 	if (retval)
@@ -2454,7 +2447,7 @@ int handle_hotplug_core(struct dptx *dptx)
 
 	// Initiate link training
 	if (dptx->link.fec) {
-		dptx_write_regfield(dptx, ctrl_fields->field_enhance_framing_en, 0);
+		dptx_write_regfield(dptx, ctrl_fields->field_enhance_framing_en, 1);
 		dptx_write_regfield(dptx, ctrl_fields->field_enhance_framing_with_fec_en, 1);
 
 		// Set FEC_READY on the sink side
@@ -2551,6 +2544,8 @@ irqreturn_t dptx_threaded_irq(int irq, void *dev)
 		if (retval)
 			dptx_err(dptx, "Unable to handle sink request %d\n",
 				 retval);
+
+		dptx_connection_result_update(dptx, !retval);
 	}
 
 	dptx_dbg(dptx, "%s: DONE\n", __func__);

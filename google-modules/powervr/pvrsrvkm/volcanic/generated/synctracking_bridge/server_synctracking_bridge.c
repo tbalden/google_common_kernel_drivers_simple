@@ -54,9 +54,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -66,7 +63,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
-static IMG_INT
+static size_t
 PVRSRVBridgeSyncRecordRemoveByHandle(IMG_UINT32 ui32DispatchTableEntry,
 				     IMG_UINT8 * psSyncRecordRemoveByHandleIN_UI8,
 				     IMG_UINT8 * psSyncRecordRemoveByHandleOUT_UI8,
@@ -102,7 +99,7 @@ PVRSRVBridgeSyncRecordRemoveByHandle(IMG_UINT32 ui32DispatchTableEntry,
 
 SyncRecordRemoveByHandle_exit:
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_SYNCRECORDREMOVEBYHANDLE, eError);
 }
 
 static PVRSRV_ERROR _SyncRecordAddpshRecordIntRelease(void *pvData)
@@ -115,7 +112,7 @@ static PVRSRV_ERROR _SyncRecordAddpshRecordIntRelease(void *pvData)
 static_assert(PVRSRV_SYNC_NAME_LENGTH <= IMG_UINT32_MAX,
 	      "PVRSRV_SYNC_NAME_LENGTH must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeSyncRecordAdd(IMG_UINT32 ui32DispatchTableEntry,
 			  IMG_UINT8 * psSyncRecordAddIN_UI8,
 			  IMG_UINT8 * psSyncRecordAddOUT_UI8, CONNECTION_DATA * psConnection)
@@ -170,7 +167,7 @@ PVRSRVBridgeSyncRecordAdd(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -281,10 +278,22 @@ SyncRecordAdd_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_SYNCRECORDADD, eError);
 }
 
 /* ***************************************************************************

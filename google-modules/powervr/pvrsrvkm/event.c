@@ -164,8 +164,17 @@ PVRSRV_ERROR LinuxEventObjectListDestroy(IMG_HANDLE hEventObjectList)
 	{
 		if (!list_empty(&psEvenObjectList->sList))
 		{
-			 PVR_DPF((PVR_DBG_ERROR, "LinuxEventObjectListDestroy: Event List is not empty"));
-			 return PVRSRV_ERROR_UNABLE_TO_DESTROY_EVENT;
+			struct list_head *list;
+
+			PVR_DPF((PVR_DBG_ERROR, "%s: Event List is not empty", __func__));
+			list_for_each(list, &psEvenObjectList->sList)
+			{
+				PVRSRV_LINUX_EVENT_OBJECT *psEvent;
+
+				psEvent = list_entry(list, PVRSRV_LINUX_EVENT_OBJECT, sList);
+				PVR_DPF((PVR_DBG_ERROR, "%s: Event Object @ " IMG_KM_PTR_FMTSPEC , __func__, psEvent));
+			}
+			return PVRSRV_ERROR_UNABLE_TO_DESTROY_EVENT;
 		}
 		OSFreeMem(psEvenObjectList);
 		/*not nulling pointer, copy on stack*/
@@ -194,10 +203,11 @@ PVRSRV_ERROR LinuxEventObjectDelete(IMG_HANDLE hOSEventObject)
 	{
 		PVRSRV_LINUX_EVENT_OBJECT *psLinuxEventObject = (PVRSRV_LINUX_EVENT_OBJECT *)hOSEventObject;
 		PVRSRV_LINUX_EVENT_OBJECT_LIST *psLinuxEventObjectList = psLinuxEventObject->psLinuxEventObjectList;
+		unsigned long flags;
 
-		write_lock_bh(&psLinuxEventObjectList->sLock);
+		write_lock_irqsave(&psLinuxEventObjectList->sLock, flags);
 		list_del(&psLinuxEventObject->sList);
-		write_unlock_bh(&psLinuxEventObjectList->sLock);
+		write_unlock_irqrestore(&psLinuxEventObjectList->sLock, flags);
 
 #ifdef LINUX_EVENT_OBJECT_STATS
 		OSLockDestroy(psLinuxEventObject->hLock);
@@ -234,6 +244,7 @@ PVRSRV_ERROR LinuxEventObjectAdd(IMG_HANDLE hOSEventObjectList, IMG_HANDLE *phOS
  {
 	PVRSRV_LINUX_EVENT_OBJECT *psLinuxEventObject;
 	PVRSRV_LINUX_EVENT_OBJECT_LIST *psLinuxEventObjectList = (PVRSRV_LINUX_EVENT_OBJECT_LIST*)hOSEventObjectList;
+	unsigned long flags;
 
 	/* allocate completion variable */
 	psLinuxEventObject = OSAllocMem(sizeof(*psLinuxEventObject));
@@ -264,9 +275,9 @@ PVRSRV_ERROR LinuxEventObjectAdd(IMG_HANDLE hOSEventObjectList, IMG_HANDLE *phOS
 
 	psLinuxEventObject->psLinuxEventObjectList = psLinuxEventObjectList;
 
-	write_lock_bh(&psLinuxEventObjectList->sLock);
+	write_lock_irqsave(&psLinuxEventObjectList->sLock, flags);
 	list_add(&psLinuxEventObject->sList, &psLinuxEventObjectList->sList);
-	write_unlock_bh(&psLinuxEventObjectList->sLock);
+	write_unlock_irqrestore(&psLinuxEventObjectList->sLock, flags);
 
 	*phOSEventObject = psLinuxEventObject;
 
@@ -292,6 +303,8 @@ PVRSRV_ERROR LinuxEventObjectSignal(IMG_HANDLE hOSEventObjectList)
 	PVRSRV_LINUX_EVENT_OBJECT *psLinuxEventObject;
 	PVRSRV_LINUX_EVENT_OBJECT_LIST *psLinuxEventObjectList = (PVRSRV_LINUX_EVENT_OBJECT_LIST*)hOSEventObjectList;
 	struct list_head *psListEntry, *psListEntryTemp, *psList;
+	unsigned long flags;
+
 	psList = &psLinuxEventObjectList->sList;
 
 	/* Move the timestamp ahead for this call, so a potential "Wait" from any
@@ -300,13 +313,13 @@ PVRSRV_ERROR LinuxEventObjectSignal(IMG_HANDLE hOSEventObjectList)
 	 * "Wait" call might block while "this" Signal call is being processed */
 	atomic_inc(&psLinuxEventObjectList->sEventSignalCount);
 
-	read_lock_bh(&psLinuxEventObjectList->sLock);
+	read_lock_irqsave(&psLinuxEventObjectList->sLock, flags);
 	list_for_each_safe(psListEntry, psListEntryTemp, psList)
 	{
 		psLinuxEventObject = (PVRSRV_LINUX_EVENT_OBJECT *)list_entry(psListEntry, PVRSRV_LINUX_EVENT_OBJECT, sList);
 		wake_up_interruptible(&psLinuxEventObject->sWait);
 	}
-	read_unlock_bh(&psLinuxEventObjectList->sLock);
+	read_unlock_irqrestore(&psLinuxEventObjectList->sLock, flags);
 
 	return PVRSRV_OK;
 }
@@ -329,7 +342,7 @@ void LinuxEventObjectDumpDebugInfo(IMG_HANDLE hOSEventObject)
 	PVRSRV_LINUX_EVENT_OBJECT *psLinuxEventObject = (PVRSRV_LINUX_EVENT_OBJECT *)hOSEventObject;
 
 	OSLockAcquire(psLinuxEventObject->hLock);
-	PVR_LOG(("%s: EvObj(%p) schedule: Avoided(%u) Called(%u) ReturnedImmediately(%u) SleptFully(%u) SleptPartially(%u)",
+	PVR_LOG(("%s: EvObj("IMG_KM_PTR_FMTSPEC ") schedule: Avoided(%u) Called(%u) ReturnedImmediately(%u) SleptFully(%u) SleptPartially(%u)",
 	         __func__, psLinuxEventObject, psLinuxEventObject->ui32ScheduleAvoided,
 			 psLinuxEventObject->ui32ScheduleCalled, psLinuxEventObject->ui32ScheduleReturnedImmediately,
 			 psLinuxEventObject->ui32ScheduleSleptFully, psLinuxEventObject->ui32ScheduleSleptPartially));

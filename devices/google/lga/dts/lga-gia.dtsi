@@ -323,6 +323,7 @@
 	hsios_multicast_aggr_6_intr: hsios-multicast-aggr-6-intr@3c253060 {
 		compatible = "google,level-gia";
 		power-domains = <&sswrp_hsio_s_pd>;
+		ignore-rpm-status;
 		interrupt-controller;
 		interrupt-parent = <&gic>;
 		#interrupt-cells = <1>;

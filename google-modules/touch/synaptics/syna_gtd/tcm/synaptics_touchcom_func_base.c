@@ -687,7 +687,7 @@ int syna_tcm_identify(struct tcm_dev *tcm_dev,
 			sizeof(struct tcm_identification_info),
 			tcm_dev->resp_buf.buf,
 			tcm_dev->resp_buf.buf_size,
-			MIN(sizeof(*id_info), tcm_dev->resp_buf.data_length));
+			min(sizeof(*id_info), tcm_dev->resp_buf.data_length));
 	if (retval < 0) {
 		LOGE("Fail to copy identify info to caller\n");
 		goto exit;
@@ -1243,7 +1243,7 @@ int syna_tcm_get_boot_info(struct tcm_dev *tcm_dev,
 	}
 
 	resp_data_len = tcm_dev->resp_buf.data_length;
-	copy_size = MIN(sizeof(struct tcm_boot_info), resp_data_len);
+	copy_size = min(sizeof(struct tcm_boot_info), resp_data_len);
 
 	/* save the boot_info */
 	retval = syna_pal_mem_cpy((unsigned char *)&tcm_dev->boot_info,
@@ -1327,7 +1327,7 @@ int syna_tcm_get_app_info(struct tcm_dev *tcm_dev,
 	}
 
 	resp_data_len = tcm_dev->resp_buf.data_length;
-	copy_size = MIN(sizeof(tcm_dev->app_info), resp_data_len);
+	copy_size = min(sizeof(tcm_dev->app_info), resp_data_len);
 
 	info = &tcm_dev->app_info;
 
@@ -1818,7 +1818,7 @@ int syna_tcm_get_features(struct tcm_dev *tcm_dev, struct tcm_features_info *inf
 		sizeof(struct tcm_features_info),
 		tcm_dev->resp_buf.buf,
 		tcm_dev->resp_buf.buf_size,
-		MIN(sizeof(*info), tcm_dev->resp_buf.data_length));
+		min(sizeof(*info), tcm_dev->resp_buf.data_length));
 	if (retval < 0) {
 		LOGE("Fail to copy features_info to caller\n");
 		goto exit;

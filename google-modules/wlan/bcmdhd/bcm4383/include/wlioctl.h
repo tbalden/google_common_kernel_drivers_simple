@@ -27046,10 +27046,10 @@ typedef struct wl_art_cmd_config_v1 {
 } wl_art_cmd_config_v1_t;
 
 /* ART Top level command IDs */
- enum {
+enum {
 	WL_ART_CMD_ENAB = 0,
 	WL_ART_CMD_TXACTIVE = 1,
 	WL_ART_CMD_CONFIG = 2,
 	WL_ART_CMD_LAST
- };
+};
 #endif /* _wlioctl_h_ */

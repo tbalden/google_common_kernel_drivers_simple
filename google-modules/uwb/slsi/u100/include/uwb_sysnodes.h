@@ -13,6 +13,7 @@ struct u100_ctx;
 struct uwb_sysnode {
 	bool init_kobj_res;
 	struct kobject uwb_kobj;
+	struct kobject power_stats_kobj;
 };
 
 int uwb_sysfs_init(struct u100_ctx *u100_ctx);

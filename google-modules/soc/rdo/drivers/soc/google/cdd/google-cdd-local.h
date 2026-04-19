@@ -7,6 +7,7 @@
 #ifndef GOOGLE_CDD_LOCAL_H
 #define GOOGLE_CDD_LOCAL_H
 #include <linux/device.h>
+#include <linux/platform_device.h>
 #include <soc/google/google-cdd-log.h>
 
 struct google_cdd_param {
@@ -53,8 +54,12 @@ struct google_cdd_ctx {
 	bool in_reboot;
 	bool in_panic;
 	bool in_warm;
+	bool long_press_power;
 	int panic_action;
 	unsigned int reset_reason;
+
+	/* other module handles */
+	struct platform_device *ufs_pdev;
 };
 
 struct google_cdd_dpm_feature {
@@ -99,7 +104,6 @@ extern struct google_cdd_ctx cdd_ctx;
 extern struct google_cdd_item cdd_items[];
 extern struct google_cdd_log_item cdd_log_items[];
 extern struct google_cdd_log_misc cdd_log_misc;
-extern struct google_cdd_dpm cdd_dpm;
 
 /* Sign domain */
 #define CDD_SIGN_RESET			0x0
@@ -111,6 +115,7 @@ extern struct google_cdd_dpm cdd_dpm;
 #define CDD_SIGN_WARM_REBOOT		0xCACC
 #define CDD_SIGN_NORMAL_REBOOT		0xCAFE
 #define CDD_SIGN_WATCHDOG_APC		0xCBCA
+#define CDD_SIGN_REBOOT_LONGKEY_POWER_WARM	0xCCC1
 #define CDD_SIGN_MAGIC			(0xDB9 << 16)
 
 /* Size parameters */

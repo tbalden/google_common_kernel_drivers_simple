@@ -18,12 +18,12 @@
 #
 #
 
+load("@bazel_skylib//lib:selects.bzl", "selects")
 load(
     "@bazel_skylib//rules:common_settings.bzl",
     "bool_flag",
     "string_flag",
 )
-load("@bazel_skylib//lib:selects.bzl", "selects")
 
 package(
     default_visibility = [
@@ -45,7 +45,6 @@ config_setting(
         ":DMA_SHARED_BUFFER": "true",
     },
 )
-
 
 #Generic C flags defines
 bool_flag(
@@ -145,7 +144,6 @@ config_setting(
         ":MALI_CUSTOMER_RELEASE": "true",
     },
 )
-
 
 selects.config_setting_group(
     name = "mali_debug_kutf",

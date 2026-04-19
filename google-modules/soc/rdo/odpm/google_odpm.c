@@ -1061,7 +1061,7 @@ static int google_odpm_parse_dt_channels(struct device_node *channels_np, struct
 		odpm->channels[ch].enabled = false;
 		odpm->channels[ch].external = false;
 
-		scan_result = sscanf(iter_np->full_name, "ch%d", &telem_channel_idx);
+		scan_result = sscanf(iter_np->full_name, "channel@%d", &telem_channel_idx);
 
 		if (scan_result == 1 && google_odpm_telem_channel_valid(telem_channel_idx)) {
 			odpm->channels[ch].telem_channel_idx = telem_channel_idx;

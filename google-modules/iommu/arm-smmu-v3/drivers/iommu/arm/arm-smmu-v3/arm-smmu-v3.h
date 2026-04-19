@@ -8,6 +8,8 @@
 #ifndef _ARM_SMMU_V3_H
 #define _ARM_SMMU_V3_H
 
+#include <asm/kvm_pkvm.h>
+
 #include <linux/delay.h>
 #include <linux/iommu.h>
 #include <linux/kernel.h>
@@ -16,6 +18,7 @@
 #include <linux/version.h>
 
 #include <arm-smmu-v3/arm-smmu-v3-regs.h>
+#include <arm-smmu-v3/io-pgtable.h>
 
 /* commit 5e0a760b4441 ("mm, treewide: rename MAX_ORDER to MAX_PAGE_ORDER")
  * renamed MAX_ORDER to MAX_PAGE_ORDER. To facilitate easier backporting of
@@ -24,6 +27,8 @@
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
 #define MAX_PAGE_ORDER			MAX_ORDER
 #endif
+
+#include "arm-smmu-v3-common-telemetry.h"
 
 #define Q_IDX(llq, p)			((p) & ((1 << (llq)->max_n_shift) - 1))
 #define Q_WRP(llq, p)			((p) & (1 << (llq)->max_n_shift))
@@ -278,7 +283,60 @@ struct arm_smmu_domain {
 	spinlock_t			devices_lock;
 
 	struct mmu_notifier		mmu_notifier;
+	struct arm_smmu_domain_telemetry_common *telemetry;
 };
+
+/*
+ * Assumption is, a domain can be attached by multiple master devices. Keeping this number as a
+ * safe-guard. On the Pixel devices, observed just 1 device per domain.
+ */
+#define MAX_MASTER_DEVICES_PER_DOMAIN 6
+
+struct kvm_arm_smmu_master {
+	struct arm_smmu_device		*smmu;
+	struct device			*dev;
+	struct xarray			domains;
+	struct kvm_arm_smmu_stream	*streams;
+	unsigned int			num_streams;
+	u32				ssid_bits;
+	bool				idmapped; /* Stage-2 is transparently identity mapped*/
+	bool				force_cacheable;
+	bool				single_page_size;
+};
+
+struct kvm_arm_smmu_stream {
+	u32				id;
+	struct kvm_arm_smmu_master	*master;
+	struct rb_node			node;
+};
+
+struct kvm_arm_smmu_domain {
+	struct iommu_domain			domain;
+	struct arm_smmu_device			*smmu;
+	struct mutex				init_mutex;
+	pkvm_handle_t				id;
+	unsigned long				type;
+	struct arm_smmu_domain_telemetry_common *telemetry;
+	struct kvm_arm_smmu_master		*masters[MAX_MASTER_DEVICES_PER_DOMAIN];
+	ioasid_t				pasid[MAX_MASTER_DEVICES_PER_DOMAIN];
+	spinlock_t				masters_lock; /* To sync. access to masters array */
+};
+
+#define to_kvm_smmu_domain(_domain) \
+	container_of(_domain, struct kvm_arm_smmu_domain, domain)
+
+struct host_arm_smmu_device {
+	struct arm_smmu_device		smmu;
+	pkvm_handle_t			id;
+	u32				boot_gbpa;
+	bool				hvc_pd;
+	struct io_pgtable_cfg		cfg_s1;
+	struct io_pgtable_cfg		cfg_s2;
+	struct arm_smmu_device_telemetry_common *telemetry;
+};
+
+#define smmu_to_host(_smmu) \
+	container_of(_smmu, struct host_arm_smmu_device, smmu)
 
 /* The following are exposed for testing purposes. */
 struct arm_smmu_entry_writer_ops;

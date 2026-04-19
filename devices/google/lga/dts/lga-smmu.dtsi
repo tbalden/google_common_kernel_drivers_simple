@@ -67,6 +67,7 @@
 		#iommu-cells = <1>;
 		arm,instdata-override;
 		arm,max-sid-bits = <8>;
+		synchronize-fw;
 	};
 
 	inf_smmu: inf_smmu {

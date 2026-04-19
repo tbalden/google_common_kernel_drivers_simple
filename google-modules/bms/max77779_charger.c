@@ -1573,6 +1573,30 @@ static int max77779_set_topoff_current_max_ma(struct max77779_chgr_data *data,
 	return ret;
 }
 
+static int max77779_set_topoff_timer(struct max77779_chgr_data *data,
+				     int timer)
+{
+	u8 value;
+	int ret;
+
+	if (timer < 0)
+		return 0;
+
+	if (timer < 600)
+		value = 0x0;
+	else if (timer >= 4200)
+		value = 0x7;
+	else
+		value = ((timer - 600) / 600) + 1;
+
+	value = VALUE2FIELD(MAX77779_CHG_CNFG_03_TO_TIME, value);
+	ret = max77779_reg_update(data, MAX77779_CHG_CNFG_03,
+				   MAX77779_CHG_CNFG_03_TO_TIME_MASK,
+				   value);
+
+	return ret;
+}
+
 static int max77779_wcin_set_ilim_max_ua(struct max77779_chgr_data *data,
 					 int ilim_ua)
 {
@@ -2608,7 +2632,7 @@ static int max77779_psy_set_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX:
 	{
-		int msc_last;
+		int msc_last, timer;
 
 		ret = max77779_set_regulation_voltage(data, pval->intval);
 		pr_debug("%s: charge_voltage=%d (%d)\n",
@@ -2618,6 +2642,15 @@ static int max77779_psy_set_property(struct power_supply *psy,
 		msc_last = max77779_set_chg_term_voltage(data, pval->intval);
 		if (max77779_is_online(data) && msc_last == 1)
 			ret = max77779_higher_headroom_enable(data, true);
+
+		/*
+		 * set TO_TIME to 10 min before entering the last tier and
+		 * change it back to 30 sec when entering the last tier
+		 */
+		timer = msc_last == 1 ? 30 : 600;
+		ret = max77779_set_topoff_timer(data, timer);
+		pr_info("%s: timer=%d (%d)\n",
+			 __func__, timer, ret);
 	}
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:

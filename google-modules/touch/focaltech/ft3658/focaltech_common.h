@@ -70,10 +70,14 @@
 
 #define FTS_CHIP_TYPE_MAPPING   {{0x88, 0x56, 0x52, 0x00, 0x00, 0x00, 0x00, 0x56, 0xB2}}
 
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 #define FTS_STTW_E3_BUF_LEN                 13
 #define FTS_LPTW_E2_BUF_LEN                 13
 #define FTS_LPTW_E1_BUF_LEN                 12
-#define FTS_LPTW_BUF_LEN                    (max(FTS_LPTW_E1_BUF_LEN, FTS_LPTW_E2_BUF_LEN))
+#define FTS_LPTW_BUF_LEN                    (MAX(FTS_LPTW_E1_BUF_LEN, FTS_LPTW_E2_BUF_LEN))
 
 #define FILE_NAME_LENGTH                    128
 #define FTS_MESSAGE_LENGTH                  128

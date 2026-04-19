@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -67,7 +64,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 static_assert(MAX_DMA_OPS <= IMG_UINT32_MAX, "MAX_DMA_OPS must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDmaTransfer(IMG_UINT32 ui32DispatchTableEntry,
 			IMG_UINT8 * psDmaTransferIN_UI8,
 			IMG_UINT8 * psDmaTransferOUT_UI8, CONNECTION_DATA * psConnection)
@@ -127,7 +124,7 @@ PVRSRVBridgeDmaTransfer(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -140,7 +137,6 @@ PVRSRVBridgeDmaTransfer(IMG_UINT32 ui32DispatchTableEntry,
 	if (psDmaTransferIN->ui32NumDMAs != 0)
 	{
 		psPMRInt = (PMR **) IMG_OFFSET_ADDR(pArrayArgsBuffer, ui32NextOffset);
-		OSCachedMemSet(psPMRInt, 0, psDmaTransferIN->ui32NumDMAs * sizeof(PMR *));
 		ui32NextOffset += psDmaTransferIN->ui32NumDMAs * sizeof(PMR *);
 		hPMRInt2 = (IMG_HANDLE *) IMG_OFFSET_ADDR(pArrayArgsBuffer, ui32NextOffset);
 		ui32NextOffset += psDmaTransferIN->ui32NumDMAs * sizeof(IMG_HANDLE);
@@ -276,15 +272,27 @@ DmaTransfer_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DMATRANSFER, eError);
 }
 
 static_assert(32 <= IMG_UINT32_MAX, "32 must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDmaSparseMappingTable(IMG_UINT32 ui32DispatchTableEntry,
 				  IMG_UINT8 * psDmaSparseMappingTableIN_UI8,
 				  IMG_UINT8 * psDmaSparseMappingTableOUT_UI8,
@@ -343,7 +351,7 @@ PVRSRVBridgeDmaSparseMappingTable(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -420,13 +428,25 @@ DmaSparseMappingTable_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DMASPARSEMAPPINGTABLE, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDmaDeviceParams(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psDmaDeviceParamsIN_UI8,
 			    IMG_UINT8 * psDmaDeviceParamsOUT_UI8, CONNECTION_DATA * psConnection)
@@ -443,7 +463,7 @@ PVRSRVBridgeDmaDeviceParams(IMG_UINT32 ui32DispatchTableEntry,
 			    &psDmaDeviceParamsOUT->ui32DmaBuffAlign,
 			    &psDmaDeviceParamsOUT->ui32DmaTransferMult);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DMADEVICEPARAMS, eError);
 }
 
 /* ***************************************************************************

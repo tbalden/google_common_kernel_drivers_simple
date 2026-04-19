@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Battery device tree entries specific to stallion
+ *
+ * Copyright 2024 Google LLC
+ *
+ */
+
+&google_battery {
+	google,chg-cc-limits = <
+		 30   10   10    0    0
+		 50   30   30   30   30
+		100  100  100  100   50
+		 80   80   80   80   50
+		 50   50   50    0    0
+		 30    0    0    0    0
+	>;
+};

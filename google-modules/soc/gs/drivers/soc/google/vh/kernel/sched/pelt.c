@@ -204,7 +204,7 @@ unsigned long approximate_util_avg(unsigned long util, u64 delta)
 u64 approximate_runtime(unsigned long util)
 {
 	struct sched_avg sa = {};
-	u64 delta = TICK_USEC;
+	u64 delta = static_branch_likely(&enable_ptick) ? PTICK_PERIOD_US : TICK_USEC;
 	u64 runtime = 0;
 
 	if (unlikely(!util))
@@ -216,7 +216,10 @@ u64 approximate_runtime(unsigned long util)
 		runtime++;
 	}
 
-	return runtime * (TICK_USEC/USEC_PER_MSEC);
+	if (static_branch_likely(&enable_ptick))
+		return runtime * (unsigned int)(PTICK_PERIOD_US/USEC_PER_MSEC);
+	else
+		return runtime * (TICK_USEC/USEC_PER_MSEC);
 }
 
 static inline u64

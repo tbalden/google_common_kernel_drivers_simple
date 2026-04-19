@@ -130,12 +130,8 @@ fwtp_ipc_client_get_string_table(struct fwtp_ipc_client *fwtp_ipc_client)
 	} while (chunk_offset < table_size);
 
 out:
-	/*
-	 * On success, move string table to FWTP interface, ensuring it's null
-	 * terminated.
-	 */
+	/* On success, move string table to FWTP IPC client. */
 	if (err == kFwtpOk) {
-		string_table[table_size - 1] = '\0';
 		fwtp_ipc_client->string_table = string_table;
 		fwtp_ipc_client->string_table_size = table_size;
 	} else {
@@ -162,8 +158,10 @@ fwtp_ipc_client_get_string(struct fwtp_printer_ctx *printer_ctx,
 {
 	struct fwtp_ipc_client *fwtp_ipc_client = printer_ctx->get_string_ctx;
 
-	return fwtp_ipc_client->string_table + string_id -
-	       fwtp_ipc_client->string_table_offset;
+	return fwtp_lookup_string(fwtp_ipc_client->string_table,
+				  fwtp_ipc_client->string_table_size,
+				  fwtp_ipc_client->string_table_offset,
+				  string_id);
 }
 
 /*******************************************************************************

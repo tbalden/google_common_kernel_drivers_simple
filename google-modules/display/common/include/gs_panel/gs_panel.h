@@ -962,6 +962,7 @@ struct gs_panel_desc {
 	u32 default_dsi_hs_clk_mbps;
 	/** @refresh_on_lp: inform composer that we need a frame update while entering AOD or not */
 	bool refresh_on_lp;
+	u32 irc_support_mode;
 
 	/**
 	 * @frame_interval_us: store frame interval information, it provides a hint about the
@@ -1358,6 +1359,18 @@ struct gs_panel_background_work_data {
 };
 
 /**
+ * enum gs_content_gray_level - the content gray level of screen UI
+ * @GRAY_LEVEL_NORMAL: content gray level is normal for most Apps
+ * @GRAY_LEVEL_LOW: content gray level is low for specific Apps
+ * @GRAY_LEVEL_COUNT: placeholder, counter for number of levels
+ */
+enum gs_content_gray_level {
+	GRAY_LEVEL_NORMAL = 0,
+	GRAY_LEVEL_LOW,
+	GRAY_LEVEL_COUNT,
+};
+
+/**
  * struct gs_panel - data associated with panel driver operation
  * TODO: better documentation
  */
@@ -1527,6 +1540,9 @@ struct gs_panel {
 
 	/** @refresh_ctrl_work_scheduled: whether any refresh_ctrl work has been scheduled */
 	bool refresh_ctrl_work_scheduled;
+
+	/**@content_gray_level: current content gray level of screen UI */
+	enum gs_content_gray_level content_gray_level;
 };
 
 /* FUNCTIONS */
@@ -2041,5 +2057,6 @@ void gs_panel_refresh_ctrl(struct gs_panel *ctx, ktime_t frame_start_ts);
 /* HBM */
 #define GS_IS_HBM_ON(mode) ((mode) >= GS_HBM_ON_IRC_ON && (mode) < GS_HBM_STATE_MAX)
 #define GS_IS_HBM_ON_IRC_OFF(mode) (((mode) == GS_HBM_ON_IRC_OFF))
+#define GS_IS_HBM_ON_PEAK_LUM(mode) (((mode) == GS_HBM_ON_PEAK_LUM))
 
 #endif // DISPLAY_COMMON_PANEL_PANEL_GS_H_

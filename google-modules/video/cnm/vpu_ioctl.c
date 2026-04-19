@@ -57,23 +57,6 @@ void vpu_update_system_state(struct vpu_core *core)
 						((core->user_idle & 0x1)        << 4));
 }
 
-/* Given inst_idx, get pointer to instance from core */
-static inline struct vpu_inst *vpu_get_inst(struct vpu_core *core, uint32_t inst_idx)
-{
-	struct vpu_inst *inst;
-	unsigned long flags;
-
-	if (inst_idx >= MAX_NUM_INST) {
-		pr_err("%s instance index exceeds max allowed: %u\n",
-			__func__, inst_idx);
-		return NULL;
-	}
-	spin_lock_irqsave(&core->inst_lock, flags);
-	inst = core->instances[inst_idx];
-	spin_unlock_irqrestore(&core->inst_lock, flags);
-	return inst;
-}
-
 static int vpu_set_inst(struct vpu_core *core, uint32_t inst_idx, struct vpu_inst *inst)
 {
 	unsigned long flags;
@@ -118,6 +101,40 @@ static void vpu_free_intr_queue(struct vpu_intr_queue *intr_queue)
 	kfifo_free(&intr_queue->intr_pending_q);
 }
 
+static void vpu_inst_release(struct kref *ref)
+{
+	struct vpu_inst *inst = container_of(ref, struct vpu_inst, refcount);
+	unsigned int inst_idx = inst->idx;
+
+	vpu_free_intr_queue(&inst->intr_queue);
+	kfree(inst);
+	pr_info("released VPU instance index %d\n", inst_idx);
+}
+
+/* Given inst_idx, get pointer to instance from core */
+static inline struct vpu_inst *vpu_get_inst(struct vpu_core *core, uint32_t inst_idx)
+{
+	struct vpu_inst *inst;
+	unsigned long flags;
+
+	if (inst_idx >= MAX_NUM_INST) {
+		pr_err("%s instance index exceeds max allowed: %u\n",
+			__func__, inst_idx);
+		return NULL;
+	}
+	spin_lock_irqsave(&core->inst_lock, flags);
+	inst = core->instances[inst_idx];
+	if (inst && !kref_get_unless_zero(&inst->refcount))
+		inst = NULL;
+	spin_unlock_irqrestore(&core->inst_lock, flags);
+	return inst;
+}
+
+static void vpu_put_inst(struct vpu_inst *inst)
+{
+	kref_put(&inst->refcount, vpu_inst_release);
+}
+
 struct vpu_dmabuf_info *vpu_get_fw_debug_buf(struct vpu_core *core)
 {
 	struct vpu_dmabuf_info *curr, *temp;
@@ -159,17 +176,13 @@ static int vpu_open_inst(struct vpu_core *core, uint32_t inst_idx)
 		pr_err("failed to create instance\n");
 		goto err;
 	}
+	/* initialize refcount = 1 */
+	kref_init(&inst->refcount);
 
 	rc = vpu_alloc_intr_queue(&inst->intr_queue);
 	if (rc) {
 		pr_err("failed to alloc interrupt pending queue\n");
 		goto err_intr_queue_alloc;
-	}
-
-	rc = vpu_set_inst(core, inst_idx, inst);
-	if (rc) {
-		pr_err("failed to set vpu instance\n");
-		goto err_inst_idx;
 	}
 
 	/* record the debug memory which is set after VPU_Init
@@ -179,8 +192,20 @@ static int vpu_open_inst(struct vpu_core *core, uint32_t inst_idx)
 	if (!core->fw_debug_buf)
 		core->fw_debug_buf = vpu_get_fw_debug_buf(core);
 
+	/* don't access inst after vpu_set_inst to avoid UAF issue
+	 * when vpu_close_inst is called before vpu_open_inst returns
+	 */
 	inst->core = core;
 	inst->idx = inst_idx;
+	rc = vpu_set_inst(core, inst_idx, inst);
+	if (rc) {
+		pr_err("failed to set vpu instance\n");
+		goto err_inst_idx;
+	}
+	/* This function should not fail after this line, otherwise it will introduce
+	 * a use-after-free bug if another thread has already acquireed inst
+	 * with the same inst_idx.
+	 */
 	pr_info("opened VPU instance index %d\n", inst_idx);
 	return rc;
 
@@ -211,23 +236,6 @@ static struct list_head *vpu_get_alloc_list(struct vpu_core *core, uint32_t inst
 	return &core->dmabuf_list[inst_idx].allocs;
 }
 
-struct vpu_intr_queue *vpu_get_intr_queue(struct vpu_core *core, uint32_t inst_idx)
-{
-	struct vpu_inst *inst;
-
-	if (inst_idx == VPU_NO_INST) {
-		return &core->intr_queue;
-	}
-
-	inst = vpu_get_inst(core, inst_idx);
-	if (inst == NULL) {
-		pr_err("get intr queue failed with index %d\n", inst_idx);
-		return NULL;
-	}
-
-	return &inst->intr_queue;
-}
-
 static int vpu_close_inst(struct vpu_inst *inst)
 {
 	struct vpu_core *core;
@@ -241,8 +249,7 @@ static int vpu_close_inst(struct vpu_inst *inst)
 	core = inst->core;
 	inst_idx = inst->idx;
 	vpu_set_inst(core, inst->idx, NULL);
-	vpu_free_intr_queue(&inst->intr_queue);
-	kfree(inst);
+	kref_put(&inst->refcount, vpu_inst_release);
 
 	pr_info("closed VPU instance index %d\n", inst_idx);
 	return 0;
@@ -399,11 +406,11 @@ static int vpu_alloc_dma_buf(struct vpu_core *core, struct list_head *alloc_list
 
 	dma_heap_put(dma_heap);
 	dma_info->size = dmabuf->size;
+	dmabuf->iova = dma_info->iova;
+	dmabuf->fd = dma_info->fd;
 	mutex_lock(list_lock);
 	list_add_tail(&dma_info->list, alloc_list);
 	mutex_unlock(list_lock);
-	dmabuf->iova = dma_info->iova;
-	dmabuf->fd = dma_info->fd;
 	return 0;
 
 err_fd:
@@ -460,10 +467,9 @@ static void vpu_free_dma_buf(struct list_head *l, struct mutex *list_lock, struc
 	_vpu_free_dma_info(dma_info);
 }
 
-static int vpu_map_dma_buf(struct vpu_inst *inst, struct vpu_dmabuf *dmabuf)
+static int vpu_map_dma_buf(struct vpu_core *core, struct vpu_dmabuf *dmabuf)
 {
 	struct vpu_dmabuf_info *dma_info = kzalloc(sizeof(*dma_info), GFP_KERNEL);
-	struct vpu_core *core;
 	struct vpu_dmabuf_list *dmabuf_list;
 
 	if (!dma_info) {
@@ -478,20 +484,18 @@ static int vpu_map_dma_buf(struct vpu_inst *inst, struct vpu_dmabuf *dmabuf)
 	}
 
 	dma_info->skip_cmo = dmabuf->skip_cmo;
-	if (__vpu_map_dma_buf(dma_info, inst->core->dev)){
+	if (__vpu_map_dma_buf(dma_info, core->dev)) {
 		pr_err("Failed to map dma buffer\n");
 		goto err_map_dma_buf;
 	}
 	dma_info->fd = dmabuf->fd;
 	dma_info->size = dmabuf->size;
+	dmabuf->iova = dma_info->iova;
 
-	core = inst->core;
-	dmabuf_list = &core->dmabuf_list[inst->idx];
+	dmabuf_list = &core->dmabuf_list[dmabuf->inst_idx];
 	mutex_lock(&dmabuf_list->lock);
 	list_add_tail(&dma_info->list, &dmabuf_list->mappings);
 	mutex_unlock(&dmabuf_list->lock);
-
-	dmabuf->iova = dma_info->iova;
 	return 0;
 err_map_dma_buf:
 	dma_buf_put(dma_info->dma_buf);
@@ -617,11 +621,18 @@ err_req_fw:
 static int vpu_signal_interrupt(struct vpu_core *core, const struct vpu_intr_info *intr_info)
 {
 	struct vpu_intr_queue *intr_queue;
+	struct vpu_inst *inst = NULL;
 
-	intr_queue = vpu_get_intr_queue(core, intr_info->inst_idx);
-	if (intr_queue == NULL) {
-		pr_err("%s Failed to get intr_queue for index %u\n", __func__, intr_info->inst_idx);
-		return -EINVAL;
+	if (intr_info->inst_idx == VPU_NO_INST) {
+		intr_queue = &core->intr_queue;
+	} else {
+		inst = vpu_get_inst(core, intr_info->inst_idx);
+		if (!inst) {
+			pr_err("%s Failed to get inst for index %u\n",
+			       __func__, intr_info->inst_idx);
+			return -EINVAL;
+		}
+		intr_queue = &inst->intr_queue;
 	}
 
 	if (kfifo_is_empty_spinlocked(&intr_queue->intr_pending_q, &intr_queue->kfifo_lock)) {
@@ -632,6 +643,9 @@ static int vpu_signal_interrupt(struct vpu_core *core, const struct vpu_intr_inf
 		wake_up(&intr_queue->wq);
 		pr_debug("inst %d is signalled\n", intr_info->inst_idx);
 	}
+
+	if (inst)
+		vpu_put_inst(inst);
 
 	return 0;
 }
@@ -802,6 +816,7 @@ static long vpu_unlocked_ioctl(struct file *fp, unsigned int cmd,
 				return -EINVAL;
 			}
 			rc = vpu_close_inst(inst);
+			vpu_put_inst(inst);
 			break;
 		case VPU_IOCX_ALLOC_DMABUF:
 			{
@@ -869,12 +884,11 @@ static long vpu_unlocked_ioctl(struct file *fp, unsigned int cmd,
 					pr_err("Failed to copy from user\n");
 					return -EFAULT;
 				}
-				inst = vpu_get_inst(core, dmabuf.inst_idx);
-				if (!inst) {
-					pr_err("Failed to get inst for index %u\n", dmabuf.inst_idx);
+				if (dmabuf.inst_idx >= MAX_NUM_INST) {
+					pr_err("Get iova with invalid index %u\n", dmabuf.inst_idx);
 					return -EINVAL;
 				}
-				rc = vpu_map_dma_buf(inst, &dmabuf);
+				rc = vpu_map_dma_buf(core, &dmabuf);
 				if (rc) {
 					pr_err("Failed to allocate dmabuf\n");
 					break;
@@ -918,10 +932,17 @@ static long vpu_unlocked_ioctl(struct file *fp, unsigned int cmd,
 					pr_err("Failed to copy from user\n");
 					return -EFAULT;
 				}
-				intr_queue = vpu_get_intr_queue(core, intr_info.inst_idx);
-				if (!intr_queue) {
-					pr_err("Failed to get inst for index %u\n", intr_info.inst_idx);
-					return -EINVAL;
+
+				if (intr_info.inst_idx == VPU_NO_INST) {
+					intr_queue = &core->intr_queue;
+				} else {
+					inst = vpu_get_inst(core, intr_info.inst_idx);
+					if (!inst) {
+						pr_err("Failed to get inst for index %u\n",
+						       intr_info.inst_idx);
+						return -EINVAL;
+					}
+					intr_queue = &inst->intr_queue;
 				}
 
 				ret = wait_event_interruptible_timeout(intr_queue->wq,
@@ -945,6 +966,9 @@ static long vpu_unlocked_ioctl(struct file *fp, unsigned int cmd,
 					pr_err("Failed to copy to user\n");
 					rc = -EFAULT;
 				}
+
+				if (inst)
+					vpu_put_inst(inst);
 				break;
 			}
 		case VPU_IOCX_SIGNAL_INTERRUPT:
@@ -1025,17 +1049,27 @@ static long vpu_unlocked_ioctl(struct file *fp, unsigned int cmd,
 				break;
 			}
 		case VPU_IOCX_NOTIFY_IDLE:
-			if (core->user_idle == arg)
+			{
+				bool current_user_idle;
+
+				if (core->user_idle == arg)
+					break;
+
+				current_user_idle = core->user_idle;
+				core->user_idle = arg;
+
+				if (arg)
+					rc = vpu_pm_suspend(core->dev);
+				else
+					rc = vpu_pm_resume(core->dev);
+
+				if (rc) {
+					core->user_idle = current_user_idle;
+					dev_warn(core->dev, "vpu notify idle %lu failed\n", arg);
+				}
+
 				break;
-
-			core->user_idle = arg;
-
-			if (arg)
-				rc = vpu_pm_suspend(core->dev);
-			else
-				rc = vpu_pm_resume(core->dev);
-
-			break;
+			}
 		case VPU_IOCX_NOTIFY_WAKELOCK:
 			mutex_lock(&core->lock);
 			if (core->wakelock) {
@@ -1150,6 +1184,7 @@ static int vpu_release(struct inode *inode, struct file *file)
 			continue;
 		dev_warn(core->dev, "instance %d is leaked\n", inst_idx);
 		vpu_close_inst(inst);
+		vpu_put_inst(inst);
 	}
 
 	for (inst_idx = 0; inst_idx < MAX_NUM_INST; inst_idx++) {

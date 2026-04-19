@@ -214,6 +214,7 @@ static inline bool edgetpu_kci_is_block_off(struct gcip_kci *kci)
 	return edgetpu_soc_pm_is_block_off(mailbox->etdev);
 }
 
+/* PM lock may be held.  Any PM calls must be non-blocking. */
 static void edgetpu_kci_on_error(struct gcip_kci *kci, int err)
 {
 	struct edgetpu_mailbox *mailbox = gcip_kci_get_data(kci);
@@ -239,13 +240,13 @@ static const struct gcip_kci_ops kci_ops = {
 	.on_error = edgetpu_kci_on_error,
 };
 
-int edgetpu_kci_init(struct edgetpu_mailbox_manager *mgr, struct edgetpu_kci *etkci)
+int edgetpu_kci_init(struct edgetpu_dev *etdev, struct edgetpu_kci *etkci)
 {
-	struct edgetpu_mailbox *mailbox = edgetpu_mailbox_kci(mgr);
+	struct edgetpu_mailbox *mailbox = edgetpu_mailbox_kci(etdev);
 	struct gcip_memory *cmd_queue_mem = &etkci->cmd_queue_mem;
 	struct gcip_memory *resp_queue_mem = &etkci->resp_queue_mem;
 	struct gcip_kci_args args = {
-		.dev = mgr->etdev->dev,
+		.dev = etdev->dev,
 		.queue_wrap_bit = CIRC_QUEUE_WRAP_BIT,
 		.rkci_buffer_size = REVERSE_KCI_BUFFER_SIZE,
 		.timeout = KCI_TIMEOUT,
@@ -258,28 +259,28 @@ int edgetpu_kci_init(struct edgetpu_mailbox_manager *mgr, struct edgetpu_kci *et
 		return PTR_ERR(mailbox);
 
 	if (!etkci->kci) {
-		etkci->kci = devm_kzalloc(mgr->etdev->dev, sizeof(*etkci->kci), GFP_KERNEL);
+		etkci->kci = devm_kzalloc(etdev->dev, sizeof(*etkci->kci), GFP_KERNEL);
 		if (!etkci->kci) {
 			ret = -ENOMEM;
 			goto err_free_mailbox;
 		}
 	}
 
-	ret = edgetpu_kci_alloc_queue(mgr->etdev, mailbox, GCIP_MAILBOX_CMD_QUEUE, cmd_queue_mem);
+	ret = edgetpu_kci_alloc_queue(etdev, mailbox, GCIP_MAILBOX_CMD_QUEUE, cmd_queue_mem);
 	if (ret)
 		goto err_free_mailbox;
 
-	etdev_dbg(mgr->etdev, "%s: cmdq kva=%pK dma=%pad", __func__, cmd_queue_mem->virt_addr,
+	etdev_dbg(etdev, "%s: cmdq kva=%pK dma=%pad", __func__, cmd_queue_mem->virt_addr,
 		  &cmd_queue_mem->dma_addr);
 
-	ret = edgetpu_kci_alloc_queue(mgr->etdev, mailbox, GCIP_MAILBOX_RESP_QUEUE, resp_queue_mem);
+	ret = edgetpu_kci_alloc_queue(etdev, mailbox, GCIP_MAILBOX_RESP_QUEUE, resp_queue_mem);
 	if (ret)
 		goto err_free_cmd_queue;
 
-	etdev_dbg(mgr->etdev, "%s: rspq kva=%pK dma=%pad", __func__, resp_queue_mem->virt_addr,
+	etdev_dbg(etdev, "%s: rspq kva=%pK dma=%pad", __func__, resp_queue_mem->virt_addr,
 		  &resp_queue_mem->dma_addr);
 
-	mailbox->handle_irq = edgetpu_kci_handle_irq;
+	edgetpu_mailbox_set_irq_handler(mailbox, edgetpu_kci_handle_irq);
 	mailbox->internal.etkci = etkci;
 
 	args.cmd_queue = cmd_queue_mem->virt_addr;
@@ -294,21 +295,19 @@ int edgetpu_kci_init(struct edgetpu_mailbox_manager *mgr, struct edgetpu_kci *et
 	return 0;
 
 err_free_resp_queue:
-	edgetpu_kci_free_queue(mgr->etdev, resp_queue_mem);
+	edgetpu_kci_free_queue(etdev, resp_queue_mem);
 err_free_cmd_queue:
-	edgetpu_kci_free_queue(mgr->etdev, cmd_queue_mem);
+	edgetpu_kci_free_queue(etdev, cmd_queue_mem);
 err_free_mailbox:
-	edgetpu_mailbox_release_dedicated_mailbox(mgr, mailbox);
+	edgetpu_mailbox_release(mailbox);
 	return ret;
 }
 
 int edgetpu_kci_reinit(struct edgetpu_kci *etkci)
 {
 	struct edgetpu_mailbox *mailbox = etkci->mailbox;
-	struct edgetpu_mailbox_manager *mgr;
 	struct gcip_memory *cmd_queue_mem = &etkci->cmd_queue_mem;
 	struct gcip_memory *resp_queue_mem = &etkci->resp_queue_mem;
-	unsigned long flags;
 	int ret;
 
 	if (!mailbox)
@@ -324,11 +323,8 @@ int edgetpu_kci_reinit(struct edgetpu_kci *etkci)
 	if (ret)
 		return ret;
 
-	mgr = mailbox->etdev->mailbox_manager;
 	/* Restore KCI irq handler */
-	write_lock_irqsave(&mgr->mailboxes_lock, flags);
-	mailbox->handle_irq = edgetpu_kci_handle_irq;
-	write_unlock_irqrestore(&mgr->mailboxes_lock, flags);
+	edgetpu_mailbox_set_irq_handler(mailbox, edgetpu_kci_handle_irq);
 
 	edgetpu_mailbox_init_doorbells(mailbox);
 	edgetpu_mailbox_enable(mailbox);
@@ -338,17 +334,11 @@ int edgetpu_kci_reinit(struct edgetpu_kci *etkci)
 
 void edgetpu_kci_cancel_work_queues(struct edgetpu_kci *etkci)
 {
-	struct edgetpu_mailbox_manager *mgr;
 	struct edgetpu_mailbox *mailbox = etkci->mailbox;
-	unsigned long flags;
 
-	if (mailbox) {
-		mgr = mailbox->etdev->mailbox_manager;
+	if (mailbox)
 		/* Remove IRQ handler to stop responding to interrupts */
-		write_lock_irqsave(&mgr->mailboxes_lock, flags);
-		mailbox->handle_irq = NULL;
-		write_unlock_irqrestore(&mgr->mailboxes_lock, flags);
-	}
+		edgetpu_mailbox_set_irq_handler(mailbox, NULL);
 	gcip_kci_cancel_work_queues(etkci->kci);
 }
 
@@ -368,7 +358,7 @@ void edgetpu_kci_release(struct edgetpu_dev *etdev, struct edgetpu_kci *etkci)
 
 	mailbox = etkci->mailbox;
 	etkci->mailbox = NULL;
-	edgetpu_mailbox_release_dedicated_mailbox(etdev->mailbox_manager, mailbox);
+	edgetpu_mailbox_release(mailbox);
 }
 
 static int edgetpu_kci_send_cmd_with_data(struct edgetpu_kci *etkci,
@@ -445,6 +435,19 @@ int edgetpu_kci_map_trace_buffer(const struct gcip_telemetry_kci_args *args)
 	};
 
 	return edgetpu_kci_send_cmd(args->kci, &cmd);
+}
+
+int edgetpu_kci_map_hwtrace_buffer(const struct gcip_telemetry_kci_args *args)
+{
+	struct gcip_kci_command_element cmd = {
+		.code = GCIP_KCI_CODE_MAP_HWTRACE_BUFFER,
+		.dma = {
+			.address = args->addr,
+			.size = args->size,
+		},
+	};
+
+	return gcip_kci_send_cmd(args->kci, &cmd);
 }
 
 enum gcip_fw_flavor edgetpu_kci_fw_info(struct edgetpu_kci *etkci, struct gcip_fw_info *fw_info)
@@ -544,6 +547,7 @@ fw_unlock:
 	return ret;
 }
 
+/* Firmware and PM are locked.  Any PM calls must be non-blocking. */
 int edgetpu_kci_update_usage_locked(struct edgetpu_dev *etdev)
 {
 #define EDGETPU_USAGE_BUFFER_SIZE	4096
@@ -830,6 +834,18 @@ int edgetpu_kci_bcl_mitigation(struct edgetpu_kci *etkci,
 	};
 
 	return edgetpu_kci_send_cmd_with_data(etkci, &cmd, config, sizeof(*config));
+}
+
+void edgetpu_kci_fw_log_state(struct edgetpu_dev *etdev)
+{
+	struct gcip_kci_command_element cmd = {
+		.code = GCIP_KCI_CODE_LOG_STATE_INFO,
+	};
+
+	cmd.dma.address = 0;
+	cmd.dma.size = 0;
+	cmd.dma.flags = GCIP_KCI_LOG_STATE_INFO_ALL;
+	edgetpu_kci_send_cmd(etdev->etkci->kci, &cmd);
 }
 
 #if EDGETPU_HAS_FW_DEBUG

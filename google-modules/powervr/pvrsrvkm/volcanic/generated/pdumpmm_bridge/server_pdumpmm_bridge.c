@@ -56,9 +56,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -68,7 +65,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
 
-static IMG_INT
+static size_t
 PVRSRVBridgePMRPDumpLoadMem(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psPMRPDumpLoadMemIN_UI8,
 			    IMG_UINT8 * psPMRPDumpLoadMemOUT_UI8, CONNECTION_DATA * psConnection)
@@ -117,10 +114,10 @@ PMRPDumpLoadMem_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PMRPDUMPLOADMEM, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePMRPDumpLoadMemValue32(IMG_UINT32 ui32DispatchTableEntry,
 				   IMG_UINT8 * psPMRPDumpLoadMemValue32IN_UI8,
 				   IMG_UINT8 * psPMRPDumpLoadMemValue32OUT_UI8,
@@ -172,10 +169,10 @@ PMRPDumpLoadMemValue32_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PMRPDUMPLOADMEMVALUE32, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePMRPDumpLoadMemValue64(IMG_UINT32 ui32DispatchTableEntry,
 				   IMG_UINT8 * psPMRPDumpLoadMemValue64IN_UI8,
 				   IMG_UINT8 * psPMRPDumpLoadMemValue64OUT_UI8,
@@ -227,13 +224,13 @@ PMRPDumpLoadMemValue64_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PMRPDUMPLOADMEMVALUE64, eError);
 }
 
 static_assert(PVRSRV_PDUMP_MAX_FILENAME_SIZE <= IMG_UINT32_MAX,
 	      "PVRSRV_PDUMP_MAX_FILENAME_SIZE must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgePMRPDumpSaveToFile(IMG_UINT32 ui32DispatchTableEntry,
 			       IMG_UINT8 * psPMRPDumpSaveToFileIN_UI8,
 			       IMG_UINT8 * psPMRPDumpSaveToFileOUT_UI8,
@@ -289,7 +286,7 @@ PVRSRVBridgePMRPDumpSaveToFile(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -364,10 +361,22 @@ PMRPDumpSaveToFile_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PMRPDUMPSAVETOFILE, eError);
 }
 
 static_assert(PHYSMEM_PDUMP_MEMSPACE_MAX_LENGTH <= IMG_UINT32_MAX,
@@ -375,7 +384,7 @@ static_assert(PHYSMEM_PDUMP_MEMSPACE_MAX_LENGTH <= IMG_UINT32_MAX,
 static_assert(PHYSMEM_PDUMP_SYMNAME_MAX_LENGTH <= IMG_UINT32_MAX,
 	      "PHYSMEM_PDUMP_SYMNAME_MAX_LENGTH must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgePMRPDumpSymbolicAddr(IMG_UINT32 ui32DispatchTableEntry,
 				 IMG_UINT8 * psPMRPDumpSymbolicAddrIN_UI8,
 				 IMG_UINT8 * psPMRPDumpSymbolicAddrOUT_UI8,
@@ -443,7 +452,7 @@ PVRSRVBridgePMRPDumpSymbolicAddr(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -550,13 +559,25 @@ PMRPDumpSymbolicAddr_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PMRPDUMPSYMBOLICADDR, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePMRPDumpPol32(IMG_UINT32 ui32DispatchTableEntry,
 			  IMG_UINT8 * psPMRPDumpPol32IN_UI8,
 			  IMG_UINT8 * psPMRPDumpPol32OUT_UI8, CONNECTION_DATA * psConnection)
@@ -606,10 +627,10 @@ PMRPDumpPol32_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PMRPDUMPPOL32, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePMRPDumpCheck32(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psPMRPDumpCheck32IN_UI8,
 			    IMG_UINT8 * psPMRPDumpCheck32OUT_UI8, CONNECTION_DATA * psConnection)
@@ -659,10 +680,10 @@ PMRPDumpCheck32_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PMRPDUMPCHECK32, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgePMRPDumpCBP(IMG_UINT32 ui32DispatchTableEntry,
 			IMG_UINT8 * psPMRPDumpCBPIN_UI8,
 			IMG_UINT8 * psPMRPDumpCBPOUT_UI8, CONNECTION_DATA * psConnection)
@@ -711,13 +732,13 @@ PMRPDumpCBP_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_PMRPDUMPCBP, eError);
 }
 
 static_assert(PVRSRV_PDUMP_MAX_FILENAME_SIZE <= IMG_UINT32_MAX,
 	      "PVRSRV_PDUMP_MAX_FILENAME_SIZE must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeDevmemIntPDumpSaveToFileVirtual(IMG_UINT32 ui32DispatchTableEntry,
 					    IMG_UINT8 * psDevmemIntPDumpSaveToFileVirtualIN_UI8,
 					    IMG_UINT8 * psDevmemIntPDumpSaveToFileVirtualOUT_UI8,
@@ -778,7 +799,7 @@ PVRSRVBridgeDevmemIntPDumpSaveToFileVirtual(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -861,10 +882,22 @@ DevmemIntPDumpSaveToFileVirtual_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_DEVMEMINTPDUMPSAVETOFILEVIRTUAL, eError);
 }
 
 /* ***************************************************************************

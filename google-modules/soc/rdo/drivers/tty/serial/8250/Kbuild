@@ -5,4 +5,4 @@ google_8250_base-y				:= google_8250_port.o
 google_8250_base-y				+= google_8250_dma.o
 google_8250_base-y				+= google_8250_dwlib.o
 # This gives the drivers access to the logbuffer.h header
-subdir-ccflags-y += -I$(KERNEL_SRC)/../private/google-modules/bms
+subdir-ccflags-y += -I$(ROOT_DIR)/private/google-modules/bms

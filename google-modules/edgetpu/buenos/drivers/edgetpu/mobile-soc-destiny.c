@@ -14,6 +14,7 @@
 #include <linux/io.h>
 #include <linux/list.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/types.h>
 
 #include <mem-qos/google_qos_box_reg_api.h>
@@ -197,8 +198,7 @@ bool edgetpu_soc_pm_is_block_off(struct edgetpu_dev *etdev)
 {
 	u32 internal_status;
 
-	if (EDGETPU_FEATURE_ALWAYS_ON || IS_ENABLED(CONFIG_EDGETPU_TEST) ||
-	    !etdev->soc_data->lpb_sswrp_csrs)
+	if (edgetpu_pm_always_on(etdev))
 		return false;
 
 	internal_status = readl(etdev->soc_data->lpb_sswrp_csrs + LPB_TPU_INT_STATUS);
@@ -241,23 +241,27 @@ int edgetpu_soc_pm_lpm_up(struct edgetpu_dev *etdev)
 /* Log TPU block power state for debugging. The block is not required to be powered up. */
 void edgetpu_soc_pm_dump_block_state(struct edgetpu_dev *etdev)
 {
-	if (EDGETPU_FEATURE_ALWAYS_ON || IS_ENABLED(CONFIG_EDGETPU_TEST) ||
-	    !etdev->soc_data->lpb_sswrp_csrs)
+	uint32_t psm0, psm1, psm2;
+
+	if (edgetpu_pm_always_on(etdev))
 		return;
 
 	etdev_warn(etdev, "lpb int status=%u rail status=%u\n",
 		   readl(etdev->soc_data->lpb_sswrp_csrs + LPB_TPU_INT_STATUS),
 		   readl(etdev->soc_data->lpb_sswrp_csrs + LPB_TPU_RAIL_STATUS));
-	if (edgetpu_pm_get_if_powered(etdev, false)) {
-		etdev_warn(etdev, "driver not holding power vote, skip PSM state dump");
+
+	if (!etdev->soc_data->lpcm_lpm_csrs)
+		return;
+	if (pm_runtime_get_if_active(etdev->dev, false) <= 0) {
+		etdev_info(etdev, "pm_runtime not active, skip PSM state dump.");
 		return;
 	}
-	if (etdev->soc_data->lpcm_lpm_csrs)
-		etdev_warn(etdev, "psm0=%#x psm1=%#x psm2=%#x\n",
-			   readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM0_STATUS),
-			   readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM1_STATUS),
-			   readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM2_STATUS));
-	edgetpu_pm_put(etdev);
+
+	psm0 = readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM0_STATUS);
+	psm1 = readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM1_STATUS);
+	psm2 = readl(etdev->soc_data->lpcm_lpm_csrs + LPCM_LPM_TPU_PSM2_STATUS);
+	pm_runtime_put(etdev->dev);
+	etdev_warn(etdev, "psm0=%#x psm1=%#x psm2=%#x\n", psm0, psm1, psm2);
 }
 
 static int mitigation_response_en_get(void *data, u64 *val)
@@ -407,8 +411,7 @@ static int sswrp_power_state_get(void *data, u64 *val)
 	struct edgetpu_dev *etdev = data;
 	u32 internal_status;
 
-	if (EDGETPU_FEATURE_ALWAYS_ON || IS_ENABLED(CONFIG_EDGETPU_TEST) ||
-	    !etdev->soc_data->lpb_sswrp_csrs) {
+	if (edgetpu_pm_always_on(etdev)) {
 		*val = LPB_TPU_INT_STATUS_ON;
 		etdev_info(etdev, "always on is enabled, return status ON and skip LPB read\n");
 		return 0;
@@ -457,6 +460,14 @@ int edgetpu_soc_pm_init(struct edgetpu_dev *etdev)
 	debugfs_create_file("sswrp_power_state", 0440, etdev->pm->debugfs_dir, etdev,
 			    &sswrp_power_state_fops);
 
+	/*
+	 * If ALWAYS_ON isn't enabled but device tree has no LPB specified,
+	 * enable ALWAYS_ON.
+	 */
+	if (!etdev->pm->always_on && !etdev->soc_data->lpb_sswrp_csrs) {
+		etdev_warn(etdev, "no lpb csr base in device tree, disable power management");
+		etdev->pm->always_on = true;
+	}
 	return 0;
 }
 
@@ -616,9 +627,6 @@ int edgetpu_soc_early_init(struct edgetpu_dev *etdev)
 
 	if (lpb_sswrp_base)
 		etdev->soc_data->lpb_sswrp_csrs = ioremap(lpb_sswrp_base, lpb_sswrp_size);
-	if (!etdev->soc_data->lpb_sswrp_csrs && !EDGETPU_FEATURE_ALWAYS_ON &&
-	    !IS_ENABLED(CONFIG_EDGETPU_TEST))
-		return -ENOMEM;
 
 	edgetpu_pixel_trim_register(etdev);
 	return 0;
@@ -666,11 +674,12 @@ int edgetpu_soc_setup_irqs(struct edgetpu_dev *etdev)
 	struct platform_device *pdev = to_platform_device(etdev->dev);
 	struct edgetpu_soc_data *soc_data = etdev->soc_data;
 	int n = platform_irq_count(pdev);
-	int wdt_irq_count = 0;
-	int ret;
-	int i, core, mbox_irq_index;
+	int core;
 	static const char *wdt_interrupt_names[] = {"wdt_0", "wdt_1"};
 	int wdt_irq_count_max = min_t(int, etdev->num_cores, ARRAY_SIZE(wdt_interrupt_names));
+#if EDGETPU_USE_HW_WDT
+	int ret;
+#endif
 
 	if (n < 0) {
 		dev_err(etdev->dev, "Error retrieving IRQ count: %d\n", n);
@@ -687,7 +696,6 @@ int edgetpu_soc_setup_irqs(struct edgetpu_dev *etdev)
 		soc_data->wdt_irq[core] =
 			platform_get_irq_byname_optional(pdev, wdt_interrupt_names[core]);
 		if (soc_data->wdt_irq[core] > 0) {
-			wdt_irq_count++;
 #if EDGETPU_USE_HW_WDT
 			ret = devm_request_irq(etdev->dev, soc_data->wdt_irq[core],
 					       edgetpu_soc_wdt_irq_handler, IRQF_ONESHOT,
@@ -705,36 +713,5 @@ int edgetpu_soc_setup_irqs(struct edgetpu_dev *etdev)
 		}
 	}
 
-	etdev->n_mailbox_irq = n - wdt_irq_count;
-	if (etdev->n_mailbox_irq < 0) {
-		dev_err(etdev->dev, "Invalid IRQ count: %d\n", platform_irq_count(pdev));
-		return -ENODEV;
-	}
-
-	etdev->mailbox_irq = devm_kmalloc_array(etdev->dev, etdev->n_mailbox_irq,
-						sizeof(*etdev->mailbox_irq), GFP_KERNEL);
-	if (!etdev->mailbox_irq)
-		return -ENOMEM;
-
-	for (i = 0, mbox_irq_index = 0; i < n; i++) {
-		int irq = platform_get_irq(pdev, i);
-
-		for (core = 0; core < etdev->num_cores; core++) {
-			if (irq == soc_data->wdt_irq[core]) {
-				irq = 0;
-				break;
-			}
-		}
-		if (!irq)
-			continue;
-		etdev->mailbox_irq[mbox_irq_index++] = irq;
-		ret = devm_request_irq(etdev->dev, irq, edgetpu_mailbox_irq_handler, IRQF_ONESHOT,
-				       etdev->dev_name, etdev);
-		if (ret) {
-			dev_err(etdev->dev, "%s: failed to request mailbox irq %d: %d\n",
-				etdev->dev_name, irq, ret);
-			return ret;
-		}
-	}
 	return 0;
 }

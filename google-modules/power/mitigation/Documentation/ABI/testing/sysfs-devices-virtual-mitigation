@@ -50,7 +50,8 @@ Contact:	"George Lee" <geolee@google.com>
 Description:
 		SUBSYSTEM can be selected from smpl_lvl, ocp_cpu1_lvl, ocp_cpu2_lvl, ocp_tpu_lvl,
 		soft_ocp_cpu1_lvl, soft_ocp_cpu2_lvl, soft_ocp_tpu_lvl, ocp_gpu_lvl,
-		soft_ocp_gpu_lvl.
+		soft_ocp_gpu_lvl, batoilo_lvl, batoilo_usb_lvl, batoilo_wlc_lvl,
+		batoilo2_lvl, batoilo2_usb_lvl, batoilo2_wlc_lvl, uvlo1_lvl, uvlo2_lvl.
 		The reported value is the readback of the corresponding threshold.
 
 What:		/sys/devices/virtual/pmic/mitigation/clock_div/<SUBSYSTEM>

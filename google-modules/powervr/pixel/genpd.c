@@ -379,9 +379,11 @@ void deinit_genpd(struct pixel_gpu_device *pixel_dev)
 		dev_pm_genpd_remove_notifier(pixel_dev->sswrp_gpu_pd);
 	}
 
+#if defined(SUPPORT_LINUX_DVFS)
 	if (pixel_dev->pf_state_link) {
 		device_link_del(pixel_dev->pf_state_link);
 	}
+#endif
 
 	if (pixel_dev->core_logic_link) {
 		device_link_del(pixel_dev->core_logic_link);
@@ -451,6 +453,7 @@ int init_genpd(struct pixel_gpu_device *pixel_dev)
 		goto err;
 	}
 
+#if defined(SUPPORT_LINUX_DVFS)
 	/* Create a dev_link between the GPU device and gpu_pf_state driver to
 	 * ensure whenever the GPU is powered on, gpu_pf_state will be resumed.
 	 */
@@ -464,6 +467,7 @@ int init_genpd(struct pixel_gpu_device *pixel_dev)
 		dev_err(dev, "failed to make dev_link between GPU and gpu_pf_state");
 		goto err;
 	}
+#endif
 
 	if (!disable_pm_runtime) {
 		pm_runtime_use_autosuspend(pixel_dev->sswrp_gpu_pd);

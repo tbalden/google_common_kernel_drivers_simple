@@ -3,7 +3,7 @@
 obj-$(CONFIG_CNSS2) += cnss2.o
 
 ifeq ($(CONFIG_CNSS_OUT_OF_TREE),y)
-ccflags-y += -I$(KERNEL_SRC)/../private/google-modules/soc/gs/include
+ccflags-y += -I$(ROOT_DIR)/private/google-modules/soc/gs/include
 ccflags-y += -I$(WLAN_PLATFORM_ROOT)/inc
 ccflags-y += -I$(WLAN_PLATFORM_ROOT)/cnss_utils
 ccflags-y += -DCONFIG_WCN_GOOGLE

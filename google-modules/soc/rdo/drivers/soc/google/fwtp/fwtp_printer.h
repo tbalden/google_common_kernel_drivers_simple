@@ -62,6 +62,25 @@ struct fwtp_data_item_list {
 };
 
 /*
+ * This structure is used for reading tracepoint data.
+ */
+struct fwtp_tracepoint_data_reader {
+	/* The full tracepoint. */
+	uint8_t *tracepoint;
+	/* The full tracepoint size. */
+	int tracepoint_size;
+	/* Index of the next byte of tracepoint data to read. */
+	int next_data;
+	/* If true, the tracepoint is a low-latency tracepoint. */
+	bool is_ll;
+	/*
+	 * If true, the tracepoint data has underflowed (i.e., an attempt was made to
+	 * read a byte of tracepoint data, but there was no more data left to read).
+	 */
+	bool underflow;
+};
+
+/*
  * A function of this type returns the string corresponding to the string ID
  * specified by string_id. The printer context is specified by printer_ctx.
  *
@@ -83,21 +102,22 @@ typedef void (*fwtp_append_output_func)(struct fwtp_printer_ctx *printer_ctx,
 
 /*
  * A function of this type runs post-processing using the decoded tracepoint
- * with the timestamp specified by timestamp, title string specified by str_id
- * and str, and data items specified by data_items. This function doesn't modify
- * the tracepoint or printer output, but it may collect information from the
- * tracepoint for other uses (e.g., generating a SEM report). The printer
- * context is specified by printer_ctx.
+ * with the type specified by type, timestamp specified by timestamp, title
+ * string specified by str_id and str, and data items specified by data_items.
+ * This function doesn't modify the tracepoint or printer output, but it may
+ * collect information from the tracepoint for other uses (e.g., generating a
+ * SEM report). The printer context is specified by printer_ctx.
  *
  *   printer_ctx            Printer context.
+ *   type                   Tracepoint type.
  *   timestamp              Tracepoint timestamp.
  *   str_id                 Tracepoint title string ID.
  *   str                    Tracepoint title string.
  *   data_items             Tracepoint data items.
  */
 typedef void (*fwtp_post_process_func)(struct fwtp_printer_ctx *printer_ctx,
-				       uint64_t timestamp, uint32_t str_id,
-				       const char *str,
+				       unsigned int type, uint64_t timestamp,
+				       uint32_t str_id, const char *str,
 				       struct fwtp_data_item_list *data_items);
 
 /*
@@ -192,6 +212,11 @@ void fwtp_print_entries(struct fwtp_printer_ctx *printer_ctx,
 
 int fwtp_get_next_data_item(struct fwtp_data_item_list *data_items,
 			    void *p_data_item, int max_data_item_size);
+
+const char *fwtp_lookup_string(const char *string_table,
+			       uint32_t string_table_size,
+			       uint32_t string_table_offset,
+			       uint32_t string_id);
 
 __END_CDECLS
 

@@ -15,7 +15,6 @@
 #include <linux/irqnr.h>
 #include <linux/irq.h>
 #include <linux/irqdesc.h>
-#include <linux/rtc.h>
 
 #include <asm/stacktrace.h>
 #include <soc/google/google-cdd.h>
@@ -512,18 +511,12 @@ static void google_cdd_print_irq(void)
 
 void google_cdd_print_log_report(void)
 {
-	struct timespec64 ts;
-	struct rtc_time tm;
 
 	if (unlikely(!google_cdd_get_enable()))
 		return;
 
-	ktime_get_real_ts64(&ts);
-	rtc_time64_to_tm(ts.tv_sec - (sys_tz.tz_minuteswest * 60), &tm);
-
 	pr_info("==========================================================\n");
-	pr_info("Panic Report (%02d-%02d %02d:%02d:%02d)\n",
-		tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	pr_info("Panic Report\n");
 	pr_info("==========================================================\n");
 	google_cdd_print_lastinfo();
 	google_cdd_print_freqinfo();

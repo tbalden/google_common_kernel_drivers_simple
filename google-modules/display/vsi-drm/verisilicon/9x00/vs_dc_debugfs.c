@@ -156,8 +156,13 @@ static ssize_t dc_coredump_write(struct file *file, const char __user *user_buf,
 	if (ret)
 		return ret;
 
-	if (coredump)
-		vs_dc_coredump(dc, "Manual core dump");
+	if (coredump) {
+		if (!dc_is_coredump_source_enabled(dc, SSCD_SRC_MANUAL))
+			dev_err(hw->dev,
+				"Manual coredump requested, but not a permitted coredump source\n");
+		else
+			vs_dc_coredump(dc, "Manual core dump");
+	}
 
 	return len;
 }

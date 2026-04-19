@@ -3915,8 +3915,14 @@ wl_nan_pairing_cmn_event_data(struct bcm_cfg80211 *cfg, void *event_data,
 	}
 
 	*tlvs_offset = OFFSETOF(wl_nan_ev_pairing_cmn_t, opt_tlvs);
-	*nan_opts_len = data_len - *tlvs_offset;
-
+	/* Calculate the actual TLV data length - make sure it's valid */
+	if (data_len > *tlvs_offset) {
+		*nan_opts_len = data_len - *tlvs_offset;
+	} else {
+		/* No TLVs or invalid length - set to 0 to avoid parsing */
+		*nan_opts_len = 0;
+	}
+	WL_TRACE(("tlvs_offset %d, nan_opts_len %d\n", *tlvs_offset, *nan_opts_len));
 fail:
 	NAN_DBG_EXIT();
 	return ret;
@@ -3999,8 +4005,10 @@ wl_cfgnan_bootstrapping_prep_npba_attr(struct bcm_cfg80211 *cfg,
 		p += cookie_len;
 	}
 	htol16_ua_store(cmd_data->pairing_config.supported_bootstrapping_methods, p);
-	WL_INFORM_MEM(("[NAN] Bootstrapping type_status %x  peer: " MACDBG " \n",
-		type_status, MAC2STRDBG(&cmd_data->mac_addr)));
+	WL_INFORM_MEM(("[NAN] Bootstrapping cmd %d type_status %x"
+			" comeback_delay_len %d cookie_len %d peer: " MACDBG " \n",
+			cmd, type_status, comeback_delay_len, cookie_len,
+			MAC2STRDBG(&cmd_data->mac_addr)));
 	prhex("NPBA info:", (void *)attr, total_len);
 	return ret;
 fail:
@@ -4089,7 +4097,7 @@ wl_cfgnan_parse_npba_attr(struct bcm_cfg80211 *cfg, const uint8 *p_attr, uint16 
 				goto fail;
 			}
 			/* advance read pointer */
-			ret = memcpy_s(&tlv_data->cookie.data, tlv_data->cookie.dlen,
+			ret = memcpy_s(tlv_data->cookie.data, tlv_data->cookie.dlen,
 					p_attr, tlv_data->cookie.dlen);
 			if (ret != BCME_OK) {
 				WL_ERR(("Failed to copy cookie\n"));
@@ -4112,7 +4120,7 @@ fail:
 		tlv_data->npba_info.data = NULL;
 	}
 
-	WL_DBG(("Error in Parsing NPBA attr, status = %d\n", ret));
+	WL_ERR(("Error in Parsing NPBA attr, status = %d\n", ret));
 	return ret;
 }
 
@@ -10208,7 +10216,14 @@ wl_nan_dp_cmn_event_data(struct bcm_cfg80211 *cfg, void *event_data,
 		}
 		*tlvs_offset = OFFSETOF(wl_nan_ev_datapath_cmn_t, opt_tlvs) +
 			OFFSETOF(bcm_xtlv_t, data);
-		*nan_opts_len = data_len - *tlvs_offset;
+		/* Calculate the actual TLV data length - make sure it's valid */
+		if (data_len > *tlvs_offset) {
+			*nan_opts_len = data_len - *tlvs_offset;
+		} else {
+			/* No TLVs or invalid length - set to 0 to avoid parsing */
+			*nan_opts_len = 0;
+		}
+		WL_TRACE(("tlvs_offset %d, nan_opts_len %d\n", *tlvs_offset, *nan_opts_len));
 		if (event_num == WL_NAN_EVENT_PEER_DATAPATH_IND) {
 			*hal_event_id = GOOGLE_NAN_EVENT_DATA_REQUEST;
 #ifdef WL_NAN_DISC_CACHE
@@ -11095,11 +11110,13 @@ wl_cfgnan_cache_pairing_confirm_data_n_send_fup(struct bcm_cfg80211 *cfg,
 		goto exit;
 	}
 	pairing_data->npk.dlen = nan_event_data->npk.dlen;
-	ret = memcpy_s(pairing_data->npk.data, pairing_data->npk.dlen,
+	if (nan_event_data->enable_pairing_cache) {
+		ret = memcpy_s(pairing_data->npk.data, pairing_data->npk.dlen,
 			nan_event_data->npk.data, nan_event_data->npk.dlen);
-	if (ret != BCME_OK) {
-		WL_ERR(("Failed to copy NPK\n"));
-		goto exit;
+		if (ret != BCME_OK) {
+			WL_ERR(("Failed to copy NPK\n"));
+			goto exit;
+		}
 	}
 
 	pairing_data->akm = nan_event_data->nan_akm;
@@ -11786,7 +11803,14 @@ wl_cfgnan_notify_nan_status(struct bcm_cfg80211 *cfg,
 	{
 		tlvs_offset = OFFSETOF(wl_nan_ev_sched_info_t, opt_tlvs) +
 			OFFSETOF(bcm_xtlv_t, data);
-		nan_opts_len = data_len - tlvs_offset;
+		/* Calculate the actual TLV data length - make sure it's valid */
+		if (data_len > tlvs_offset) {
+			nan_opts_len = data_len - tlvs_offset;
+		} else {
+			/* No TLVs or invalid length - set to 0 to avoid parsing */
+			nan_opts_len = 0;
+		}
+		WL_TRACE(("tlvs_offset %d, nan_opts_len %d\n", tlvs_offset, nan_opts_len));
 		xtlv_opt = BCM_IOV_CMD_OPT_ALIGN_NONE;
 		break;
 	}
@@ -11930,8 +11954,8 @@ wl_cfgnan_notify_nan_status(struct bcm_cfg80211 *cfg,
 			bs_entry = wl_cfgnan_add_bootstrapping_entry(cfg,
 					(struct ether_addr *)cfg->nancfg->nan_nmi_mac,
 					&nan_event_data->remote_nmi, NAN_PAIRING_BS_ROLE_RESPONDER,
-					nan_event_data->requestor_id,
 					nan_event_data->local_inst_id,
+					nan_event_data->requestor_id,
 					&nan_event_data->npba_info);
 			if (bs_entry == NULL) {
 				WL_ERR(("Could not add BS cache entry for BS REQ event \n"));

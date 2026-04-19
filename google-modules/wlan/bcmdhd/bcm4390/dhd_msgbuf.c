@@ -6387,6 +6387,12 @@ int dhd_sync_with_dongle(dhd_pub_t *dhd)
 	}
 	DHD_PRINT(("%s: GET_REVINFO device 0x%x, vendor 0x%x, chipnum 0x%x\n", __FUNCTION__,
 		revinfo.deviceid, revinfo.vendorid, revinfo.chipnum));
+	if (((revinfo.deviceid == 0U) || (revinfo.deviceid == 0xFFFFFFFFU)) ||
+		((revinfo.vendorid == 0U) || (revinfo.vendorid == 0xFFFFFFFFU)) ||
+		((revinfo.chipnum  == 0U) || (revinfo.chipnum  == 0xFFFFFFFFU))) {
+		DHD_ERROR(("%s: revinfo returned invalid values\n", __FUNCTION__));
+		goto done;
+	}
 
 	DHD_SSSR_DUMP_INIT(dhd);
 
@@ -6414,8 +6420,9 @@ int dhd_sync_with_dongle(dhd_pub_t *dhd)
 				DHD_ERROR(("%s: rxbufpost_sz memcpy failed\n", __FUNCTION__));
 			}
 
-			if (prot->rxbufpost_sz > DHD_FLOWRING_RX_BUFPOST_PKTSZ_MAX) {
-				DHD_ERROR(("%s: Invalid RxBuf post size : %d, default to %d\n",
+			if ((prot->rxbufpost_sz == 0) ||
+				(prot->rxbufpost_sz > DHD_FLOWRING_RX_BUFPOST_PKTSZ_MAX)) {
+				DHD_ERROR(("%s: invalid RxBuf post size : %d, default to %d\n",
 					__FUNCTION__, prot->rxbufpost_sz,
 					DHD_FLOWRING_RX_BUFPOST_PKTSZ));
 				prot->rxbufpost_sz = DHD_FLOWRING_RX_BUFPOST_PKTSZ;
@@ -10593,6 +10600,10 @@ BCMFASTPATH(dhd_prot_txdata)(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 	if (art_pkt) {
 		pktdata = PKTPULL(dhd->osh, PKTBUF, TXPOST_EXT_ART_HDR_LEN);
 		pktlen  = PKTLEN(dhd->osh, PKTBUF);
+		/* Set HOST SFH LLC flag in the Tx descriptor */
+		if (host_sfh_llc_reqd) {
+			txdesc->flags |= BCMPCIE_TXPOST_FLAGS_HOST_SFH_LLC;
+		}
 	} else
 #endif /* DHD_ART */
 #ifdef DHD_LLC
@@ -12999,21 +13010,9 @@ BCMFASTPATH(dhd_prot_alloc_ring_space)(dhd_pub_t *dhd, msgbuf_ring_t *ring,
 	uint16 nitems, uint16 *alloced, bool exactly_nitems)
 {
 	void *ret_buf;
-	sh_addr_t base_addr;
 
 	if (nitems == 0) {
 		DHD_ERROR(("%s: nitems is 0 - ring(%s)\n", __FUNCTION__, ring->name));
-		return NULL;
-	}
-	/* sanity check */
-	if (!DHD_VIRT_ADDR_VALID(ring)) {
-		DHD_ERROR(("%s() ring virtual address is invalid\n", __FUNCTION__));
-		return NULL;
-	}
-	/* compare the saved physical address in ring sanity for memory corruption */
-	dhd_base_addr_htolpa(&base_addr, ring->dma_buf.pa);
-	if (memcmp(&base_addr, &ring->base_addr, sizeof(sh_addr_t)) != 0) {
-		DHD_ERROR(("%s() ring base_addr and dma_buf.pa did not match\n", __FUNCTION__));
 		return NULL;
 	}
 

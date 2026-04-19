@@ -16,6 +16,7 @@
 		pinctrl-0 = <&keyfps2aoc_ap_int_l>;
 		fp-gpio-irq = <&cpm_pinctrl XCPM_EINT_13 GPIO_ACTIVE_LOW>;
 		fp-gpio-reset = <&lsioe_pinctrl XLSIOE_CLI7_PIN2 GPIO_ACTIVE_LOW>;
+		spi-gpio-provider = <&lsios_pinctrl>;
 	};
 };
 

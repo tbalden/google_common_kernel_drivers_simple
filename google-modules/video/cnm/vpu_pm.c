@@ -186,16 +186,15 @@ static int vpu_sleep_wakeup(struct vpu_core *core, bool is_sleep)
 static int vpu_wait_interrupt(struct vpu_core *core, uint32_t *reason)
 {
 	int rc;
-	struct vpu_intr_queue *intr_queue;
+	struct vpu_intr_queue *intr_queue = &core->intr_queue;
 	uint32_t num;
 
-	intr_queue = vpu_get_intr_queue(core, VPU_NO_INST);
-	if (!intr_queue)
-		return -EINVAL;
-
-	rc = wait_event_interruptible_timeout(intr_queue->wq,
-					kfifo_len(&intr_queue->intr_pending_q),
-					msecs_to_jiffies(VPU_BUSY_CHECK_TIMEOUT));
+	/* b/446005383#comment5 this wait can't be interrupted as we need
+	 * vpu to stop either by sleep command or waiting for a while here
+	 */
+	rc = wait_event_timeout(intr_queue->wq,
+			kfifo_len(&intr_queue->intr_pending_q),
+			msecs_to_jiffies(VPU_BUSY_CHECK_TIMEOUT));
 	if (!rc) {
 		dev_warn(core->dev, "timed out waiting for interrupt\n");
 		return -ETIMEDOUT;
@@ -205,7 +204,7 @@ static int vpu_wait_interrupt(struct vpu_core *core, uint32_t *reason)
 						sizeof(u32), &intr_queue->kfifo_lock);
 
 	if (num <= 0) {
-		dev_warn(core->dev, "unknown error occurred\n");
+		dev_warn(core->dev, "no entry in fifo queue\n");
 		*reason = 0;
 		return -EINTR;
 	}

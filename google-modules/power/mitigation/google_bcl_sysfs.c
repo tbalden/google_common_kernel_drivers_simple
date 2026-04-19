@@ -1105,6 +1105,36 @@ static ssize_t uvlo2_lvl_store(struct device *dev,
 
 static DEVICE_ATTR_RW(uvlo2_lvl);
 
+static int check_batoilo_threshold_range(struct bcl_device *bcl_dev, int idx, int value)
+{
+
+	int batoilo_lower_limit, batoilo_upper_limit;
+
+	if (idx != BATOILO1 && idx != BATOILO2)
+		return -EINVAL;
+
+	if (!bcl_dev->zone[idx])
+		return -EIO;
+
+	if (idx == BATOILO1) {
+		batoilo_lower_limit = bcl_dev->batt_irq_conf1.batoilo_lower_limit;
+		batoilo_upper_limit = bcl_dev->batt_irq_conf1.batoilo_upper_limit;
+	} else {
+		batoilo_lower_limit = bcl_dev->batt_irq_conf2.batoilo_lower_limit;
+		batoilo_upper_limit = bcl_dev->batt_irq_conf2.batoilo_upper_limit;
+	}
+
+	if (value < batoilo_lower_limit || value > batoilo_upper_limit) {
+		dev_err(bcl_dev->device, "zone %d: %d outside of range %d - %d mA.",
+			idx,
+			value,
+			batoilo_lower_limit, batoilo_upper_limit);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static ssize_t batoilo_lvl_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
@@ -1134,17 +1164,10 @@ static ssize_t batoilo_lvl_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	if (!bcl_dev)
-		return -EIO;
-	if (!bcl_dev->zone[BATOILO1])
-		return -EIO;
-	if (value < bcl_dev->batt_irq_conf1.batoilo_lower_limit ||
-	    value > bcl_dev->batt_irq_conf1.batoilo_upper_limit) {
-		dev_err(bcl_dev->device, "BATOILO1 %d outside of range %d - %d mA.", value,
-			bcl_dev->batt_irq_conf1.batoilo_lower_limit,
-			bcl_dev->batt_irq_conf1.batoilo_upper_limit);
-		return -EINVAL;
-	}
+	ret = check_batoilo_threshold_range(bcl_dev, BATOILO1, value);
+	if (ret)
+		return ret;
+
 	lvl = (value - bcl_dev->batt_irq_conf1.batoilo_lower_limit) / BO_STEP;
 	ret = batoilo_reg_write(bcl_dev->intf_pmic_dev, lvl, bcl_dev->ifpmic, BATOILO1);
 	if (ret)
@@ -1153,6 +1176,88 @@ static ssize_t batoilo_lvl_store(struct device *dev,
 }
 
 static DEVICE_ATTR_RW(batoilo_lvl);
+
+static ssize_t batoilo_usb_lvl_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	unsigned int lvl_mA;
+
+	if (!bcl_dev->zone[BATOILO1])
+		return -EIO;
+	if (!bcl_dev->intf_pmic_dev)
+		return -EBUSY;
+
+	lvl_mA = BO_STEP * bcl_dev->batt_irq_conf1.batoilo_usb_trig_lvl +
+		bcl_dev->batt_irq_conf1.batoilo_lower_limit;
+
+	return sysfs_emit(buf, "%umA\n", lvl_mA);
+}
+
+static ssize_t batoilo_usb_lvl_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	unsigned int value;
+	int ret;
+
+	ret = kstrtou32(buf, 10, &value);
+	if (ret)
+		return ret;
+
+	ret = check_batoilo_threshold_range(bcl_dev, BATOILO1, value);
+	if (ret)
+		return ret;
+
+	bcl_dev->batt_irq_conf1.batoilo_usb_trig_lvl =
+		(value - bcl_dev->batt_irq_conf1.batoilo_lower_limit) / BO_STEP;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo_usb_lvl);
+
+static ssize_t batoilo_wlc_lvl_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	unsigned int lvl_mA;
+
+	if (!bcl_dev->zone[BATOILO1])
+		return -EIO;
+	if (!bcl_dev->intf_pmic_dev)
+		return -EBUSY;
+
+	lvl_mA = BO_STEP * bcl_dev->batt_irq_conf1.batoilo_wlc_trig_lvl +
+		bcl_dev->batt_irq_conf1.batoilo_lower_limit;
+
+	return sysfs_emit(buf, "%umA\n", lvl_mA);
+}
+
+static ssize_t batoilo_wlc_lvl_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	unsigned int value;
+	int ret;
+
+	ret = kstrtou32(buf, 10, &value);
+	if (ret)
+		return ret;
+
+	ret = check_batoilo_threshold_range(bcl_dev, BATOILO1, value);
+	if (ret)
+		return ret;
+
+	bcl_dev->batt_irq_conf1.batoilo_wlc_trig_lvl =
+		(value - bcl_dev->batt_irq_conf1.batoilo_lower_limit) / BO_STEP;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo_wlc_lvl);
 
 static ssize_t batoilo2_lvl_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -1183,17 +1288,10 @@ static ssize_t batoilo2_lvl_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	if (!bcl_dev)
-		return -EIO;
-	if (!bcl_dev->zone[BATOILO2])
-		return -EIO;
-	if (value < bcl_dev->batt_irq_conf2.batoilo_lower_limit ||
-	    value > bcl_dev->batt_irq_conf2.batoilo_upper_limit) {
-		dev_err(bcl_dev->device, "BATOILO2 %d outside of range %d - %d mA.", value,
-			bcl_dev->batt_irq_conf2.batoilo_lower_limit,
-			bcl_dev->batt_irq_conf2.batoilo_upper_limit);
-		return -EINVAL;
-	}
+	ret = check_batoilo_threshold_range(bcl_dev, BATOILO2, value);
+	if (ret)
+		return ret;
+
 	lvl = (value - bcl_dev->batt_irq_conf2.batoilo_lower_limit) / BO_STEP;
 	ret = batoilo_reg_write(bcl_dev->intf_pmic_dev, lvl, bcl_dev->ifpmic, BATOILO2);
 	if (ret)
@@ -1202,6 +1300,88 @@ static ssize_t batoilo2_lvl_store(struct device *dev,
 }
 
 static DEVICE_ATTR_RW(batoilo2_lvl);
+
+static ssize_t batoilo2_usb_lvl_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	unsigned int lvl_mA;
+
+	if (!bcl_dev->zone[BATOILO2])
+		return -EIO;
+	if (!bcl_dev->intf_pmic_dev)
+		return -EBUSY;
+
+	lvl_mA = BO_STEP * bcl_dev->batt_irq_conf2.batoilo_usb_trig_lvl +
+		bcl_dev->batt_irq_conf2.batoilo_lower_limit;
+
+	return sysfs_emit(buf, "%umA\n", lvl_mA);
+}
+
+static ssize_t batoilo2_usb_lvl_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	unsigned int value;
+	int ret;
+
+	ret = kstrtou32(buf, 10, &value);
+	if (ret)
+		return ret;
+
+	ret = check_batoilo_threshold_range(bcl_dev, BATOILO2, value);
+	if (ret)
+		return ret;
+
+	bcl_dev->batt_irq_conf2.batoilo_usb_trig_lvl =
+		(value - bcl_dev->batt_irq_conf2.batoilo_lower_limit) / BO_STEP;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo2_usb_lvl);
+
+static ssize_t batoilo2_wlc_lvl_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	unsigned int lvl_mA;
+
+	if (!bcl_dev->zone[BATOILO2])
+		return -EIO;
+	if (!bcl_dev->intf_pmic_dev)
+		return -EBUSY;
+
+	lvl_mA = BO_STEP * bcl_dev->batt_irq_conf2.batoilo_wlc_trig_lvl +
+		bcl_dev->batt_irq_conf2.batoilo_lower_limit;
+
+	return sysfs_emit(buf, "%umA\n", lvl_mA);
+}
+
+static ssize_t batoilo2_wlc_lvl_store(struct device *dev,
+				  struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct bcl_device *bcl_dev = platform_get_drvdata(pdev);
+	unsigned int value;
+	int ret;
+
+	ret = kstrtou32(buf, 10, &value);
+	if (ret)
+		return ret;
+
+	ret = check_batoilo_threshold_range(bcl_dev, BATOILO2, value);
+	if (ret)
+		return ret;
+
+	bcl_dev->batt_irq_conf2.batoilo_wlc_trig_lvl =
+		(value - bcl_dev->batt_irq_conf2.batoilo_lower_limit) / BO_STEP;
+
+	return size;
+}
+
+static DEVICE_ATTR_RW(batoilo2_wlc_lvl);
 
 static ssize_t smpl_lvl_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -1514,7 +1694,11 @@ static struct attribute *triggered_lvl_attrs[] = {
 	&dev_attr_uvlo1_lvl.attr,
 	&dev_attr_uvlo2_lvl.attr,
 	&dev_attr_batoilo_lvl.attr,
+	&dev_attr_batoilo_usb_lvl.attr,
+	&dev_attr_batoilo_wlc_lvl.attr,
 	&dev_attr_batoilo2_lvl.attr,
+	&dev_attr_batoilo2_usb_lvl.attr,
+	&dev_attr_batoilo2_wlc_lvl.attr,
 	&dev_attr_smpl_lvl.attr,
 	&dev_attr_ocp_cpu1_lvl.attr,
 	&dev_attr_ocp_cpu2_lvl.attr,

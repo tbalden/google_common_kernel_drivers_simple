@@ -63,6 +63,7 @@ static const struct drm_ioctl_desc vs_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(VS_GET_HW_CAP, vs_get_hw_cap_ioctl, DRM_MASTER),
 	DRM_IOCTL_DEF_DRV(VS_GET_HIST_BINS, vs_get_hist_bins_query_ioctl, DRM_MASTER),
 	DRM_IOCTL_DEF_DRV(VS_GET_LTM_HIST, vs_get_ltm_hist_ioctl, DRM_MASTER),
+	DRM_IOCTL_DEF_DRV(VS_TASK_FENCE, vs_task_fence_ioctl, DRM_MASTER),
 };
 
 static void vs_drm_lastclose(struct drm_device *dev)
@@ -208,21 +209,21 @@ static int drm_state_history_show(struct seq_file *s, void *data)
 
 static int drm_state_history_open(struct inode *inode, struct file *file)
 {
-	struct drm_state_history_record *sh_record = inode->i_private;
+	struct drm_device *drm_dev = inode->i_private;
 	size_t total_dump_size = 0;
 	int num_logged_states;
 	char state_header[] = "State # -XX\n";
 	struct drm_state_history_data *sh_data = vzalloc(sizeof(struct drm_state_history_data));
 	int i;
 
-	if (!sh_record)
+	if (!drm_dev)
 		return -EINVAL;
 	if (!sh_data)
 		return -ENOMEM;
 	file->private_data = sh_data;
 
 	/* Alloc and fill drm state logs */
-	num_logged_states = vs_drm_recorded_states_prepare(sh_data, sh_record);
+	num_logged_states = vs_drm_recorded_states_prepare(sh_data, drm_dev);
 	if (num_logged_states <= 0)
 		return 0;
 
@@ -260,14 +261,12 @@ static int drm_debugfs_add_custom_entries(struct drm_device *drm_dev)
 {
 #if IS_ENABLED(CONFIG_VERISILICON_RECORD_DRM_STATE)
 	struct dentry *debugfs_root = drm_dev->primary->debugfs_root;
-	struct vs_drm_private *priv = drm_dev->dev_private;
 
 	/*
 	 * Ideally, we would not directly access the debugfs root like this,
 	 * but it is necessary to add custom fops to the file
 	 */
-	debugfs_create_file("state_history", 0444, debugfs_root, priv->sh_record,
-			    &drm_state_history_fops);
+	debugfs_create_file("state_history", 0444, debugfs_root, drm_dev, &drm_state_history_fops);
 #endif /* CONFIG_VERISILICON_RECORD_DRM_STATE */
 
 	return 0;
@@ -319,7 +318,7 @@ static int vs_drm_bind(struct device *dev)
 
 	drm_kms_helper_poll_init(drm_dev);
 
-	ret = vs_drm_prepare_state_history_record(&priv->sh_record);
+	ret = vs_drm_prepare_state_history_record(drm_dev);
 	if (ret)
 		goto err_helper;
 
@@ -335,7 +334,7 @@ static int vs_drm_bind(struct device *dev)
 	return 0;
 
 err_state_history:
-	vs_drm_destroy_state_history_record(priv->sh_record);
+	vs_drm_destroy_state_history_record(drm_dev);
 err_helper:
 	drm_kms_helper_poll_fini(drm_dev);
 err_bind:
@@ -352,11 +351,10 @@ err_put_dev:
 static void vs_drm_unbind(struct device *dev)
 {
 	struct drm_device *drm_dev = dev_get_drvdata(dev);
-	struct vs_drm_private *priv = drm_dev->dev_private;
 
 	drm_dev_unregister(drm_dev);
 
-	vs_drm_destroy_state_history_record(priv->sh_record);
+	vs_drm_destroy_state_history_record(drm_dev);
 
 	drm_kms_helper_poll_fini(drm_dev);
 

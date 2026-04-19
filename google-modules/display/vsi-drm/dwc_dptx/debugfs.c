@@ -1904,65 +1904,12 @@ void dptx_debugfs_init(struct dptx *dptx)
 		debugfs_remove_recursive(root);
 		return;
 	}
-	dptx->regset[CLKMGR] = kzalloc(sizeof(*dptx->regset[CLKMGR]), GFP_KERNEL);
-	if (!dptx->regset[CLKMGR]) {
-		debugfs_remove_recursive(root);
-		return;
-	}
-	dptx->regset[AG] = kzalloc(sizeof(*dptx->regset[AG]), GFP_KERNEL);
-	if (!dptx->regset[AG]) {
-		debugfs_remove_recursive(root);
-		return;
-	}
-	dptx->regset[VG] = kzalloc(sizeof(*dptx->regset[VG]), GFP_KERNEL);
-	if (!dptx->regset[VG]) {
-		debugfs_remove_recursive(root);
-		return;
-	}
-
-	dptx->regset[SETUPID] = kzalloc(sizeof(*dptx->regset[SETUPID]), GFP_KERNEL);
-	if (!dptx->regset[SETUPID]) {
-		debugfs_remove_recursive(root);
-		return;
-	}
-
-	dptx->regset[PHYIF] = kzalloc(sizeof(*dptx->regset[PHYIF]), GFP_KERNEL);
-	if (!dptx->regset[PHYIF]) {
-		debugfs_remove_recursive(root);
-		return;
-	}
-
 
 	dptx->regset[DPTX]->regs = dptx_regs;
 	dptx->regset[DPTX]->nregs = dptx_regs_size;
 	dptx->regset[DPTX]->base = dptx->base[DPTX];
-	//Clkmng Regset
-	dptx->regset[CLKMGR]->regs = clkmng_regs;
-	dptx->regset[CLKMGR]->nregs = clkmng_regs_size;
-	dptx->regset[CLKMGR]->base = dptx->base[CLKMGR];
-	//Audio Bridge Regset
-	dptx->regset[AG]->regs = audiogen_regs;
-	dptx->regset[AG]->nregs = audiogen_regs_size;
-	dptx->regset[AG]->base = dptx->base[AG];
-	//Video Bridge Regset
-	dptx->regset[VG]->regs = videogen_regs;
-	dptx->regset[VG]->nregs = videogen_regs_size;
-	dptx->regset[VG]->base = dptx->base[VG];
-	//Setup ID Regset
-	dptx->regset[SETUPID]->regs = setupid_regs;
-	dptx->regset[SETUPID]->nregs = setupid_regs_size;
-	dptx->regset[SETUPID]->base = dptx->base[SETUPID];
-	//PHY Interface Regset
-	dptx->regset[PHYIF]->regs = phyif_regs;
-	dptx->regset[PHYIF]->nregs = phyif_regs_size;
-	dptx->regset[PHYIF]->base = dptx->base[PHYIF];
 
 	debugfs_create_regset32("regdump", 0444, root, dptx->regset[DPTX]);
-	debugfs_create_regset32("regdump", 0444, clk_mng, dptx->regset[CLKMGR]);
-	debugfs_create_regset32("regdump", 0444, audio_gen, dptx->regset[AG]);
-	debugfs_create_regset32("regdump", 0444, video_gen, dptx->regset[VG]);
-	debugfs_create_regset32("regdump", 0444, setup_id, dptx->regset[SETUPID]);
-	debugfs_create_regset32("regdump", 0444, phy, dptx->regset[PHYIF]);
 
 	/* Global Reset */
 	file = debugfs_create_file("Global_Reset", 0644, root, dptx,
@@ -2275,56 +2222,22 @@ static const struct debugfs_reg32 dptx_regs[] = {
 	{ .name = "CCTL", .offset = CCTL, },
 	{ .name = "SOFT_RESET_CTRL", .offset = SOFT_RESET_CTRL, },
 
-	{ .name = "MST_VCP_TABLE_0", .offset = DPTX_MST_VCP_TABLE_REG_N(0), },
-	{ .name = "MST_VCP_TABLE_1", .offset = DPTX_MST_VCP_TABLE_REG_N(1), },
-	{ .name = "MST_VCP_TABLE_2", .offset = DPTX_MST_VCP_TABLE_REG_N(2), },
-	{ .name = "MST_VCP_TABLE_3", .offset = DPTX_MST_VCP_TABLE_REG_N(3), },
-	{ .name = "MST_VCP_TABLE_4", .offset = DPTX_MST_VCP_TABLE_REG_N(4), },
-	{ .name = "MST_VCP_TABLE_5", .offset = DPTX_MST_VCP_TABLE_REG_N(5), },
-	{ .name = "MST_VCP_TABLE_6", .offset = DPTX_MST_VCP_TABLE_REG_N(6), },
-	{ .name = "MST_VCP_TABLE_7", .offset = DPTX_MST_VCP_TABLE_REG_N(7), },
-
+	{ .name = "VSAMPLE_CTRL", .offset = VSAMPLE_CTRL, },
+	{ .name = "VINPUT_POLARITY_CTRL", .offset = VINPUT_POLARITY_CTRL, },
 	{ .name = "VIDEO_CONFIG1_STREAM_0", .offset = DPTX_VIDEO_CONFIG1_N(0), },
 	{ .name = "VIDEO_CONFIG2_STREAM_0", .offset = DPTX_VIDEO_CONFIG2_N(0), },
 	{ .name = "VIDEO_CONFIG3_STREAM_0", .offset = DPTX_VIDEO_CONFIG3_N(0), },
 	{ .name = "VIDEO_CONFIG4_STREAM_0", .offset = DPTX_VIDEO_CONFIG4_N(0), },
 	{ .name = "VIDEO_CONFIG5_STREAM_0", .offset = DPTX_VIDEO_CONFIG5_N(0), },
 
-	{ .name = "VIDEO_CONFIG1_STREAM_1", .offset = DPTX_VIDEO_CONFIG1_N(1), },
-	{ .name = "VIDEO_CONFIG2_STREAM_1", .offset = DPTX_VIDEO_CONFIG2_N(1), },
-	{ .name = "VIDEO_CONFIG3_STREAM_1", .offset = DPTX_VIDEO_CONFIG3_N(1), },
-	{ .name = "VIDEO_CONFIG4_STREAM_1", .offset = DPTX_VIDEO_CONFIG4_N(1), },
-	{ .name = "VIDEO_CONFIG5_STREAM_1", .offset = DPTX_VIDEO_CONFIG5_N(1), },
-
-	{ .name = "VIDEO_CONFIG1_STREAM_2", .offset = DPTX_VIDEO_CONFIG1_N(2), },
-	{ .name = "VIDEO_CONFIG2_STREAM_2", .offset = DPTX_VIDEO_CONFIG2_N(2), },
-	{ .name = "VIDEO_CONFIG3_STREAM_2", .offset = DPTX_VIDEO_CONFIG3_N(2), },
-	{ .name = "VIDEO_CONFIG4_STREAM_2", .offset = DPTX_VIDEO_CONFIG4_N(2), },
-	{ .name = "VIDEO_CONFIG5_STREAM_2", .offset = DPTX_VIDEO_CONFIG5_N(2), },
-
-	{ .name = "VIDEO_CONFIG1_STREAM_3", .offset = DPTX_VIDEO_CONFIG1_N(3), },
-	{ .name = "VIDEO_CONFIG2_STREAM_3", .offset = DPTX_VIDEO_CONFIG2_N(3), },
-	{ .name = "VIDEO_CONFIG3_STREAM_3", .offset = DPTX_VIDEO_CONFIG3_N(3), },
-	{ .name = "VIDEO_CONFIG4_STREAM_3", .offset = DPTX_VIDEO_CONFIG4_N(3), },
-	{ .name = "VIDEO_CONFIG5_STREAM_3", .offset = DPTX_VIDEO_CONFIG5_N(3), },
-
-	{ .name = "AUD_CONFIG1", .offset = AUD_CONFIG1, },
-
 	{ .name = "VIDEO_MSA1_STREAM_0", .offset = DPTX_VIDEO_MSA1_N(0), },
 	{ .name = "VIDEO_MSA2_STREAM_0", .offset = DPTX_VIDEO_MSA2_N(0), },
 	{ .name = "VIDEO_MSA3_STREAM_0", .offset = DPTX_VIDEO_MSA3_N(0), },
+	{ .name = "VIDEO_HBLANK_INTERVAL", .offset = VIDEO_HBLANK_INTERVAL, },
 
-	{ .name = "VIDEO_MSA1_STREAM_1", .offset = DPTX_VIDEO_MSA1_N(1), },
-	{ .name = "VIDEO_MSA2_STREAM_1", .offset = DPTX_VIDEO_MSA2_N(1), },
-	{ .name = "VIDEO_MSA3_STREAM_1", .offset = DPTX_VIDEO_MSA3_N(1), },
-
-	{ .name = "VIDEO_MSA1_STREAM_2", .offset = DPTX_VIDEO_MSA1_N(2), },
-	{ .name = "VIDEO_MSA2_STREAM_2", .offset = DPTX_VIDEO_MSA2_N(2), },
-	{ .name = "VIDEO_MSA3_STREAM_2", .offset = DPTX_VIDEO_MSA3_N(2), },
-
-	{ .name = "VIDEO_MSA1_STREAM_3", .offset = DPTX_VIDEO_MSA1_N(3), },
-	{ .name = "VIDEO_MSA2_STREAM_3", .offset = DPTX_VIDEO_MSA2_N(3), },
-	{ .name = "VIDEO_MSA3_STREAM_3", .offset = DPTX_VIDEO_MSA3_N(3), },
+	{ .name = "MVID_CONFIG1", .offset = MVID_CONFIG1, },
+	{ .name = "MVID_CONFIG2", .offset = MVID_CONFIG2, },
+	{ .name = "AUD_CONFIG1", .offset = AUD_CONFIG1, },
 
 	{ .name = "PHYIF_CTRL", .offset = PHYIF_CTRL, },
 	{ .name = "PHY_TX_EQ", .offset = PHY_TX_EQ, },

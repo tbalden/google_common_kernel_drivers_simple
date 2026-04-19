@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_module", "ddk_uapi_headers", "kernel_module_group")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_module", "ddk_uapi_headers", "kernel_module_group")
 
 checkpatch(
     name = "checkpatch",

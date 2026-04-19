@@ -69,7 +69,7 @@
 				google,bd-trigger-voltage = <4270000>;
 				google,bd-recharge-voltage = <4250000>;
 				google,bd-drainto-soc = <80>;
-				google,bd-recharge-soc = <79>;
+				google,bd-recharge-soc = <77>;
 				/* Enable TEMP-DEFEND */
 				google,bd-temp-enable;
 

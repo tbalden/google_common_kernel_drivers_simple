@@ -218,6 +218,8 @@ static ssize_t trigger_uevent_write(struct file *file,
 	if (sscanf(str, "%u %u", &evt.type, &evt.info) != 2)
 		return -EINVAL;
 
+	evt.uid = OSGetCurrentApplicationUID();
+
 	gpu_uevent_send(pixel_dev, &evt);
 
 	return count;

@@ -16,6 +16,7 @@
 #include "google_powercap_devfreq.h"
 #include "google_powercap_helper.h"
 #include "google_powercap_helper_mock.h"
+#include "powercap_voltage_match_algo.h"
 
 #define GPC_TEST_OPP_CT		3
 #define GPC_FREQ_INIT		300000
@@ -28,10 +29,28 @@
 #define GPC_MOCK_POWER_UW	1000005
 #define GPC_TEST_CPU		0
 #define GPC_TEST_CPU_MAX	4
+#define GPC_VOLT_ALGO_CHILD_CT 2
 
 struct powercap_test_data {
 	struct gpowercap gpc;
 };
+
+/* Voltage Match Algo Tests */
+struct powercap_volt_algo_test_data {
+	struct gpowercap parent_gpc;
+	struct gpowercap children_gpc[GPC_VOLT_ALGO_CHILD_CT];
+};
+
+struct powercap_volt_algo_platform_data {
+	const void *freq_table;
+	unsigned int num_opps;
+	unsigned int num_children;
+};
+
+static struct powercap_volt_algo_test_data *volt_algo_test_data;
+static u64 children_power_limit[GPC_VOLT_ALGO_CHILD_CT];
+static u64 children_get_power_val[GPC_VOLT_ALGO_CHILD_CT];
+static int children_get_power_ret[GPC_VOLT_ALGO_CHILD_CT];
 
 static struct cdev_opp_table *opp_table;
 static struct powercap_test_data *test_data;
@@ -51,7 +70,30 @@ static bool gpc_register_called;
 static struct powercap_control_type *pct_test;
 static struct powercap_zone pc_zone_test;
 static struct gpowercap *virt_node, *leaf_node;
+static struct device_node mock_np;
+static int of_find_node_ret;
+static bool of_node_put_called;
 static struct cpufreq_policy *test_policy;
+
+static unsigned int gpc_volt_algo_children_freq[][GPC_VOLT_ALGO_CHILD_CT] = {
+	{ 300000, 300000 },
+	{ 800000, 800000 },
+	{ 1300000, 1300000 },
+};
+
+static const struct powercap_volt_algo_platform_data gpc_volt_algo_test_pdata = {
+	.freq_table = gpc_volt_algo_children_freq,
+	.num_opps = ARRAY_SIZE(gpc_volt_algo_children_freq),
+	.num_children = GPC_VOLT_ALGO_CHILD_CT,
+};
+
+static const struct of_device_id powercap_volt_algo_test_match_data[] = {
+	{
+		.compatible = "google,lga-rango",
+		.data = &gpc_volt_algo_test_pdata,
+	},
+	{}
+};
 
 static struct gpowercap_node gpc_test_tree[GPC_TREE_NODE_CT] = {
 	[0] { .name = "soc",
@@ -75,6 +117,15 @@ static struct of_device_id powercap_test_match_data[] = {
 
 static u64 gpc_test_set_power_uw(struct gpowercap *gpc, u64 power_uw)
 {
+	int i;
+
+	for (i = 0; i < GPC_VOLT_ALGO_CHILD_CT; i++) {
+		if (gpc == &volt_algo_test_data->children_gpc[i]) {
+			children_power_limit[i] = power_uw;
+			return power_uw;
+		}
+	}
+
 	power_limit_uw = power_uw;
 
 	return power_limit_uw;
@@ -82,11 +133,24 @@ static u64 gpc_test_set_power_uw(struct gpowercap *gpc, u64 power_uw)
 
 static u64 gpc_test_get_power_uw(struct gpowercap *gpc)
 {
+	int i;
+
+	for (i = 0; i < GPC_VOLT_ALGO_CHILD_CT; i++) {
+		if (gpc == &volt_algo_test_data->children_gpc[i]) {
+			gpc->num_opps = children_get_power_ret[i] ? 0 : GPC_TEST_OPP_CT;
+			return children_get_power_val[i];
+		}
+	}
+
 	return GPC_MOCK_POWER_UW;
 }
 
 static int gpc_test_update_power_uw(struct gpowercap *gpc)
 {
+	if (gpc == &volt_algo_test_data->children_gpc[0] ||
+	    gpc == &volt_algo_test_data->children_gpc[1])
+		return 0;
+
 	gpc->power_min = opp_table[0].power;
 	gpc->power_max = opp_table[GPC_TEST_OPP_CT - 1].power;
 	gpc->num_opps = GPC_TEST_OPP_CT;
@@ -97,6 +161,11 @@ static int gpc_test_update_power_uw(struct gpowercap *gpc)
 
 static void gpc_test_release(struct gpowercap *gpc)
 {
+	if (gpc == &volt_algo_test_data->children_gpc[0] ||
+	    gpc == &volt_algo_test_data->children_gpc[1])
+		return;
+
+	gpowercap_unregister(gpc);
 	gpc_release_called = true;
 }
 
@@ -110,7 +179,19 @@ static struct gpowercap_ops test_ops = {
 const struct of_device_id *mock_match_of_node(const struct of_device_id *matches,
 					 const struct device_node *node)
 {
+	if (node == &mock_np) // voltage match algo node.
+		return (match_node_ret) ? NULL : powercap_volt_algo_test_match_data;
 	return (match_node_ret) ? NULL : powercap_test_match_data;
+}
+
+struct device_node *mock_of_find_node_by_path(const char *path)
+{
+	return of_find_node_ret ? NULL : &mock_np;
+}
+
+void mock_of_node_put(struct device_node *np)
+{
+	of_node_put_called = true;
 }
 
 static struct gpowercap *gpc_alloc_and_create_node(const char *name, struct gpowercap *parent,
@@ -136,21 +217,26 @@ static struct gpowercap *gpc_alloc_and_create_node(const char *name, struct gpow
 struct gpowercap *gpc_test_setup(const struct gpowercap_node *hierarchy,
 				 struct gpowercap *parent)
 {
+	char zone_name[25] = "";
+
 	gpc_setup_ct++;
 	if (virt_setup_ret)
 		return ERR_PTR(virt_setup_ret);
 
-	virt_node = gpc_alloc_and_create_node(hierarchy->name, parent, NULL);
+	snprintf(zone_name, sizeof(zone_name), "%s", hierarchy->name);
+	virt_node = gpc_alloc_and_create_node(zone_name, parent, NULL);
 	return virt_node;
 }
 
 int gpc_test_setup_dt(struct gpowercap *parent, struct device_node *np, enum hw_dev_type cdev_id)
 {
+	char zone_name[25] = "leaf_node";
+
 	gpc_setup_dt_ct++;
 	if (setup_ret)
 		return setup_ret;
 
-	leaf_node = gpc_alloc_and_create_node("leaf_node", parent, &test_ops);
+	leaf_node = gpc_alloc_and_create_node(zone_name, parent, &test_ops);
 	return 0;
 }
 
@@ -382,7 +468,8 @@ static void powercap_setup_virtual_test(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, __gpowercap_create_hierarchy(powercap_test_match_data), 0);
 	ret = __gpowercap_setup_virtual(&new_node, virt_node);
 	KUNIT_EXPECT_NOT_ERR_OR_NULL(test, ret);
-	gpowercap_unregister(ret);
+	if (ret)
+		gpowercap_unregister(ret);
 
 	reg_zone_ret = -ENODEV;
 	ret = __gpowercap_setup_virtual(&new_node, NULL);
@@ -396,21 +483,18 @@ static void powercap_gpc_register_and_ops_test(struct kunit *test)
 	char *buf = kunit_kzalloc(test, PAGE_SIZE, GFP_KERNEL);
 	u64 power_limit;
 
-	gpowercap_init(&data->gpc, NULL);
-	//No control type.
+	gpowercap_init(&data->gpc, &test_ops);
+	// No control type.
 	KUNIT_EXPECT_EQ(test, __gpowercap_register("test", &data->gpc, NULL), -EAGAIN);
 
 	KUNIT_EXPECT_EQ(test, __gpowercap_create_hierarchy(powercap_test_match_data), 0);
 	// Root already exists.
 	KUNIT_EXPECT_EQ(test, __gpowercap_register("test", &data->gpc, NULL), -EBUSY);
 
-	// parent has ops
-	gpowercap_init(&data->gpc, &test_ops);
-	KUNIT_EXPECT_EQ(test, __gpowercap_register("test", virt_node, &data->gpc), -EINVAL);
 	// NULL gpc node.
 	KUNIT_EXPECT_EQ(test, __gpowercap_register("test", NULL, virt_node), -EINVAL);
 	test_ops.release = NULL;
-	//Invalid ops
+	// Invalid ops
 	KUNIT_EXPECT_EQ(test, __gpowercap_register("test", &data->gpc, virt_node), -EINVAL);
 	test_ops.release = gpc_test_release;
 
@@ -452,14 +536,14 @@ static void powercap_gpc_register_and_ops_test(struct kunit *test)
 					  &leaf_node->flags));
 	KUNIT_EXPECT_EQ(test, power_limit_uw, opp_table[0].power);
 
-	//get power.
+	// get power.
 	KUNIT_EXPECT_EQ(test, __get_power_uw(leaf_node, &power_limit), 0);
 	KUNIT_EXPECT_EQ(test, power_limit, GPC_MOCK_POWER_UW);
 	power_limit = 0;
 	KUNIT_EXPECT_EQ(test, __get_power_uw(virt_node, &power_limit), 0);
 	KUNIT_EXPECT_EQ(test, power_limit, GPC_MOCK_POWER_UW);
 
-	//Test sub/add power.
+	// Test sub/add power.
 	__gpowercap_sub_power(leaf_node);
 	KUNIT_EXPECT_EQ(test, virt_node->power_min, 0);
 	KUNIT_EXPECT_EQ(test, virt_node->power_max, 0);
@@ -467,7 +551,7 @@ static void powercap_gpc_register_and_ops_test(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, virt_node->power_min, opp_table[0].power);
 	KUNIT_EXPECT_EQ(test, virt_node->power_max, opp_table[GPC_TEST_OPP_CT - 1].power);
 
-	//Release zone test.
+	// Release zone test.
 	KUNIT_EXPECT_EQ(test, __gpowercap_release_zone(&virt_node->zone), -EBUSY);
 	KUNIT_EXPECT_EQ(test, __gpowercap_release_zone(&leaf_node->zone), 0);
 	// Make sure the top nodes power value are updated.
@@ -526,6 +610,10 @@ static struct gpowercap_devfreq *__create_and_init_devfreq(struct kunit *test)
 		gpc_devfreq->cdev.opp_table[i].power = opp_table[i].power;
 		gpc_devfreq->cdev.opp_table[i].freq = opp_table[i].freq;
 	}
+	dev_pm_qos_add_request(gpc_devfreq->cdev.devfreq->dev.parent,
+				&gpc_devfreq->cdev.qos_req,
+				DEV_PM_QOS_MAX_FREQUENCY,
+				PM_QOS_MAX_FREQUENCY_DEFAULT_VALUE);
 
 	return gpc_devfreq;
 }
@@ -556,6 +644,8 @@ static void powercap_devfreq_update_power_test(struct kunit *test)
 	devfreq = gpc_devfreq->cdev.devfreq;
 	gpc_devfreq->cdev.devfreq = NULL;
 	KUNIT_EXPECT_EQ(test, gpc_devfreq_update_pd_power_uw(gpc), -ENODEV);
+
+	gpc_devfreq->cdev.devfreq = devfreq;
 	gpc_devfreq_pd_release(&gpc_devfreq->gpowercap);
 }
 
@@ -564,6 +654,7 @@ static void powercap_devfreq_get_power_test(struct kunit *test)
 	struct gpowercap_devfreq *gpc_devfreq;
 	struct gpowercap *gpc;
 	int i = 0;
+	struct devfreq *devfreq;
 
 	// success
 	gpc_devfreq = __create_and_init_devfreq(test);
@@ -577,8 +668,11 @@ static void powercap_devfreq_get_power_test(struct kunit *test)
 	}
 
 	// When devfreq is not available.
+	devfreq = gpc_devfreq->cdev.devfreq;
 	gpc_devfreq->cdev.devfreq = NULL;
 	KUNIT_EXPECT_EQ(test, gpc_devfreq_get_pd_power_uw(gpc), 0);
+
+	gpc_devfreq->cdev.devfreq = devfreq;
 	gpc_devfreq_pd_release(&gpc_devfreq->gpowercap);
 }
 
@@ -604,6 +698,8 @@ static void powercap_devfreq_set_power_test(struct kunit *test)
 	devfreq = gpc_devfreq->cdev.devfreq;
 	gpc_devfreq->cdev.devfreq = NULL;
 	KUNIT_EXPECT_EQ(test, gpc_devfreq_set_pd_power_limit(gpc, 0), 0);
+	gpc_devfreq->cdev.devfreq = devfreq;
+
 	gpc_devfreq_pd_release(&gpc_devfreq->gpowercap);
 }
 
@@ -788,32 +884,20 @@ static void powercap_cpu_set_power_test(struct kunit *test)
 		}
 	}
 }
-static struct kunit_case powercap_helper_test[] = {
-	KUNIT_CASE(powercap_init_test),
-	KUNIT_CASE(powercap_create_hierarchy_test),
-	KUNIT_CASE(powercap_destroy_hierarchy_test),
-	KUNIT_CASE(powercap_setup_virtual_test),
-	KUNIT_CASE(powercap_gpc_register_and_ops_test),
-	KUNIT_CASE(powercap_power_limit_bypass),
-	KUNIT_CASE(powercap_devfreq_setup_test),
-	KUNIT_CASE(powercap_devfreq_update_power_test),
-	KUNIT_CASE(powercap_devfreq_get_power_test),
-	KUNIT_CASE(powercap_devfreq_set_power_test),
-	KUNIT_CASE(powercap_cpu_setup_test),
-	KUNIT_CASE(powercap_cpu_release_test),
-	KUNIT_CASE(powercap_cpu_update_power_test),
-	KUNIT_CASE(powercap_cpu_get_power_test),
-	KUNIT_CASE(powercap_cpu_set_power_test),
-	{},
-};
 
 static void powercap_test_suite_exit(struct kunit_suite *suite)
 {
+	int i;
+
 	if (!IS_ERR_OR_NULL(pct_test))
 		powercap_unregister_control_type(pct_test);
 	kfree(opp_table);
 	kfree(test_data);
 	kfree(test_policy);
+
+	for (i = 0; i < GPC_VOLT_ALGO_CHILD_CT; i++)
+		kfree(volt_algo_test_data->children_gpc[i].opp_table);
+	kfree(volt_algo_test_data);
 }
 
 static void powercap_test_init_cpu(void)
@@ -830,6 +914,31 @@ static void powercap_test_init_cpu(void)
 static int powercap_test_suite_init(struct kunit_suite *suite)
 {
 	int i = 0;
+	int j;
+
+	volt_algo_test_data = kzalloc(sizeof(*volt_algo_test_data), GFP_KERNEL);
+	if (!volt_algo_test_data)
+		return -ENOMEM;
+
+	gpowercap_init(&volt_algo_test_data->parent_gpc, NULL);
+
+	for (i = 0; i < GPC_VOLT_ALGO_CHILD_CT; i++) {
+		struct gpowercap *child = &volt_algo_test_data->children_gpc[i];
+
+		gpowercap_init(child, &test_ops);
+		child->num_opps = GPC_TEST_OPP_CT;
+		child->opp_table = kcalloc(GPC_TEST_OPP_CT,
+						 sizeof(*child->opp_table), GFP_KERNEL);
+		if (!child->opp_table)
+			return -ENOMEM;
+		for (j = 0; j < GPC_TEST_OPP_CT; j++) {
+			child->opp_table[j].power = (GPC_POWER_INIT + GPC_POWER_INCREMENT * j);
+			child->opp_table[j].freq = (GPC_FREQ_INIT + GPC_FREQ_INCREMENT * j);
+		}
+		child->power_min = child->opp_table[0].power;
+		child->power_max = child->opp_table[GPC_TEST_OPP_CT - 1].power;
+		child->power_limit = child->power_max;
+	}
 
 	pct_test = powercap_register_control_type(NULL, "gpc_test", NULL);
 
@@ -848,8 +957,18 @@ static int powercap_test_suite_init(struct kunit_suite *suite)
 static int powercap_test_init(struct kunit *test)
 {
 	test->priv = test_data;
+	int i;
+
 	gpc_test_init_data(test_data);
 
+	of_find_node_ret = 0;
+	of_node_put_called = false;
+
+	for (i = 0; i < GPC_VOLT_ALGO_CHILD_CT; i++) {
+		children_power_limit[i] = 0;
+		children_get_power_val[i] = 0;
+		children_get_power_ret[i] = 0;
+	}
 	return 0;
 }
 
@@ -861,6 +980,184 @@ static void powercap_test_exit(struct kunit *test)
 		__gpc_cpu_pd_release(&pos->gpowercap);
 	}
 }
+
+static struct gpowercap *volt_algo_test_init(struct kunit *test)
+{
+	struct powercap_volt_algo_test_data *data = volt_algo_test_data;
+	struct gpowercap *gpc_volt_algo;
+	int i;
+
+	gpc_volt_algo = __gpc_volt_algo_setup("test_volt", &data->parent_gpc);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, gpc_volt_algo);
+
+	for (i = 0; i < GPC_VOLT_ALGO_CHILD_CT; i++)
+		list_add_tail(&data->children_gpc[i].siblings, &gpc_volt_algo->children);
+
+	return gpc_volt_algo;
+}
+
+static void volt_algo_test_exit(struct gpowercap *gpc_volt_algo)
+{
+	struct powercap_volt_algo_test_data *data = volt_algo_test_data;
+
+	list_del(&data->children_gpc[0].siblings);
+	list_del(&data->children_gpc[1].siblings);
+	__gpc_volt_algo_release(gpc_volt_algo);
+}
+
+static void powercap_volt_algo_setup_release_test(struct kunit *test)
+{
+	struct powercap_volt_algo_test_data *data = volt_algo_test_data;
+	struct gpowercap *gpc_volt_algo;
+
+	/* Success case */
+	gpc_volt_algo = __gpc_volt_algo_setup("test_volt", &data->parent_gpc);
+	KUNIT_EXPECT_NOT_ERR_OR_NULL(test, gpc_volt_algo);
+	KUNIT_EXPECT_TRUE(test, gpc_register_called);
+	__gpc_volt_algo_release(gpc_volt_algo);
+
+	/* Failure cases */
+	gpc_register_called = false;
+	gpc_volt_algo = __gpc_volt_algo_setup(NULL, &data->parent_gpc);
+	KUNIT_EXPECT_TRUE(test, IS_ERR(gpc_volt_algo));
+	KUNIT_EXPECT_FALSE(test, gpc_register_called);
+
+	gpc_volt_algo = __gpc_volt_algo_setup("test_volt", NULL);
+	KUNIT_EXPECT_TRUE(test, IS_ERR(gpc_volt_algo));
+	KUNIT_EXPECT_FALSE(test, gpc_register_called);
+
+	gpc_register_ret = -ENOMEM;
+	gpc_volt_algo = __gpc_volt_algo_setup("test_volt", &data->parent_gpc);
+	KUNIT_EXPECT_TRUE(test, IS_ERR(gpc_volt_algo));
+	KUNIT_EXPECT_TRUE(test, gpc_register_called);
+	gpc_register_ret = 0;
+}
+
+static void powercap_volt_algo_evaluate_test(struct kunit *test)
+{
+	struct powercap_volt_algo_test_data *data = volt_algo_test_data;
+	struct gpowercap *gpc_volt_algo;
+
+	gpc_volt_algo = volt_algo_test_init(test);
+
+	/* Success case */
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_evaluate(gpc_volt_algo), 0);
+	KUNIT_EXPECT_EQ(test, gpc_volt_algo->num_opps, GPC_TEST_OPP_CT);
+
+	/* No children */
+	list_del(&data->children_gpc[0].siblings);
+	list_del(&data->children_gpc[1].siblings);
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_evaluate(gpc_volt_algo), 0);
+	list_add_tail(&data->children_gpc[0].siblings, &gpc_volt_algo->children);
+	list_add_tail(&data->children_gpc[1].siblings, &gpc_volt_algo->children);
+
+	/* load static table fails (child count mismatch) */
+	list_del(&data->children_gpc[1].siblings);
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_evaluate(gpc_volt_algo), -EINVAL);
+	list_add_tail(&data->children_gpc[1].siblings, &gpc_volt_algo->children);
+
+	/* of_find_node fails */
+	of_find_node_ret = -ENODEV;
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_evaluate(gpc_volt_algo), -ENODEV);
+	of_find_node_ret = 0;
+
+	/* of_match_node fails */
+	match_node_ret = -EINVAL;
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_evaluate(gpc_volt_algo), -ENODEV);
+	match_node_ret = 0;
+
+	volt_algo_test_exit(gpc_volt_algo);
+}
+
+static void powercap_volt_algo_set_get_power_test(struct kunit *test)
+{
+	struct powercap_volt_algo_test_data *data = volt_algo_test_data;
+	struct gpowercap *gpc_volt_algo;
+	u64 power, power_limit_req;
+
+	gpc_volt_algo = volt_algo_test_init(test);
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_evaluate(gpc_volt_algo), 0);
+
+	/* Set power limit */
+	power_limit_req = GPC_POWER_INIT * GPC_VOLT_ALGO_CHILD_CT;
+	power = __gpc_volt_algo_set_power_limit(gpc_volt_algo, power_limit_req);
+	KUNIT_EXPECT_EQ(test, power, power_limit_req);
+	KUNIT_EXPECT_EQ(test, children_power_limit[0], GPC_POWER_INIT);
+	KUNIT_EXPECT_EQ(test, children_power_limit[1], GPC_POWER_INIT);
+
+	/* Set power limit above max */
+	power = __gpc_volt_algo_set_power_limit(gpc_volt_algo, 9999999);
+	/* child0(1.3MHz):2.5W + child1(1.3MHz):2.5W */
+	KUNIT_EXPECT_EQ(test, power, 5000000);
+
+	/* Set power limit with no opp_table */
+	to_gpowercap_volt_algo(gpc_volt_algo)->opp_table = NULL;
+	power = __gpc_volt_algo_set_power_limit(gpc_volt_algo, 1000);
+	KUNIT_EXPECT_EQ(test, power, 0);
+	to_gpowercap_volt_algo(gpc_volt_algo)->opp_table = gpc_volt_algo->opp_table;
+
+	/* Get power */
+	children_get_power_val[0] = 100;
+	children_get_power_val[1] = 200;
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_get_power(gpc_volt_algo), 300);
+
+	/* Get power with one child failing */
+	volt_algo_test_data->children_gpc[0].num_opps = 0;
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_get_power(gpc_volt_algo), 200);
+	volt_algo_test_data->children_gpc[0].num_opps = GPC_TEST_OPP_CT;
+
+	/* Get power with no children */
+	list_del(&data->children_gpc[0].siblings);
+	list_del(&data->children_gpc[1].siblings);
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_get_power(gpc_volt_algo), 0);
+
+	__gpc_volt_algo_release(gpc_volt_algo);
+}
+
+static void powercap_volt_algo_update_power_test(struct kunit *test)
+{
+	struct gpowercap *gpc_volt_algo;
+	struct gpowercap_volt_algo *gpc_volt;
+
+	gpc_volt_algo = volt_algo_test_init(test);
+	gpc_volt = to_gpowercap_volt_algo(gpc_volt_algo);
+
+	/* No OPPs yet */
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_update_power_uw(gpc_volt_algo), 0);
+	KUNIT_EXPECT_EQ(test, gpc_volt_algo->num_opps, 0);
+
+	/* With OPPs */
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_evaluate(gpc_volt_algo), 0);
+	KUNIT_EXPECT_EQ(test, __gpc_volt_algo_update_power_uw(gpc_volt_algo), 0);
+	KUNIT_EXPECT_EQ(test, gpc_volt_algo->num_opps, 3);
+	KUNIT_EXPECT_EQ(test, gpc_volt_algo->power_min, 1000000);
+	KUNIT_EXPECT_EQ(test, gpc_volt_algo->power_max, 5000000);
+
+	volt_algo_test_exit(gpc_volt_algo);
+}
+
+static struct kunit_case powercap_helper_test[] = {
+	KUNIT_CASE(powercap_init_test),
+	KUNIT_CASE(powercap_create_hierarchy_test),
+	KUNIT_CASE(powercap_destroy_hierarchy_test),
+	KUNIT_CASE(powercap_setup_virtual_test),
+	KUNIT_CASE(powercap_gpc_register_and_ops_test),
+	KUNIT_CASE(powercap_power_limit_bypass),
+	KUNIT_CASE(powercap_devfreq_setup_test),
+	KUNIT_CASE(powercap_devfreq_update_power_test),
+	KUNIT_CASE(powercap_devfreq_get_power_test),
+	KUNIT_CASE_SLOW(powercap_devfreq_set_power_test),
+	KUNIT_CASE(powercap_cpu_setup_test),
+	KUNIT_CASE(powercap_cpu_release_test),
+	KUNIT_CASE(powercap_cpu_update_power_test),
+	KUNIT_CASE(powercap_cpu_get_power_test),
+	KUNIT_CASE(powercap_cpu_set_power_test),
+	KUNIT_CASE(powercap_volt_algo_setup_release_test),
+	KUNIT_CASE(powercap_volt_algo_evaluate_test),
+	KUNIT_CASE(powercap_volt_algo_set_get_power_test),
+	KUNIT_CASE(powercap_volt_algo_update_power_test),
+	{},
+};
 
 static struct kunit_suite powercap_helper_test_suite = {
 	.name = "powercap_helper_tests",

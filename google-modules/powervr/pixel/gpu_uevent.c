@@ -55,10 +55,12 @@ static void gpu_uevent_send_worker(struct work_struct *data)
 	enum uevent_env_idx {
 	ENV_IDX_TYPE,
 	ENV_IDX_INFO,
+	ENV_IDX_UID,
 	ENV_IDX_NULL,
 	ENV_IDX_MAX
 	};
 	char *env[ENV_IDX_MAX] = {0};
+	char uid_str[64];
 	unsigned long flags, current_ts = jiffies;
 	bool suppress_uevent = false;
 	struct gpu_uevent evt = {0};
@@ -84,6 +86,11 @@ static void gpu_uevent_send_worker(struct work_struct *data)
 
 	env[ENV_IDX_TYPE] = (char *) gpu_uevent_type_str(evt.type);
 	env[ENV_IDX_INFO] = (char *) gpu_uevent_info_str(evt.info);
+	if (evt.info == GPU_UEVENT_INFO_GUILTY_LOCKUP) {
+		snprintf(uid_str, sizeof(uid_str), "GPU_UEVENT_UID=%u", evt.uid);
+		env[ENV_IDX_UID] = uid_str;
+	}
+
 	env[ENV_IDX_NULL] = NULL;
 
 	kobject_uevent_env(&pixel_dev->dev->kobj, KOBJ_CHANGE, env);

@@ -7781,6 +7781,11 @@ wl_set_ap_suspend_error_handler(struct net_device *ndev, bool suspend)
 }
 
 #define MAX_AP_RESUME_TIME   5000
+static bool ap_created_condition(struct bcm_cfg80211 *cfg, struct net_device *ndev)
+{
+	return wl_get_drv_status(cfg, AP_CREATED, ndev);
+}
+
 int
 wl_set_ap_suspend(struct net_device *dev, bool suspend, char *ifname)
 {
@@ -7790,7 +7795,6 @@ wl_set_ap_suspend(struct net_device *dev, bool suspend, char *ifname)
 	int ret = BCME_OK;
 	bool is_bssup = FALSE;
 	int bssidx;
-	unsigned long start_j;
 	int time_to_sleep = MAX_AP_RESUME_TIME;
 
 	dhdp = (dhd_pub_t *)(cfg->pub);
@@ -7836,30 +7840,16 @@ wl_set_ap_suspend(struct net_device *dev, bool suspend, char *ifname)
 			goto exit;
 		}
 
-		while (TRUE) {
-			start_j = get_jiffies_64();
-			/* Wait for Linkup event to mark successful AP bring up */
-			ret = wait_event_interruptible_timeout(cfg->netif_change_event,
-				wl_get_drv_status(cfg, AP_CREATED, ndev),
-				msecs_to_jiffies(time_to_sleep));
-			if (ret == -ERESTARTSYS) {
-				WL_ERR(("waitqueue was interrupted by a signal\n"));
-				time_to_sleep -= jiffies_to_msecs(get_jiffies_64() - start_j);
-				if (time_to_sleep <= 0) {
-					WL_ERR(("time to sleep hits 0\n"));
-					ret = BCME_NOTUP;
-					goto exit;
-				}
-			} else if (ret == 0 || !wl_get_drv_status(cfg, AP_CREATED, ndev)) {
-				WL_ERR(("AP resume failed!\n"));
-				ret = BCME_NOTUP;
-				goto exit;
-			} else {
-				wl_set_drv_status(cfg, CONNECTED, ndev);
-				wl_clr_drv_status(cfg, AP_CREATING, ndev);
-				ret = BCME_OK;
-				break;
-			}
+		ret = wl_cfg80211_wait_interruptible(cfg, ndev, ap_created_condition,
+				time_to_sleep);
+		if (ret > 0 && wl_get_drv_status(cfg, AP_CREATED, ndev)) {
+			wl_set_drv_status(cfg, CONNECTED, ndev);
+			wl_clr_drv_status(cfg, AP_CREATING, ndev);
+			ret = BCME_OK;
+		} else {
+			WL_ERR(("AP resume failed!\n"));
+			ret = BCME_NOTUP;
+			goto exit;
 		}
 	} else {
 		/* bssup + resume or bssdown + suspend,

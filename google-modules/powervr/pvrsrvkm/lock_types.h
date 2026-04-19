@@ -63,6 +63,7 @@ typedef spinlock_t POS_SPINLOCK;
 typedef atomic_t ATOMIC_T;
 /* Priority-inheriting mutex. */
 typedef struct rt_mutex *POS_PILOCK;
+typedef atomic64_t ATOMIC64_T;
 
 #else /* defined(__linux__) && defined(__KERNEL__) */
 #include "img_types.h" /* needed for IMG_INT */

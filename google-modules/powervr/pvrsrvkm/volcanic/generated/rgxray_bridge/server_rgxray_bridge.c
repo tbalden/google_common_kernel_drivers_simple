@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -72,10 +69,10 @@ static PVRSRV_ERROR _RGXCreateRayContextpsRayContextIntRelease(void *pvData)
 	return eError;
 }
 
-static_assert(RGXFWIF_STATIC_RAYCONTEXT_SIZE <= IMG_UINT32_MAX,
-	      "RGXFWIF_STATIC_RAYCONTEXT_SIZE must not be larger than IMG_UINT32_MAX");
+static_assert(RGXFWIF_CONTEXT_DATA_RAY_SIZE <= IMG_UINT32_MAX,
+	      "RGXFWIF_CONTEXT_DATA_RAY_SIZE must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXCreateRayContext(IMG_UINT32 ui32DispatchTableEntry,
 				IMG_UINT8 * psRGXCreateRayContextIN_UI8,
 				IMG_UINT8 * psRGXCreateRayContextOUT_UI8,
@@ -90,7 +87,7 @@ PVRSRVBridgeRGXCreateRayContext(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_HANDLE hPrivData = psRGXCreateRayContextIN->hPrivData;
 	IMG_HANDLE hPrivDataInt = NULL;
-	IMG_BYTE *ui8sStaticRayContextStateInt = NULL;
+	IMG_BYTE *ui8RayContextDataInt = NULL;
 	RGX_SERVER_RAY_CONTEXT *psRayContextInt = NULL;
 
 	IMG_UINT32 ui32NextOffset = 0;
@@ -99,12 +96,10 @@ PVRSRVBridgeRGXCreateRayContext(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize =
-	    ((IMG_UINT64) psRGXCreateRayContextIN->ui32StaticRayContextStateSize *
-	     sizeof(IMG_BYTE)) + 0;
+	    ((IMG_UINT64) psRGXCreateRayContextIN->ui32RayContextDataSize * sizeof(IMG_BYTE)) + 0;
 
 	if (unlikely
-	    (psRGXCreateRayContextIN->ui32StaticRayContextStateSize >
-	     RGXFWIF_STATIC_RAYCONTEXT_SIZE))
+	    (psRGXCreateRayContextIN->ui32RayContextDataSize > RGXFWIF_CONTEXT_DATA_RAY_SIZE))
 	{
 		psRGXCreateRayContextOUT->eError = PVRSRV_ERROR_BRIDGE_ARRAY_SIZE_TOO_BIG;
 		goto RGXCreateRayContext_exit;
@@ -136,7 +131,7 @@ PVRSRVBridgeRGXCreateRayContext(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -146,21 +141,21 @@ PVRSRVBridgeRGXCreateRayContext(IMG_UINT32 ui32DispatchTableEntry,
 		}
 	}
 
-	if (psRGXCreateRayContextIN->ui32StaticRayContextStateSize != 0)
+	if (psRGXCreateRayContextIN->ui32RayContextDataSize != 0)
 	{
-		ui8sStaticRayContextStateInt =
+		ui8RayContextDataInt =
 		    (IMG_BYTE *) IMG_OFFSET_ADDR(pArrayArgsBuffer, ui32NextOffset);
 		ui32NextOffset +=
-		    psRGXCreateRayContextIN->ui32StaticRayContextStateSize * sizeof(IMG_BYTE);
+		    psRGXCreateRayContextIN->ui32RayContextDataSize * sizeof(IMG_BYTE);
 	}
 
 	/* Copy the data over */
-	if (psRGXCreateRayContextIN->ui32StaticRayContextStateSize * sizeof(IMG_BYTE) > 0)
+	if (psRGXCreateRayContextIN->ui32RayContextDataSize * sizeof(IMG_BYTE) > 0)
 	{
 		if (OSCopyFromUser
-		    (NULL, ui8sStaticRayContextStateInt,
-		     (const void __user *)psRGXCreateRayContextIN->pui8sStaticRayContextState,
-		     psRGXCreateRayContextIN->ui32StaticRayContextStateSize * sizeof(IMG_BYTE)) !=
+		    (NULL, ui8RayContextDataInt,
+		     (const void __user *)psRGXCreateRayContextIN->pui8RayContextData,
+		     psRGXCreateRayContextIN->ui32RayContextDataSize * sizeof(IMG_BYTE)) !=
 		    PVRSRV_OK)
 		{
 			psRGXCreateRayContextOUT->eError = PVRSRV_ERROR_INVALID_PARAMS;
@@ -190,8 +185,8 @@ PVRSRVBridgeRGXCreateRayContext(IMG_UINT32 ui32DispatchTableEntry,
 					psRGXCreateRayContextIN->i32Priority,
 					hPrivDataInt,
 					psRGXCreateRayContextIN->ui32ContextFlags,
-					psRGXCreateRayContextIN->ui32StaticRayContextStateSize,
-					ui8sStaticRayContextStateInt,
+					psRGXCreateRayContextIN->ui32RayContextDataSize,
+					ui8RayContextDataInt,
 					psRGXCreateRayContextIN->ui64RobustnessAddress,
 					psRGXCreateRayContextIN->ui32MaxDeadlineMS,
 					&psRayContextInt);
@@ -249,13 +244,25 @@ RGXCreateRayContext_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXCREATERAYCONTEXT, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXDestroyRayContext(IMG_UINT32 ui32DispatchTableEntry,
 				 IMG_UINT8 * psRGXDestroyRayContextIN_UI8,
 				 IMG_UINT8 * psRGXDestroyRayContextOUT_UI8,
@@ -291,7 +298,7 @@ PVRSRVBridgeRGXDestroyRayContext(IMG_UINT32 ui32DispatchTableEntry,
 
 RGXDestroyRayContext_exit:
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXDESTROYRAYCONTEXT, eError);
 }
 
 static_assert(PVRSRV_MAX_SYNCS <= IMG_UINT32_MAX,
@@ -301,7 +308,7 @@ static_assert(PVRSRV_SYNC_NAME_LENGTH <= IMG_UINT32_MAX,
 static_assert(RGXFWIF_DM_INDEPENDENT_KICK_CMD_SIZE <= IMG_UINT32_MAX,
 	      "RGXFWIF_DM_INDEPENDENT_KICK_CMD_SIZE must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeRGXKickRDM(IMG_UINT32 ui32DispatchTableEntry,
 		       IMG_UINT8 * psRGXKickRDMIN_UI8,
 		       IMG_UINT8 * psRGXKickRDMOUT_UI8, CONNECTION_DATA * psConnection)
@@ -371,7 +378,7 @@ PVRSRVBridgeRGXKickRDM(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -385,9 +392,6 @@ PVRSRVBridgeRGXKickRDM(IMG_UINT32 ui32DispatchTableEntry,
 	{
 		psClientUpdateUFOSyncPrimBlockInt =
 		    (SYNC_PRIMITIVE_BLOCK **) IMG_OFFSET_ADDR(pArrayArgsBuffer, ui32NextOffset);
-		OSCachedMemSet(psClientUpdateUFOSyncPrimBlockInt, 0,
-			       psRGXKickRDMIN->ui32ClientUpdateCount *
-			       sizeof(SYNC_PRIMITIVE_BLOCK *));
 		ui32NextOffset +=
 		    psRGXKickRDMIN->ui32ClientUpdateCount * sizeof(SYNC_PRIMITIVE_BLOCK *);
 		hClientUpdateUFOSyncPrimBlockInt2 =
@@ -583,10 +587,22 @@ RGXKickRDM_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_RGXKICKRDM, eError);
 }
 
 /* ***************************************************************************

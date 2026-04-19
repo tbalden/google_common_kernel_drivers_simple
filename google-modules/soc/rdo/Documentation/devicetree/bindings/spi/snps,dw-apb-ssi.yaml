@@ -175,6 +175,10 @@ properties:
     type: boolean
     description: Enable external power control instead of auto runtime PM
 
+  polling-busy-wait-mode:
+    type: boolean
+    description: Enable polling busy-wait mode instead of interrupt mode
+
 patternProperties:
   "^.*@[0-9a-f]+$":
     type: object

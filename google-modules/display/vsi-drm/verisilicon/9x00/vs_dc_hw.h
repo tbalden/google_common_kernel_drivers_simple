@@ -804,15 +804,51 @@ struct dc_hw_hdr {
 	bool dirty;
 };
 
+/**
+ * struct dc_hw_interrupt_status - Represents the status of various hardware interrupts.
+ * @layer_frm_done: Bitmask indicating which layers have completed a frame.
+ *                  The bit position corresponds to the dc_hw_plane_id.
+ * @output_frm_start: Bitmask indicating which output interfaces have started a frame.
+ *                    The bit position corresponds to the dc_hw_output_id.
+ * @output_frm_done: Bitmask indicating which output interfaces have completed a frame.
+ *                   The bit position corresponds to the dc_hw_output_id.
+ * @output_underrun: Bitmask indicating which output interfaces have experienced an underrun.
+ *                   The bit position corresponds to the dc_hw_output_id.
+ * @output_te_rising: Bitmask for Tearing Effect (TE) rising edge interrupts per output.
+ * @output_te_falling: Bitmask for Tearing Effect (TE) falling edge interrupts per output.
+ * @wb_frm_done: Bitmask indicating which write-back paths have completed a frame.
+ *               The bit position corresponds to the dc_hw_wb_id.
+ * @wb_datalost: Bitmask indicating which write-back paths have lost data.
+ * @of_output_frm_start: Bitmask indicating overflow bits for output_frm_start
+ * @of_output_frm_done: Bitmask indicating overflow bits for output_frm_done
+ * @of_output_underrun: Bitmask indicating overflow bits for output_underrun
+ * @of_output_te_rising: Bitmask indicating overflow bits for output_te_rising
+ * @of_output_te_falling: Bitmask indicating overflow bits for output_te_falling
+ * @of_wb_frm_done: Bitmask indicating overflow bits for wb_frm_done
+ * @of_wb_datalost: Bitmask indicating overflow bits for wb_datalost
+ * @pvric_decode_err: Bitmask for PVRIC decode errors per plane.
+ * @layer_reset_done: Bitmask indicating which layers have completed a reset.
+ * @reset_status: Array indicating completion status of software resets for FE0, FE1, and BE.
+ * @fe0_bus_errors: Bitmap of bus errors for Front-End 0.
+ * @fe1_bus_errors: Bitmap of bus errors for Front-End 1.
+ * @be_bus_errors: Bitmap of bus errors for the Back-End.
+ */
 struct dc_hw_interrupt_status {
 	u16 layer_frm_done;
-	u8 display_frm_start;
-	u8 display_frm_done;
-	u8 display_underrun;
-	u8 display_te_rising;
-	u8 display_te_falling;
+	u8 output_frm_start;
+	u8 output_frm_done;
+	u8 output_underrun;
+	u8 output_te_rising;
+	u8 output_te_falling;
 	u8 wb_frm_done;
 	u8 wb_datalost;
+	u8 of_output_frm_start;
+	u8 of_output_frm_done;
+	u8 of_output_underrun;
+	u8 of_output_te_rising;
+	u8 of_output_te_falling;
+	u8 of_wb_frm_done;
+	u8 of_wb_datalost;
 	u16 pvric_decode_err;
 	u16 layer_reset_done;
 	u8 reset_status[SW_RESET_NUM];
@@ -838,6 +874,52 @@ struct dc_hw_wb_funcs {
 	void (*print_state)(struct seq_file *s, const struct dc_hw_wb *wb, const u8 indent);
 };
 
+/**
+ * struct dc_hw_display - Represents the hardware state for a display pipeline.
+ * @info: Pointer to the static display capabilities structure.
+ * @mode: Display timing and format configuration.
+ * @bld_size: Size of the blending area.
+ * @data_ext: Data extension mode configuration.
+ * @gamma: Gamma correction LUTs configuration.
+ * @wb: Write-back configuration from this display pipeline.
+ * @blur_mask: Framebuffer for the blur mask.
+ * @brightness_mask: Framebuffer for the brightness mask.
+ * @ltm_enable: Local Tone Mapping (LTM) enable state.
+ * @ltm_degamma: LTM de-gamma configuration.
+ * @ltm_gamma: LTM gamma configuration.
+ * @ltm_luma: LTM luma processing configuration.
+ * @freq_decomp: LTM frequency decomposition configuration.
+ * @luma_adj: LTM luma adjustment LUT.
+ * @grid_size: LTM grid size configuration.
+ * @af_filter: LTM adaptive filter configuration.
+ * @af_slice: LTM adaptive filter slice configuration.
+ * @af_trans: LTM adaptive filter transition configuration.
+ * @tone_adj: LTM tone adjustment LUT.
+ * @ltm_color: LTM color processing configuration.
+ * @ltm_dither: LTM dither configuration.
+ * @ltm_luma_set: LTM luma average settings to be written to hardware.
+ * @ltm_luma_get: LTM luma average values read from hardware.
+ * @ltm_cd_set: LTM color distribution settings to be written to hardware.
+ * @ltm_cd_get: LTM color distribution values read from hardware.
+ * @ltm_hist_set: LTM histogram settings to be written to hardware.
+ * @ltm_hist_get: LTM histogram values read from hardware.
+ * @ltm_ds: LTM down-sampling configuration.
+ * @hw_hist_chan: Per-channel histogram hardware state.
+ * @hw_hist_rgb: RGB histogram hardware state.
+ * @crc: Display-level CRC calculation configuration.
+ * @urgent_cmd_config: Urgent request configuration for command mode.
+ * @urgent_vid_config: Urgent request configuration for video mode.
+ * @states: Group of generic property states for this display.
+ * @sram_pool: SRAM allocation state for this display.
+ * @dsc: Display Stream Compression (DSC) configuration.
+ * @output_id: The hardware output interface ID this display is routed to.
+ * @sbs_split_dirty: Flag indicating a dirty state for side-by-side split mode.
+ * @wb_split_dirty: Flag indicating a dirty state for write-back split mode.
+ * @config_status: Flag indicating if the display is configured and active.
+ * @vblank_count: Counter for VBLANK events.
+ * @func: Function pointers for display-specific operations.
+ * @needs_restore: Flag indicating the display state needs to be restored (e.g., after suspend).
+ */
 struct dc_hw_display {
 	const struct vs_display_info *info;
 	struct dc_hw_display_mode mode;
@@ -875,7 +957,7 @@ struct dc_hw_display {
 	struct vs_dc_property_state_group states;
 	struct dc_hw_sram_pool sram_pool;
 	struct drm_dsc_config dsc;
-	u8 output_id;
+	enum dc_hw_output_id output_id;
 	bool sbs_split_dirty;
 	bool wb_split_dirty;
 	bool config_status;
@@ -944,6 +1026,7 @@ struct dc_hw_sub_funcs {
 	void (*display_wb_pos)(struct dc_hw *hw, u8 hw_id, struct dc_hw_display_wb *wb);
 	void (*wb_fb)(struct dc_hw *hw, u8 hw_id, struct dc_hw_fb *fb);
 	void (*wb_reg_switch)(struct dc_hw *hw, u8 hw_id, bool enable);
+	void (*wb_disable_irq)(struct dc_hw *hw, u8 hw_id);
 	/* TBD */
 };
 
@@ -989,6 +1072,9 @@ struct dc_hw {
 
 	DECLARE_BITMAP(secured_layers_mask, HW_PLANE_NUM);
 
+	/* Protect secured_layers_mask */
+	struct mutex secure_lock;
+
 #if IS_ENABLED(CONFIG_VERISILICON_REGMAP)
 	struct regmap_config regmap_config;
 	struct regmap *regmap;
@@ -1003,6 +1089,9 @@ struct dc_hw {
 	/* Output mux lock */
 	spinlock_t output_mux_slock;
 	u32 output_mux_value;
+
+	/* writeback irq control */
+	int wb_irq_refcnt[HW_WB_NUM];
 };
 
 void dc_write(struct dc_hw *hw, u32 reg, u32 value);
@@ -1061,6 +1150,7 @@ void dc_hw_setup_display_mode(struct dc_hw *hw, u8 id, struct dc_hw_display_mode
 void dc_hw_update_wb_fb(struct dc_hw *hw, u8 id, struct dc_hw_fb *fb);
 void dc_hw_update_r2y(struct dc_hw *hw, u8 id, struct dc_hw_r2y *r2y_conf);
 void dc_hw_setup_wb(struct dc_hw *hw, u8 id);
+void dc_hw_enable_wb_irqs(struct dc_hw *hw, u8 wb_hw_id, bool enable);
 void dc_hw_set_wb_stall(struct dc_hw *hw, bool enable);
 void dc_hw_get_crtc_scanout_position(struct dc_hw *hw, u8 display_id, u32 *position);
 u32 dc_hw_get_vblank_count(struct dc_hw *hw, u8 id);
@@ -1100,6 +1190,7 @@ void dc_hw_do_reset(struct dc_hw *hw);
 bool dc_hw_fe_is_all_layers_idle(struct dc_hw *hw);
 void dc_hw_enable_shadow_register(struct dc_hw *hw, u8 display_id, bool enable);
 void dc_hw_start_trigger(struct dc_hw *hw, u8 display_id, struct drm_crtc *crtc);
+void dc_hw_hard_reset_output_regs(struct dc_hw *hw, u8 id);
 void dc_hw_disable_trigger(struct dc_hw *hw, u8 id);
 void dc_hw_sw_sof_trigger(struct dc_hw *hw, u8 output_id, bool trig_enable);
 int dc_hw_get_ltm_hist(struct dc_hw *hw, u8 output_id, struct drm_vs_ltm_histogram_data *data,
@@ -1115,8 +1206,7 @@ void dc_hw_commit(struct dc_hw *hw, u8 display_id);
 void dc_hw_plane_commit(struct dc_hw *hw, u8 display_id);
 void dc_hw_disable_plane_features(struct dc_hw *hw, u8 display_id);
 void dc_hw_display_commit(struct dc_hw *hw, u8 display_id);
-void dc_hw_display_frame_done(struct dc_hw *hw, u8 display_id,
-			      struct dc_hw_interrupt_status *irq_status);
+void dc_hw_display_frame_done(struct dc_hw *hw, u8 display_id);
 void dc_hw_display_flip_done(struct dc_hw *hw, u8 display_id);
 u32 vs_dc_get_display_offset(u32 hw_id);
 u32 vs_dc_get_panel_dither_table_offset(u32 hw_id);

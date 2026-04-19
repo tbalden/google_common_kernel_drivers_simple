@@ -14,6 +14,7 @@
 
 #include "uwb_fw.h"
 #include "uwb_sysnodes.h"
+#include "uwb_power_stats.h"
 
 #define MAX_NAME_LEN 64
 #define MAX_RXQ_DEPTH 1024
@@ -51,6 +52,7 @@
 #define PROBE_ATTR_TIMEOUT msecs_to_jiffies(1000)
 #define UNKNOWN_STR "Unknown"
 #define SKB_MAX_PRINT_SIZE 64U
+#define HOST_TYPE_LEGACY 0xF
 
 enum {
 	DOWNLOAD,
@@ -106,29 +108,32 @@ struct u100_ctx {
 	struct sk_buff *sk_tx;
 	int tx_status;
 	struct completion tx_done_cmpl;
-	struct completion atr_done_cmpl;
 	struct completion process_done_cmpl;
-	struct mutex atr_lock;
 
 	struct uwb_firmware_ctx uwb_fw_ctx;
 	atomic_t flashing;
 	atomic_t flashing_fw;
+
+	struct mutex atr_lock;
+	struct completion atr_done_cmpl;
+	bool waiting_atr;
 	int u100_state;
+	int u100_state_wanted;
+
 	atomic_t u100_powered_on;
 	atomic_t u100_enter_download;
-	atomic_t waiting_atr;
-	int wait_atr_err;
 	struct firmware_info fw_info;
 	unsigned long flags;
 	bool is_download_mode;
-	bool is_atr_right;
 	bool is_bhalf_entered;
 	struct task_struct *fw_download_thr;
 	struct uwb_sysnode uwb_node;
+	struct dentry *debugfs;
 
 	void (*recv_package)(struct u100_ctx *u100_ctx, struct sk_buff *skb);
 
 	struct uwb_coredump *coredump;
+	struct u100_power_stats *power_stats;
 };
 
 int init_controller_layer(struct u100_ctx *u100_ctx);
@@ -167,6 +172,12 @@ void handle_fw_ap_send(struct u100_ctx *u100_ctx);
 int init_fw_download_thread(struct u100_ctx *u100_ctx, bool flag);
 void stop_fw_download_thread(struct u100_ctx *u100_ctx);
 
+/* Load Switch On */
+void pin_ldsw_high(struct u100_ctx *u100_ctx);
+
+/* Load Switch Off */
+void pin_ldsw_low(struct u100_ctx *u100_ctx);
+
 void uwbs_init(struct u100_ctx *u100_ctx);
 
 void uwbs_power_on(struct u100_ctx *u100_ctx);
@@ -176,11 +187,11 @@ void uwbs_power_off(struct u100_ctx *u100_ctx);
 void uwbs_reset(struct u100_ctx *u100_ctx);
 
 /**
- * UWBS reset VBAT by means of power-switch pin.
+ * UWBS reset VBAT by means of load-switch pin.
  * Calling IS_ERR_OR_NULL(u100_ctx->gpio_u100_power) to check if it is available since
  * it is not defined in older version device tree.
  */
-void uwbs_reset_vbat(struct u100_ctx *u100_ctx);
+void uwbs_ldsw_reset(struct u100_ctx *u100_ctx);
 
 /**
  * uwbs_sync_reset() - Rest UWBS and get ATR.

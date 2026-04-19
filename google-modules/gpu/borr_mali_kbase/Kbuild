@@ -135,7 +135,7 @@ ccflags-y += \
     -DMALI_PLATFORM_DIR=$(MALI_PLATFORM_DIR)
 
 subdir-ccflags-y += \
-		-I$(KERNEL_SRC)/../private/google-modules/power/mitigation
+		-I$(ROOT_DIR)/private/google-modules/power/mitigation
 
 ifeq ($(KBUILD_EXTMOD),)
 # in-tree

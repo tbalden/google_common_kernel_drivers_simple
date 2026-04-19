@@ -7,7 +7,7 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_print.h>
 
-#define VS_RECORD_STATE_MAX 4
+#define VS_RECORD_STATE_MAX 8
 
 struct drm_state_history_record;
 
@@ -33,7 +33,7 @@ struct drm_state_history_data {
 
 /**
  * vs_drm_prepare_state_history_record() - prepares state history object
- * @sh_record: Pointer into which to store a record of the drm state history
+ * @drm_dev: drm device onto which to attach state history record
  *
  * This function allocates all required resources and locks in order to keep
  * track of a history of committed struct drm_atomic_states.
@@ -42,14 +42,15 @@ struct drm_state_history_data {
  *
  * Return: 0 on success, negative value on error
  */
-int vs_drm_prepare_state_history_record(struct drm_state_history_record **sh_record);
+int vs_drm_prepare_state_history_record(struct drm_device *drm_dev);
 
 /**
  * vs_drm_destroy_state_history_record() - cleans up state history object
+ * @drm_dev: drm device storing state history record
  *
  * Releases resources prepared by vs_drm_prepare_state_history_record().
  */
-void vs_drm_destroy_state_history_record(struct drm_state_history_record *sh_record);
+void vs_drm_destroy_state_history_record(struct drm_device *drm_dev);
 
 /**
  * vs_drm_record_state() - Keeps the given state around for debug dumping later
@@ -59,14 +60,16 @@ void vs_drm_destroy_state_history_record(struct drm_state_history_record *sh_rec
  * such that they may be printed by vs_drm_dump_recorded_states() later.
  * It increments their reference count until the point where they
  * are dropped out of the ring buffer.
+ *
+ * Note that it stores the record within the struct drm_device pointed to by
+ * the given state.
  */
-void vs_drm_record_state(struct drm_atomic_state *state,
-			 struct drm_state_history_record *sh_record);
+void vs_drm_record_state(struct drm_atomic_state *state);
 
 /**
  * vs_drm_recorded_states_prepare() - Write out the drm_atomic_state ring buffer to memory
  * @sh_data: struct containing output buffers to be written
- * @sh_record: struct maintaining history of drm states
+ * @drm_dev: drm device containing recorded states within its private struct
  *
  * Sizes and prepares output buffers to store history of recorded drm states.
  * Both returns the number of output buffers and stores the value in the sh_data
@@ -77,7 +80,7 @@ void vs_drm_record_state(struct drm_atomic_state *state,
  * Return: number of buffers stored in output, or negative value on error
  */
 int vs_drm_recorded_states_prepare(struct drm_state_history_data *sh_data,
-				   struct drm_state_history_record *sh_record);
+				   struct drm_device *drm_dev);
 
 /**
  * vs_drm_recorded_states_destroy() - Cleans up resources from recording state history

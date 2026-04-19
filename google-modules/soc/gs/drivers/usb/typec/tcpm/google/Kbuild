@@ -15,4 +15,4 @@ obj-$(CONFIG_POGO_TRANSPORT)		    += pogo_transport.o
 obj-$(CONFIG_TYPEC_COOLING_DEV)             += usbc_cooling_dev.o
 
 # This gives the drivers access to the logbuffer.h and gvotable.h header
-subdir-ccflags-y += -I$(KERNEL_SRC)/../private/google-modules/bms
+subdir-ccflags-y += -I$(ROOT_DIR)/private/google-modules/bms

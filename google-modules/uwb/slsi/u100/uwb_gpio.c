@@ -9,6 +9,7 @@
 #include <linux/gpio.h>
 #include "include/uwb_gpio.h"
 #include "include/uwb_fw_common.h"
+#include "include/uwb_power_stats.h"
 
 static unsigned long gpio_delay_ms = GPIO_DELAY_MS;
 module_param(gpio_delay_ms, ulong, 0664);
@@ -114,13 +115,13 @@ static void pin_en_low(struct u100_ctx *u100_ctx)
 	set_gpio_value(&u100_ctx->gpio_u100_en, 0);
 }
 
-static void pin_power_high(struct u100_ctx *u100_ctx)
+void pin_ldsw_high(struct u100_ctx *u100_ctx)
 {
 	/* b/441968643 to set open-drain in DT */
 	gpiod_direction_input(u100_ctx->gpio_u100_power);
 }
 
-static void pin_power_low(struct u100_ctx *u100_ctx)
+void pin_ldsw_low(struct u100_ctx *u100_ctx)
 {
 	gpiod_direction_output(u100_ctx->gpio_u100_power, 0);
 }
@@ -147,7 +148,7 @@ void uwbs_init(struct u100_ctx *u100_ctx)
 void uwbs_power_on(struct u100_ctx *u100_ctx)
 {
 	UWB_DEBUG("U100 power on begin");
-	pin_power_high(u100_ctx);
+	pin_ldsw_high(u100_ctx);
 	mdelay(pow_swt_gpio_delay_ms);
 	pin_sync_low(u100_ctx);
 	mdelay(gpio_delay_ms);
@@ -172,8 +173,9 @@ void uwbs_power_off(struct u100_ctx *u100_ctx)
 	mdelay(gpio_delay_ms);
 	pin_rst_high(u100_ctx);
 	mdelay(gpio_delay_ms);
-	pin_power_low(u100_ctx);
+	pin_ldsw_low(u100_ctx);
 	atomic_set(&u100_ctx->u100_powered_on, 0);
+	u100_power_stats_on_switch(u100_ctx);
 	UWB_DEBUG("U100 power off end");
 }
 
@@ -186,48 +188,85 @@ void uwbs_reset(struct u100_ctx *u100_ctx)
 	UWB_DEBUG("U100 reset end");
 }
 
-void uwbs_reset_vbat(struct u100_ctx *u100_ctx)
+void uwbs_ldsw_reset(struct u100_ctx *u100_ctx)
 {
-	UWB_DEBUG("U100 reset vbat begin");
-	pin_power_low(u100_ctx);
+	UWB_DEBUG("U100 ldsw reset begin");
+	pin_ldsw_low(u100_ctx);
 	mdelay(pow_swt_gpio_delay_ms);
-	pin_power_high(u100_ctx);
+	pin_ldsw_high(u100_ctx);
 	mdelay(pow_swt_gpio_delay_ms);
-	UWB_DEBUG("U100 reset vbat end");
+	UWB_DEBUG("U100 ldsw reset end");
+}
+
+/* Prepares the "ATR checking" context before "sync" power-on. */
+static void uwbs_sync_power_on_init(struct u100_ctx *u100_ctx, int wanted_state)
+{
+	mutex_lock(&u100_ctx->atr_lock);
+	reinit_completion(&u100_ctx->atr_done_cmpl);
+	u100_ctx->u100_state = U100_UNKNOWN_STATE;
+	u100_ctx->u100_state_wanted = wanted_state;
+	u100_ctx->waiting_atr = true;
+	mutex_unlock(&u100_ctx->atr_lock);
+}
+
+/**
+ *  Checks the state after power-on. u100_state becomes valid
+ *  once the system has powered on correctly and received an ATR.
+ */
+static int uwbs_sync_power_on_check(struct u100_ctx *u100_ctx)
+{
+	int ret = 0;
+
+	wait_for_completion_timeout(&u100_ctx->atr_done_cmpl, PROBE_ATTR_TIMEOUT);
+
+	mutex_lock(&u100_ctx->atr_lock);
+	u100_ctx->waiting_atr = false;
+
+	if (u100_ctx->u100_state != u100_ctx->u100_state_wanted) {
+		UWB_ERR("U100 sync-power-on error, U100 state %#x (expected %#x).\n",
+			u100_ctx->u100_state, u100_ctx->u100_state_wanted);
+		ret = FW_ERROR;
+	}
+
+	mutex_unlock(&u100_ctx->atr_lock);
+	return ret;
+}
+
+static void uwbs_sync_power_on_abort(struct u100_ctx *u100_ctx)
+{
+	mutex_lock(&u100_ctx->atr_lock);
+	u100_ctx->u100_state = U100_UNKNOWN_STATE;
+	u100_ctx->waiting_atr = false;
+	mutex_unlock(&u100_ctx->atr_lock);
 }
 
 int uwbs_sync_reset(struct u100_ctx *u100_ctx)
 {
-	int ret = 0;
+	int ret;
 
 	UWB_DEBUG("U100 sync reset begin");
-	reinit_completion(&u100_ctx->atr_done_cmpl);
-	u100_ctx->u100_state = U100_UNKNOWN_STATE;
-	u100_ctx->wait_atr_err = FW_ERROR_TIME;
-	atomic_set(&u100_ctx->waiting_atr, 1);
-	uwbs_reset(u100_ctx);
-	ret = wait_for_completion_timeout(&u100_ctx->atr_done_cmpl, PROBE_ATTR_TIMEOUT);
 
-	/* Free IRQ.
+	uwbs_sync_power_on_init(u100_ctx, U100_FW_STATE);
+
+	uwbs_reset(u100_ctx);
+
+	ret = uwbs_sync_power_on_check(u100_ctx);
+
+	/*
+	 * Free IRQ.
 	 * Request a level-triggered IRQ when ATR comes and U100 is in a normal state.
 	 */
 	uwb_free_irq(u100_ctx);
 
-	if (!ret) {
-		atomic_set(&u100_ctx->waiting_atr, 0);
-		ret = u100_ctx->wait_atr_err;
+	if (ret) {
 		uwbs_power_off(u100_ctx);
-		UWB_ERR("U100 sync reset timeout.\n");
-	} else if (u100_ctx->u100_state != U100_FW_STATE) {
-		uwbs_power_off(u100_ctx);
-		UWB_ERR("U100 sync reset with invalid U100 state 0x%x.\n", u100_ctx->u100_state);
-		ret = FW_ERROR_PARAMETER;
-	} else {
-		UWB_DEBUG("U100 sync reset end\n");
-		/* Request a level-triggered IRQ for UCI transmission */
-		ret = uwb_request_irq(u100_ctx, IRQF_TRIGGER_HIGH);
+		return ret;
 	}
-	return ret;
+
+	UWB_DEBUG("U100 sync reset successfully.\n");
+
+	/* Request a level-triggered IRQ for UCI transmission */
+	return uwb_request_irq(u100_ctx, IRQF_TRIGGER_HIGH);
 }
 
 int uwbs_start_download(struct u100_ctx *u100_ctx)
@@ -249,7 +288,7 @@ int uwbs_start_download(struct u100_ctx *u100_ctx)
 	 * turn it back on, power up with a custom sequence that tells the chip to
 	 * turn on in download mode.
 	 */
-	pin_power_high(u100_ctx);
+	pin_ldsw_high(u100_ctx);
 	mdelay(pow_swt_gpio_delay_ms);
 	pin_sync_high(u100_ctx);
 	mdelay(gpio_delay_ms);
@@ -272,28 +311,18 @@ bool uwbs_sync_start_download(struct u100_ctx *u100_ctx)
 	UWB_INFO("U100 sync enter download begin");
 	u100_ctx->uwb_fw_ctx.action = ACTION_IDLE;
 	complete_all(&u100_ctx->process_done_cmpl);
-	reinit_completion(&u100_ctx->atr_done_cmpl);
-	u100_ctx->u100_state = U100_UNKNOWN_STATE;
-	u100_ctx->wait_atr_err = FW_ERROR_TIME;
-	atomic_set(&u100_ctx->waiting_atr, 1);
+
+	uwbs_sync_power_on_init(u100_ctx, U100_BL0_STATE);
 
 	ret = uwbs_start_download(u100_ctx);
 	if (ret) {
-		atomic_set(&u100_ctx->waiting_atr, 0);
+		uwbs_sync_power_on_abort(u100_ctx);
 		return false;
 	}
 
-	ret = wait_for_completion_timeout(&u100_ctx->atr_done_cmpl, PROBE_ATTR_TIMEOUT);
-	if (!ret) {
-		atomic_set(&u100_ctx->waiting_atr, 0);
-		UWB_ERR("U100 sync enter download timeout.");
+	if (uwbs_sync_power_on_check(u100_ctx))
 		return false;
-	} else if (u100_ctx->u100_state != U100_BL0_STATE) {
-		UWB_ERR("U100 sync enter download state abnormal, Expect [%#x], but actual [%#x]",
-				U100_BL0_STATE, u100_ctx->u100_state);
-		return false;
-	}
+
 	UWB_INFO("U100 sync enter download end");
 	return true;
 }
-

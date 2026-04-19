@@ -22,12 +22,6 @@
 #include "ufs-google-platform.h"
 #include "ufs-google.h"
 
-static bool dump_registers_upon_error = true;
-module_param(dump_registers_upon_error, bool, 0444);
-MODULE_PARM_DESC(
-	dump_registers_upon_error,
-	"enable/disable printing of the debug dump (registers and voltages)");
-
 enum register_dump_status {
 	REGISTER_DUMP_VALID,
 	REGISTER_DUMP_INVALID,
@@ -267,10 +261,8 @@ static void ufs_google_dbg_dump_work(struct work_struct *work)
 	ufs_google_capture_vregs_snapshot(dbg);
 
 	spin_lock_irqsave(&dbg->register_snapshot_lock, flags);
-	if (dump_registers_upon_error) {
-		ufs_google_print_vregs_snapshot(dbg);
-		ufs_google_print_reg_snapshot(dbg);
-	}
+	ufs_google_print_vregs_snapshot(dbg);
+	ufs_google_print_reg_snapshot(dbg);
 
 	dbg->reg_dump_status = REGISTER_DUMP_INVALID;
 	spin_unlock_irqrestore(&dbg->register_snapshot_lock, flags);

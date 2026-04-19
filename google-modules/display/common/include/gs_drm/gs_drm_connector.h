@@ -34,6 +34,7 @@ enum gs_hbm_mode {
 	GS_HBM_OFF = 0,
 	GS_HBM_ON_IRC_ON,
 	GS_HBM_ON_IRC_OFF,
+	GS_HBM_ON_PEAK_LUM,
 	GS_HBM_STATE_MAX,
 };
 
@@ -91,7 +92,6 @@ enum gs_mipi_sync_mode {
  * @GS_PANEL_ERR_DSI_PROTOCOL_VIOLATION: A general DSI protocol rule was
  *					 encountered that was not covered by
  *					 other DSI error flags.
- * @GS_PANEL_ERR_DSI_GENERAL: Any DSI errors were encountered
  * @GS_PANEL_ERR_VLIN1: A panel error was encountered relating to VLIN1
  * @GS_PANEL_ERR_TE: A panel error was encountered relating to TE
  * @GS_PANEL_ERR_PPS: The panel's PPS settings did not match expected values
@@ -99,6 +99,7 @@ enum gs_mipi_sync_mode {
  * @GS_PANEL_ERR_ESD: ESD detected by panel DDIC
  * @GS_PANEL_ERR_DISP_INVALID: Panel detects invalid display state
  * @GS_PANEL_ERR_VGH: A panel error was encountered relating to VGH
+ * @GS_PANEL_ERR_GRAM_COLLISION: A panel error was encountered relating to underrun
  */
 enum gs_panel_err {
 	GS_PANEL_ERR_DSI_SOT = 0,
@@ -117,7 +118,6 @@ enum gs_panel_err {
 	GS_PANEL_ERR_DSI_XMIT_LEN,
 	GS_PANEL_ERR_DSI_RESERVED,
 	GS_PANEL_ERR_DSI_PROTOCOL_VIOLATION,
-	GS_PANEL_ERR_DSI_GENERAL,
 	GS_PANEL_ERR_VLIN1,
 	GS_PANEL_ERR_TE,
 	GS_PANEL_ERR_PPS,
@@ -125,6 +125,7 @@ enum gs_panel_err {
 	GS_PANEL_ERR_ESD,
 	GS_PANEL_ERR_DISP_INVALID,
 	GS_PANEL_ERR_VGH,
+	GS_PANEL_ERR_GRAM_COLLISION,
 	/** @GS_PANEL_ERR_MAX: maximum number of panel err enum values */
 	GS_PANEL_ERR_MAX,
 };
@@ -214,6 +215,7 @@ struct gs_drm_connector_properties {
 	struct drm_property *panel_power_state;
 	struct drm_property *dsi_errors;
 	struct drm_property *panel_errors;
+	struct drm_property *irc_support_mode;
 };
 
 struct gs_display_partial {
@@ -380,6 +382,12 @@ struct gs_drm_connector_state {
 	 * If there is no active frame transfer at this time, the value will be 0
 	 */
 	ktime_t frame_start_ts;
+
+	/**
+	 * @coredump_for_gram_collision_triggered: Whether the coredump for GRAM collision has
+	 * been triggered
+	 */
+	bool coredump_for_gram_collision_triggered;
 };
 
 #define to_gs_connector_state(connector_state) \
@@ -665,6 +673,22 @@ void gs_drm_connector_update_gray_level_callback(struct drm_connector *connector
  *         value on error
  */
 int gs_drm_connector_get_safe_min_mipi_datarate(struct gs_drm_connector *gs_connector, bool is_lp);
+
+/**
+ * gs_panel_only_specific_error_detected_in_bitmap() - whether only specific panel error is
+ *                                                     detected in bitmap
+ * @panel_errors: bitmap of panel errors
+ * @error: the specific panel error which needs to be detected
+ *
+ * Return: true if only the specific error is detected, false otherwise
+ */
+static inline bool gs_panel_only_specific_error_detected_in_bitmap(
+		const unsigned long *panel_errors, enum gs_panel_err error) {
+	int first_bit = find_first_bit(panel_errors, GS_PANEL_ERR_MAX);
+
+	return (first_bit == error &&
+		find_next_bit(panel_errors, GS_PANEL_ERR_MAX, first_bit + 1) == GS_PANEL_ERR_MAX);
+}
 
 /* Op Hz Notifier */
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 ccflags-y := -DDYNAMIC_DEBUG_MODULE
-ccflags-y += -I$(KERNEL_SRC)/../private/google-modules/perf/include
+ccflags-y += -I$(ROOT_DIR)/private/google-modules/perf/include
 
 obj-$(CONFIG_GS_CHIPID)			+= gs-chipid.o
 obj-$(CONFIG_CAL_IF)            	+= cal-if/

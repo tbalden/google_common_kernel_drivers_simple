@@ -150,10 +150,17 @@ static int edgetpu_iommu_fault_handler(struct iommu_domain *domain, struct devic
 static void edgetpu_init_etdomain(struct edgetpu_iommu_domain *etdomain, struct edgetpu_dev *etdev,
 				  struct gcip_iommu_domain *gdomain, uint pasid)
 {
+	struct iommu_domain *domain = gdomain->domain;
+
 	etdomain->etdev = etdev;
 	etdomain->gdomain = gdomain;
 	etdomain->pasid = pasid;
-	iommu_set_fault_handler(etdomain->gdomain->domain, edgetpu_iommu_fault_handler, etdomain);
+	/*
+	 * Only register fault handler used by clients where we need to inform them when an IOMMU
+	 * fault happens.
+	 */
+	if (pasid)
+		iommu_set_fault_handler(domain, edgetpu_iommu_fault_handler, etdomain);
 }
 
 /*

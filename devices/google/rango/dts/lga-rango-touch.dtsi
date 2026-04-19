@@ -30,6 +30,7 @@
 
 &lsion_cli19_int2_spi {
 	google,cs-clock-delay-us = <10>;
+	polling-busy-wait-mode;
 
 	inner_touch: touchscreen@0 {
 		#address-cells = <1>;
@@ -58,6 +59,8 @@
  */
 
 &lsion_cli20_int3_spi {
+	polling-busy-wait-mode;
+
 	outer_touch: touchscreen@0 {
 		#address-cells = <1>;
 		#size-cells = <1>;

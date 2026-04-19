@@ -217,6 +217,8 @@ struct dp_stats_counters {
 	u32 max_res_counts[DPTX_RES_MAX];
 	u32 fec_dsc_supported;
 	u32 fec_dsc_not_supported;
+	u32 connection_success;
+	u32 connection_failure;
 };
 
 struct dp_hw_config {
@@ -380,6 +382,7 @@ struct dptx {
 	struct work_struct hpd_plug_work;
 	struct work_struct hpd_unplug_work;
 	struct work_struct hpd_irq_work;
+	bool hpd_unplug_running;
 
 	/* Clocks */
 	struct clk_bulk_data pixel_clks[DPTX_NUM_PIXEL_CLKS];
@@ -571,7 +574,7 @@ char *__bytes_str(u8 *bytes, unsigned int n);
  */
 int dptx_link_training(struct dptx *dptx);
 int dptx_fast_link_training(struct dptx *dptx);
-int dptx_link_check_status(struct dptx *dptx);
+int dptx_link_check_status(struct dptx *dptx, u8 *irq_vector);
 int dptx_set_link_configs(struct dptx *dptx, u8 rate, u8 lanes);
 void dptx_update_link_status(struct dptx *dptx, enum link_training_status link_status);
 
@@ -697,6 +700,9 @@ void dptx_audio_sdp_en(struct dptx *dptx, int enabled);
 void dptx_audio_timestamp_sdp_en(struct dptx *dptx, int enabled);
 
 void dptx_video_disable(struct dptx *dptx);
+
+// Stats
+void dptx_connection_result_update(struct dptx *dptx, bool success);
 
 /* EDID Audio Data Block */
 #define AUDIO_TAG		1

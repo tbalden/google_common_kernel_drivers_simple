@@ -493,6 +493,9 @@ static int dw_spi_mmio_probe(struct platform_device *pdev)
 	if (dws->irq < 0)
 		return dws->irq; /* -ENXIO */
 
+	if (device_property_read_bool(&pdev->dev, "polling-busy-wait-mode"))
+		dws->irq = IRQ_NOTCONNECTED;
+
 	dwsmmio->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(dwsmmio->clk))
 		return PTR_ERR(dwsmmio->clk);

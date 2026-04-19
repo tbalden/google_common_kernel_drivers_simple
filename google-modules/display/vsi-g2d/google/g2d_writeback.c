@@ -33,6 +33,7 @@ static const u32 g2d_wb_formats[] = {
 	DRM_FORMAT_ABGR8888,
 	DRM_FORMAT_NV12,
 	DRM_FORMAT_NV21,
+	DRM_FORMAT_P010,
 };
 
 // TODO(rushikesh@): Since this is exclusively a writeback engine, it may be acceptable to
@@ -111,11 +112,6 @@ static int g2d_wb_connector_atomic_prepare(struct drm_writeback_connector *conne
 	struct drm_framebuffer *fb;
 	struct g2d_writeback_connector *g2d_wb_connector = to_g2d_writeback_connector(connector);
 
-	/*
-	 * TODO(rushikesh@) remove pitch alignment.
-	 * we should always use the pitch exactly as provided by userspace
-	 */
-	uint32_t pitch_alignment = 64;
 	u8 num_planes;
 	int i;
 
@@ -130,7 +126,7 @@ static int g2d_wb_connector_atomic_prepare(struct drm_writeback_connector *conne
 
 		g2d_obj = to_g2d_buffer_object(fb->obj[i]);
 		g2d_wb_connector->dma_addr[i] = g2d_obj->dma_addr + fb->offsets[i];
-		g2d_wb_connector->pitch[i] = ALIGN(fb->pitches[i], pitch_alignment);
+		g2d_wb_connector->pitch[i] = fb->pitches[i];
 		g2d_wb_connector->is_yuv = fb->format->is_yuv;
 	}
 
@@ -144,7 +140,14 @@ static void g2d_wb_connector_atomic_commit(struct drm_connector *connector,
 	struct drm_writeback_connector *wb_connector;
 	struct g2d_writeback_connector *g2d_wb_connector;
 	struct drm_device *drm = connector->dev;
+	struct g2d_device *g2d_device = to_g2d_device(drm);
+	struct g2d_sc *sc = g2d_device->sc;
 	struct drm_framebuffer *fb;
+
+	if (sc->requires_reset && !sc->allow_reset) {
+		dev_dbg(drm->dev, "Skipping G2D writeback because G2D requires reset");
+		return;
+	}
 
 	connector_state = drm_atomic_get_new_connector_state(state, connector);
 	wb_connector = drm_connector_to_writeback(connector);
@@ -198,10 +201,10 @@ static const struct drm_encoder_helper_funcs g2d_wb_encoder_helper_funcs = {
 	.atomic_disable = g2d_wb_encoder_atomic_disable,
 };
 
-int g2d_enable_writeback_connector(struct g2d_device *gdevice, uint32_t possible_crtcs)
+int g2d_enable_writeback_connector(struct g2d_device *g2d_device, uint32_t possible_crtcs)
 {
 	int i;
-	struct drm_device *drm = &gdevice->drm;
+	struct drm_device *drm = &g2d_device->drm;
 
 	for (i = 0; i < NUM_PIPELINES; i++) {
 		int ret;
@@ -211,7 +214,7 @@ int g2d_enable_writeback_connector(struct g2d_device *gdevice, uint32_t possible
 		g2d_wb_connector = kzalloc(sizeof(struct g2d_writeback_connector), GFP_KERNEL);
 		if (!g2d_wb_connector)
 			return -ENOMEM;
-		gdevice->sc->writeback[i] = g2d_wb_connector;
+		g2d_device->sc->writeback[i] = g2d_wb_connector;
 		wb_connector = &(g2d_wb_connector->base);
 
 		ret = drm_writeback_connector_init(drm, wb_connector, &g2d_wb_connector_funcs,
@@ -251,4 +254,22 @@ void g2d_handle_writeback_frm_done(struct g2d_writeback_connector *g2d_wb_connec
 
 	if (!g2d_wb_connector->armed)
 		dev_dbg(g2d_wb_connector->dev, "wb_connector idle");
+}
+
+void g2d_signal_wb_error(struct g2d_writeback_connector *g2d_wb_connector)
+{
+
+	struct drm_writeback_job *job;
+
+	if (!g2d_wb_connector)
+		return;
+
+	job = list_first_entry_or_null(&g2d_wb_connector->base.job_queue, struct drm_writeback_job,
+				       list_entry);
+
+	if (job) {
+		drm_writeback_signal_completion(&g2d_wb_connector->base, -EIO);
+		dev_warn(g2d_wb_connector->dev, "signalled error for writeback job");
+		g2d_wb_connector->armed--;
+	}
 }

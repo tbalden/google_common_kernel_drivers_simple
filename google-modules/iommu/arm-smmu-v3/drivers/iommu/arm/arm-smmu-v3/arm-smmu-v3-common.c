@@ -23,6 +23,7 @@ static struct arm_smmu_option_prop arm_smmu_options[] = {
 	{ ARM_SMMU_OPT_OVR_INSTCFG_DATA, "arm,instdata-override"},
 	{ ARM_SMMU_OPT_RPM_DISABLE, "disable-runtime-pm"},
 	{ ARM_SMMU_OPT_NON_COHERENT_TTW, "non-coherent-ttw"},
+	{ ARM_SMMU_OPT_SYNC_FW, "synchronize-fw"},
 	{ 0, NULL},
 };
 

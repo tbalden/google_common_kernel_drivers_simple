@@ -1982,8 +1982,6 @@ dhdpcie_request_irq(dhdpcie_info_t *dhdpcie_info)
 		DHD_ERROR(("%s: PCI IRQ is already registered\n", __FUNCTION__));
 	}
 
-	dhdpcie_enable_irq_loop(bus);
-
 	DHD_TRACE(("%s %s\n", __FUNCTION__, dhdpcie_info->pciname));
 
 	return 0; /* SUCCESS */
@@ -2670,16 +2668,6 @@ dhdpcie_enable_irq(dhd_bus_t *bus)
 	dev = bus->dev;
 	enable_irq(dev->irq);
 	return BCME_OK;
-}
-
-void
-dhdpcie_enable_irq_loop(dhd_bus_t *bus)
-{
-	/* Enable IRQ in a loop till host_irq_disable_count becomes 0 */
-	uint host_irq_disable_count = dhdpcie_irq_disabled(bus);
-	while (host_irq_disable_count--) {
-		dhdpcie_enable_irq(bus); /* Enable back interrupt!! */
-	}
 }
 
 int

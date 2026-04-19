@@ -57,14 +57,6 @@ enum max77779_fg_command_bits {
 /* No longer used in 79, used for taskperiod re-scaling in 59 */
 #define MAX77779_LSB 1
 
-#define MAX77779_FG_EVENT_FULLCAPNOM_LOW     BIT(0)
-#define MAX77779_FG_EVENT_FULLCAPNOM_HIGH    BIT(1)
-#define MAX77779_FG_EVENT_REPSOC_EDET        BIT(2)
-#define MAX77779_FG_EVENT_REPSOC_FDET        BIT(3)
-#define MAX77779_FG_EVENT_REPSOC             BIT(4)
-#define MAX77779_FG_EVENT_VFOCV              BIT(5)
-#define MAX77779_FG_EVENT_STUCK              BIT(6)
-
 #define MAX77779_FG_AAFV_DEFAULT_FULLSOCTHR  95
 #define MAX77779_FG_AAFV_DEFAULT_FUS         0x0
 #define MAX77779_FG_AAFV_RESTORE_FUS         0x3
@@ -1266,51 +1258,14 @@ done:
 	chip->current_offset_check_done = true;
 }
 
-static int max77779_fg_monitor_log_data(struct max77779_fg_chip *chip, bool force_log)
-{
-	int ret, charge_counter = -1;
-	u16 repsoc, data;
-	char buf[256] = { 0 };
-
-	ret = REGMAP_READ(&chip->regmap, MAX77779_FG_RepSOC, &data);
-	if (ret < 0)
-		return ret;
-
-	repsoc = (data >> 8) & 0x00FF;
-	if (repsoc == chip->pre_repsoc && !force_log)
-		return ret;
-
-	ret = maxfg_reg_log_data(&chip->regmap, &chip->regmap_debug, buf);
-	if (ret < 0)
-		return ret;
-
-	ret = max77779_fg_update_battery_qh_based_capacity(chip);
-	if (ret == 0)
-		charge_counter = reg_to_capacity_uah(chip->current_capacity, chip);
-
-	gbms_logbuffer_devlog(chip->monitor_log, chip->dev, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
-			      "0x%04X %02X:%04X %s CC:%d", MONITOR_TAG_RM, MAX77779_FG_RepSOC, data,
-			      buf, charge_counter);
-
-	chip->pre_repsoc = repsoc;
-
-	return ret;
-}
-
-static int max77779_is_relaxed(struct max77779_fg_chip *chip)
-{
-	return maxfg_ce_relaxed(&chip->regmap, MAX77779_FG_FStat_RelDt_MASK,
-			(u16*)chip->cb_lh.latest_entry);
-}
-
-static int max77779_fg_monitor_log_learning(struct max77779_fg_chip *chip, bool force)
+static int max77779_fg_monitor_log_learning(struct max77779_fg_chip *chip, enum fg_log_event event)
 {
 	bool log_it, seed = !chip->cb_lh.latest_entry;
 	char* buf;
 	int ret;
 
 	/* do noting if no changes on dpacc/dqacc or relaxation */
-	log_it = force || seed ||
+	log_it = event != FG_LOG_RELAX || seed ||
 		 maxfg_ce_relaxed(&chip->regmap, MAX77779_FG_FStat_RelDt_MASK |
 				  MAX77779_FG_FStat_RelDt2_MASK, (u16*)chip->cb_lh.latest_entry);
 	if (!log_it)
@@ -1343,11 +1298,54 @@ static int max77779_fg_monitor_log_learning(struct max77779_fg_chip *chip, bool 
 	if (ret > 0)
 		gbms_logbuffer_devlog(chip->monitor_log, chip->dev,
 				      LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
-				      "0x%04X %s", MONITOR_TAG_LH, buf);
+				      "0x%04X %s EVT:%d", MONITOR_TAG_LH, buf, event);
 
 	kfree(buf);
 
 	return 0;
+}
+
+static int max77779_fg_monitor_log_data(struct max77779_fg_chip *chip, bool force_log)
+{
+	int ret, charge_counter = -1;
+	u16 repsoc, data;
+	char buf[256] = { 0 };
+
+	ret = REGMAP_READ(&chip->regmap, MAX77779_FG_RepSOC, &data);
+	if (ret < 0)
+		return ret;
+
+	repsoc = (data >> 8) & 0x00FF;
+	if (repsoc == chip->pre_repsoc && !force_log)
+		return ret;
+
+	ret = maxfg_reg_log_data(&chip->regmap, &chip->regmap_debug, buf);
+	if (ret < 0)
+		return ret;
+
+	ret = max77779_fg_update_battery_qh_based_capacity(chip);
+	if (ret == 0)
+		charge_counter = reg_to_capacity_uah(chip->current_capacity, chip);
+
+	gbms_logbuffer_devlog(chip->monitor_log, chip->dev, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+			      "0x%04X %02X:%04X %s CC:%d", MONITOR_TAG_RM, MAX77779_FG_RepSOC, data,
+			      buf, charge_counter);
+
+	/* Log learning entry when reaching 100% and each % drop for SoC < 10% */
+	if (chip->pre_repsoc > 0 && chip->pre_repsoc < 100 && repsoc == 100)
+		max77779_fg_monitor_log_learning(chip, FG_LOG_REACHING_100);
+	else if (chip->pre_repsoc <= 10 && repsoc < chip->pre_repsoc)
+		max77779_fg_monitor_log_learning(chip, FG_LOG_FALL_BELOW_10);
+
+	chip->pre_repsoc = repsoc;
+
+	return ret;
+}
+
+static int max77779_is_relaxed(struct max77779_fg_chip *chip)
+{
+	return maxfg_ce_relaxed(&chip->regmap, MAX77779_FG_FStat_RelDt_MASK,
+			(u16*)chip->cb_lh.latest_entry);
 }
 
 /* same as max77779_fg_nregister_write() */
@@ -1522,7 +1520,7 @@ static void max77779_fg_dynrelax(struct max77779_fg_chip *chip)
 static void max77779_fg_check_learning(struct max77779_fg_chip *chip)
 {
 	/* check for relaxation event and log it */
-	max77779_fg_monitor_log_learning(chip, false);
+	max77779_fg_monitor_log_learning(chip, FG_LOG_RELAX);
 	/* run dynamic relax if enabled  */
 	max77779_fg_dynrelax(chip);
 }
@@ -1728,6 +1726,7 @@ static int max77779_fg_property_is_writeable(struct power_supply *psy,
 static int max77779_fg_aafv_update(struct max77779_fg_chip *chip)
 {
 	const struct aafv_fg_config *cfg;
+	struct logbuffer *mon = chip->ce_log;
 	int ret, idx;
 
 	ret = max77779_fg_usr_lock_section(&chip->regmap, MAX77779_FG_ALL_SECTION, false);
@@ -1736,10 +1735,10 @@ static int max77779_fg_aafv_update(struct max77779_fg_chip *chip)
 		return ret;
 	}
 
-	ret = maxfg_aafv_apply(&chip->regmap, chip->aafv,
+	ret = maxfg_aafv_apply(mon, chip->dev, &chip->regmap, chip->aafv,
 			       chip->aafv_cfgs, chip->aafv_config_limits,
 			       MAX77779_FG_MiscCfg_FUS_CLEAR, MAX77779_FG_MiscCfg_FUS_SHIFT,
-			       &idx);
+			       &chip->aafv_modified_fus, &idx);
 	if (ret) {
 		dev_err(chip->dev, "failed to maxfg_aafv_apply (%d)\n", ret);
 		goto done;
@@ -1748,13 +1747,12 @@ static int max77779_fg_aafv_update(struct max77779_fg_chip *chip)
 	if (chip->aafv_cur_idx != idx) {
 		cfg = &chip->aafv_cfgs[idx];
 		chip->aafv_cur_idx = idx;
-		chip->aafv_modified_fus = true;
 
-		gbms_logbuffer_devlog(chip->monitor_log, chip->dev, LOGLEVEL_INFO, 0,
-				      LOGLEVEL_INFO,
-				      "aafv_fullsoc_update with %d %d %d %d",
-				      chip->cycle_count, cfg->fullsoc, cfg->voffset,
-				      cfg->fus);
+		gbms_logbuffer_devlog(mon, chip->dev, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
+				      "%s with cycle_count:%d fullsoc:%d%% voffset:%dmV fus:%#x(%s) ichgterm:%duA",
+				      __func__, chip->cycle_count, cfg->fullsoc, cfg->voffset,
+				      cfg->fus, chip->aafv_modified_fus ? "set" : "unset",
+				      reg_to_micro_amp(cfg->ichgterm, chip->RSense));
 	}
 
 done:
@@ -1811,8 +1809,7 @@ static int max77779_gbms_fg_get_property(struct power_supply *psy,
 		val->prop.intval = batt_ce_full_estimate(&chip->cap_estimate);
 		break;
 	case GBMS_PROP_CAPACITY_FADE_RATE:
-	case GBMS_PROP_CAPACITY_FADE_RATE_FCR:
-		err = maxfg_get_fade_rate(chip->dev, chip->bhi_fcn_count, &val->prop.intval, psp);
+		err = maxfg_get_fade_rate(chip->dev, chip->bhi_fcn_count, &val->prop.intval);
 		break;
 	case GBMS_PROP_BATT_ID:
 		val->prop.intval = chip->batt_id;
@@ -1914,6 +1911,9 @@ static int max77779_gbms_fg_set_property(struct power_supply *psy,
 		if (rc < 0)
 			dev_err(chip->dev, "failed to update bypass charge limit %d\n", rc);
 		break;
+	case GBMS_PROP_FG_EVENT_LOGGING:
+		max77779_fg_monitor_log_learning(chip, val->prop.intval);
+		break;
 	default:
 		pr_debug("%s: route to max77779_fg_set_property, psp:%d\n", __func__, psp);
 		return -ENODATA;
@@ -1931,8 +1931,11 @@ static int max77779_gbms_fg_property_is_writeable(struct power_supply *psy,
 	switch (psp) {
 	case GBMS_PROP_BATT_CE_CTRL:
 	case GBMS_PROP_HEALTH_ACT_IMPEDANCE:
+	case GBMS_PROP_FG_REG_LOGGING:
+	case GBMS_PROP_RECAL_FG:
 	case GBMS_PROP_AAFV_OFFSET:
 	case GBMS_PROP_NEED_CHARGE_TO_FULL:
+	case GBMS_PROP_FG_EVENT_LOGGING:
 		return 1;
 	default:
 		break;
@@ -2022,11 +2025,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: next FullCapNom updated
 	 * start condition: FullCapNom < DesignCap x 60%
 	 */
-	if (curr_event & MAX77779_FG_EVENT_FULLCAPNOM_LOW) {
+	if (curr_event & MAXFG_EVENT_FULLCAPNOM_LOW) {
 		if (fullcapnom != chip->last_fullcapnom)
-			curr_event &= ~MAX77779_FG_EVENT_FULLCAPNOM_LOW;
+			curr_event &= ~MAXFG_EVENT_FULLCAPNOM_LOW;
 	} else if (fullcapnom < (designcap * 60 / 100)) {
-		curr_event |= MAX77779_FG_EVENT_FULLCAPNOM_LOW;
+		curr_event |= MAXFG_EVENT_FULLCAPNOM_LOW;
 		chip->last_fullcapnom = fullcapnom;
 	}
 
@@ -2035,11 +2038,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: next FullCapNom updated
 	 * start condition: FullCapNom > DesignCap x 115%
 	 */
-	if (curr_event & MAX77779_FG_EVENT_FULLCAPNOM_HIGH) {
+	if (curr_event & MAXFG_EVENT_FULLCAPNOM_HIGH) {
 		if (fullcapnom != chip->last_fullcapnom)
-			curr_event &= ~MAX77779_FG_EVENT_FULLCAPNOM_HIGH;
+			curr_event &= ~MAXFG_EVENT_FULLCAPNOM_HIGH;
 	} else if (fullcapnom > (designcap * 115 / 100)) {
-		curr_event |= MAX77779_FG_EVENT_FULLCAPNOM_HIGH;
+		curr_event |= MAXFG_EVENT_FULLCAPNOM_HIGH;
 		chip->last_fullcapnom = fullcapnom;
 	}
 
@@ -2048,11 +2051,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: RepSoC > 20%
 	 * start condition: RepSoC > 10% && Empty detection bit is set
 	 */
-	if (curr_event & MAX77779_FG_EVENT_REPSOC_EDET) {
+	if (curr_event & MAXFG_EVENT_REPSOC_EDET) {
 		if (repsoc > 20)
-			curr_event &= ~MAX77779_FG_EVENT_REPSOC_EDET;
+			curr_event &= ~MAXFG_EVENT_REPSOC_EDET;
 	} else if (repsoc > 10 && edet) {
-		curr_event |= MAX77779_FG_EVENT_REPSOC_EDET;
+		curr_event |= MAXFG_EVENT_REPSOC_EDET;
 	}
 
 	/*
@@ -2060,11 +2063,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: RepSoc < 80%
 	 * start condition: RepSoC < 90% && Full detection bit is set
 	 */
-	if (curr_event & MAX77779_FG_EVENT_REPSOC_FDET) {
+	if (curr_event & MAXFG_EVENT_REPSOC_FDET) {
 		if (repsoc < 80)
-			curr_event &= ~MAX77779_FG_EVENT_REPSOC_FDET;
+			curr_event &= ~MAXFG_EVENT_REPSOC_FDET;
 	} else if (repsoc < 90 && fdet) {
-		curr_event |= MAX77779_FG_EVENT_REPSOC_FDET;
+		curr_event |= MAXFG_EVENT_REPSOC_FDET;
 	}
 
 	/*
@@ -2072,11 +2075,11 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * stop condition: abs(MixSoC - RepSoC) < 20%
 	 * start condition: abs(MixSoC - RepSoC) > 25%
 	 */
-	if (curr_event & MAX77779_FG_EVENT_REPSOC) {
+	if (curr_event & MAXFG_EVENT_REPSOC) {
 		if (abs(mixsoc - repsoc) < 20)
-			curr_event &= ~MAX77779_FG_EVENT_REPSOC;
+			curr_event &= ~MAXFG_EVENT_REPSOC;
 	} else if (abs(mixsoc - repsoc) > 25) {
-		curr_event |= MAX77779_FG_EVENT_REPSOC;
+		curr_event |= MAXFG_EVENT_REPSOC;
 	}
 
 	/*
@@ -2085,14 +2088,14 @@ static int max77779_fg_monitor_log_abnormal(struct max77779_fg_chip *chip)
 	 * start condition: (VFOCV < (AvgVCell - 1V) || VFOCV > (AvgVCell + 1V))
 	 *		    && abs(Current) < 5A
 	 */
-	if (curr_event & MAX77779_FG_EVENT_VFOCV) {
+	if (curr_event & MAXFG_EVENT_VFOCV) {
 		if (reg_to_micro_volt(vfocv) < (reg_to_micro_volt(avgvcell) - 200000) ||
 		    reg_to_micro_volt(vfocv) > (reg_to_micro_volt(avgvcell) + 200000))
-			curr_event &= ~MAX77779_FG_EVENT_VFOCV;
+			curr_event &= ~MAXFG_EVENT_VFOCV;
 	} else if ((reg_to_micro_volt(vfocv) < (reg_to_micro_volt(avgvcell) - 1000000) ||
 		    reg_to_micro_volt(vfocv) > (reg_to_micro_volt(avgvcell) + 1000000)) &&
 		    abs(reg_to_micro_amp(ibat, chip->RSense)) < 5000000) {
-		curr_event |= MAX77779_FG_EVENT_VFOCV;
+		curr_event |= MAXFG_EVENT_VFOCV;
 	}
 
 	/* do nothing if no state change */
@@ -2263,7 +2266,7 @@ static int max77779_fg_log_stuck_event(struct max77779_fg_chip *chip)
 
 	gbms_logbuffer_devlog(chip->monitor_log, chip->dev, LOGLEVEL_INFO, 0, LOGLEVEL_INFO,
 			      "%#04X %d 1%s",
-			      MONITOR_TAG_AB, GET_BIT_POSITION(MAX77779_FG_EVENT_STUCK), buf);
+			      MONITOR_TAG_AB, GET_BIT_POSITION(MAXFG_EVENT_STUCK), buf);
 	chip->fg_stuck_count++;
 
 	return 0;
@@ -2456,7 +2459,7 @@ static int max77779_log_learn_set(void *data, u64 val)
 {
 	struct max77779_fg_chip *chip = (struct max77779_fg_chip *)data;
 
-	max77779_fg_monitor_log_learning(chip, true);
+	max77779_fg_monitor_log_learning(chip, FG_LOG_DEBUG);
 	return 0;
 }
 
@@ -3562,7 +3565,7 @@ static int max77779_fg_init_model_data(struct max77779_fg_chip *chip)
 
 static int max77779_fg_init_chip(struct max77779_fg_chip *chip)
 {
-	int ret;
+	int ret, fus = 0;
 	u16 data = 0;
 	u16 misccfg;
 
@@ -3666,12 +3669,12 @@ static int max77779_fg_init_chip(struct max77779_fg_chip *chip)
 	if (ret < 0) {
 		dev_err(chip->dev, "Error reading misccfg reg (%d)\n", ret);
 	} else if (chip->aafv_config_limits != 0) {
-		int fus;
-
 		fus = _max77779_fg_misccfg_fus_get(misccfg);
 		chip->aafv_modified_fus = (fus == chip->aafv_cfgs[chip->aafv_cur_idx].fus);
 	}
-	dev_info(chip->dev, "aafv_modified_fus: %d\n", chip->aafv_modified_fus);
+	dev_info(chip->dev, "aafv_modified_fus:%d, misccfg:0x%x, idx:%d, fus:%d, cfgs:%d\n",
+		 chip->aafv_modified_fus, misccfg, chip->aafv_cur_idx, fus,
+		 chip->aafv_cfgs[chip->aafv_cur_idx].fus);
 
 	return 0;
 }
@@ -3700,6 +3703,15 @@ static int max77779_fg_prop_read(gbms_tag_t tag, void *buff, size_t size,
 	case GBMS_TAG_CLHI:
 		ret = maxfg_collect_history_data(buff, size, chip->por, chip->designcap,
 						 chip->RSense, &chip->regmap, &chip->regmap_debug);
+		/* size is the idx from google_battery */
+		if (!chip->history_idx)
+			chip->history_idx = size;
+
+		if (chip->history_idx != size) {
+			ret = maxfg_reset_max_min(&chip->regmap);
+			if (ret == 0)
+				chip->history_idx = size;
+		}
 		break;
 
 	default:

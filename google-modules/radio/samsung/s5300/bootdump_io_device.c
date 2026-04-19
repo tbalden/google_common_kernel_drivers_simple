@@ -27,6 +27,7 @@
 #if IS_ENABLED(CONFIG_BOOT_DEVICE_SPI)
 #include "boot_device_spi.h"
 #endif
+#include "link_device_memory.h"
 
 static int bootdump_open(struct inode *inode, struct file *filp)
 {
@@ -143,12 +144,20 @@ static long bootdump_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 	enum modem_state p_state;
 	struct cpif_version version;
 	int ret = 0, value;
-#if IS_ENABLED(CONFIG_BOOT_DEVICE_SPI)
-	struct mem_link_device *mld;
-#endif
+	struct modem_data *modem = mc->mdm_data;
+	struct mem_link_device *mld = modem->mld;
+	u32 __iomem *boot_indicator_addr;
 
 	switch (cmd) {
 	case IOCTL_POWER_ON:
+		if (modem->offset_boot_indicator) {
+			boot_indicator_addr =
+				(u32 __iomem *)(mld->base + modem->offset_boot_indicator);
+			mif_info("cp boot indicator:0x%08x\n", ioread32(boot_indicator_addr));
+		} else {
+			mif_err("cp boot indicator not defined in dts!\n");
+		}
+
 		if (!mc->ops.power_on) {
 			mif_err("%s: power_on is null\n", iod->name);
 			return -EINVAL;
@@ -168,6 +177,14 @@ static long bootdump_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 	{
 		void __user *uarg = (void __user *)arg;
 		struct boot_mode mode;
+
+		if (modem->offset_boot_indicator) {
+			boot_indicator_addr =
+				(u32 __iomem *)(mld->base + modem->offset_boot_indicator);
+			mif_info("cp boot indicator:0x%08x\n", ioread32(boot_indicator_addr));
+		} else {
+			mif_err("cp boot indicator not defined in dts!\n");
+		}
 
 		mif_info("%s: IOCTL_POWER_RESET\n", iod->name);
 		ret = copy_from_user(&mode, uarg, sizeof(mode));

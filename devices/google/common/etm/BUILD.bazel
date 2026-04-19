@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
-load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 load(
-    "//build/kernel/kleaf:kernel.bzl",
+    "@kleaf//build/kernel/kleaf:kernel.bzl",
     "kernel_build",
     "kernel_build_config",
 )
+load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 
 package(
     default_visibility = [

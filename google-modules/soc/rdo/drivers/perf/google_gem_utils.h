@@ -113,7 +113,7 @@ static inline const char *parse_substr(struct device *dev, const char *pos, cons
 		return end;
 
 	while (true) {
-		const char *tok_end = min_t(char *, end, strchrnul(pos, delimiter));
+		const char *tok_end = min_t(const char *, end, strchrnul(pos, delimiter));
 		int ret = consume_cb(dev, pos, tok_end - pos, data);
 
 		if (ret)

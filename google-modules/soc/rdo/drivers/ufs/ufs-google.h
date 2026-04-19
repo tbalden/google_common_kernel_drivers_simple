@@ -12,6 +12,7 @@
 #include <linux/debugfs.h>
 #include <linux/gpio/consumer.h>
 #include <linux/iopoll.h>
+#include <linux/mutex.h>
 #include <linux/notifier.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -28,6 +29,7 @@
 #include <ufs/ufshci.h>
 
 #if IS_ENABLED(CONFIG_UFS_PIXEL_FEATURES)
+#include <perf/core/gs_domain_idle.h>
 #include "ufs-pixel.h"
 #endif
 
@@ -80,6 +82,8 @@ struct ufs_google_ops {
 	int (*poll_phy_ready)(struct ufs_google_host *host);
 };
 
+#define ERR_STR_LEN 128
+
 struct ufs_google_host {
 #if IS_ENABLED(CONFIG_UFS_PIXEL_FEATURES)
 	struct pixel_ufs pixel_ufs;
@@ -92,8 +96,10 @@ struct ufs_google_host {
 	bool multi_intr_enabled;
 	bool calibration_needed;
 	bool phy_patching_needed;
+	bool phy_init_needed;
 	enum phy_patch_mode phy_patch_mode;
 	bool clkgate_delay_set;
+	ktime_t device_off_time;
 
 	void __iomem *ufs_top_mmio;
 	void __iomem *ufs_phy_sram_mmio;
@@ -113,6 +119,7 @@ struct ufs_google_host {
 	struct cq_irq_desc cq_desc[MAXQ];
 	struct pm_qos_request pm_qos_req;
 	struct mutex indirect_reg_mutex;
+	struct mutex ufs_pm_lock;
 	struct clk *refclk;
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *refclk_on_state;
@@ -123,6 +130,12 @@ struct ufs_google_host {
 	int phy_cal_size;
 	bool pm_request_active;
 	bool pm_set;
+
+	/* UFS error signature */
+	char sig_err_str[ERR_STR_LEN];
+	u64 sig_err_tstamp;
+	char saved_err_str[ERR_STR_LEN];
+	u64 saved_err_tstamp;
 
 	/* dts properties */
 	u64 caps;
@@ -141,6 +154,7 @@ enum google_host_cap {
 	GCAP_PHY_CAL = BIT(3), /* calibration */
 	GCAP_LOCAL_RPM = BIT(4),
 	GCAP_LOCAL_SWH8 = BIT(5),
+	GCAP_BLOCK_C4 = BIT(6),
 
 	/* Resources CAPs - starts from bit 32 */
 	GCAP_RSC_IP_IDLE = BIT(32),

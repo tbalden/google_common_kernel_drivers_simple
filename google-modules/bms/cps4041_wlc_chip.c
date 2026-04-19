@@ -1427,7 +1427,8 @@ static int cps4041_firmware_request(struct google_wlc_data *chgr,
 	int ret;
 
 	/* upload stats for errors on loading firmware */
-	chgr->fw_data.needs_update = true;
+	chgr->fw_data.ver.major = -1;
+	chgr->fw_data.ver.minor = -1;
 
 	if (!chgr->fw_data.update_support)
 		return -EINVAL;
@@ -1453,7 +1454,8 @@ static int cps4041_firmware_request(struct google_wlc_data *chgr,
 	ver.major = (*fw_data)->data[CPS4041_FW_MAJOR_OFFSET];
 	ver.minor = (*fw_data)->data[CPS4041_FW_MINOR_OFFSET];
 
-	if (ver.project_id != chgr->fw_data.ver.project_id && chgr->fw_data.erase_fw == false) {
+	chgr->fw_data.ver.project_id = ver.project_id;
+	if (ver.project_id != chgr->fw_data.cur_ver.project_id && chgr->fw_data.erase_fw == false) {
 		logbuffer_devlog(chgr->fw_log, chgr->dev, "fw file with wrong project id=%02x",
 				 ver.project_id);
 		chgr->fw_data.update_support = false;
@@ -1469,7 +1471,8 @@ static int cps4041_firmware_request(struct google_wlc_data *chgr,
 		chgr->fw_data.needs_update = true;
 		break;
 	case FWUPDATE_DIFF:
-		if (ver.major != chgr->fw_data.ver.major || ver.minor != chgr->fw_data.ver.minor) {
+		if (ver.major != chgr->fw_data.cur_ver.major ||
+		    ver.minor != chgr->fw_data.cur_ver.minor) {
 			chgr->fw_data.needs_update = true;
 		} else {
 			chgr->fw_data.needs_update = false;
@@ -1477,8 +1480,9 @@ static int cps4041_firmware_request(struct google_wlc_data *chgr,
 		}
 		break;
 	case FWUPDATE_NEW:
-		if ((ver.major >= chgr->fw_data.ver.major && ver.minor > chgr->fw_data.ver.minor) ||
-		    (ver.major > chgr->fw_data.ver.major))  {
+		if ((ver.major >= chgr->fw_data.cur_ver.major &&
+		    ver.minor > chgr->fw_data.cur_ver.minor) ||
+		    (ver.major > chgr->fw_data.cur_ver.major))  {
 			chgr->fw_data.needs_update = true;
 		} else {
 			chgr->fw_data.needs_update = false;
@@ -1493,8 +1497,8 @@ static int cps4041_firmware_request(struct google_wlc_data *chgr,
 
 	logbuffer_devlog(chgr->fw_log, chgr->dev,
 			 "fw=0x%02x 0x%02x, request=0x%02x 0x%02x, option=%d, needs_update=%d",
-			 chgr->fw_data.ver.major, chgr->fw_data.ver.minor, ver.major, ver.minor,
-			 chgr->fw_data.update_option, chgr->fw_data.needs_update);
+			 chgr->fw_data.cur_ver.major, chgr->fw_data.cur_ver.minor, ver.major,
+			 ver.minor, chgr->fw_data.update_option, chgr->fw_data.needs_update);
 	return 0;
 }
 
@@ -1541,37 +1545,47 @@ static int cps4041_read_firmware_version(struct google_wlc_data *chgr, struct wl
 
 static int cps4041_crc_check(struct google_wlc_data *chgr, u64 *crc)
 {
-	int ret;
-	u8 val8;
+	int ret = 0;
+	u8 val8 = 0;
 	u16 val;
 
-	/* it takes up to 0.3 + 1 + 2 seconds for waiting mode and crc computation */
-	for (int i = 0; i < 3; i++) {
-		msleep(100);
+	/* it takes up to 100ms for waiting mode */
+	for (int i = 0; i < BACKPOWER_CHECK_RETRY_COUNT; i++) {
+		msleep(BACKPOWER_CHECK_DELAY_MS);
 		ret = chgr->chip->reg_read_8(chgr, CPS4041_SYS_MODE_REG, &val8);
 		if (ret != 0) {
 			ret = -FWUPDATE_ERROR_I2C;
 			continue;
 		}
-		if (val8 == CPS4041_SYS_MODE_BACKPOWER) {
-			ret = cps4041_chip_set_cmd_reg(chgr, CPS4041_COMMAND_CRC_CHECK, 1000);
-			if (ret != 0)
-				ret = -FWUPDATE_ERROR_I2C;
+		if (val8 == CPS4041_SYS_MODE_BACKPOWER)
 			break;
-		}
-		if (val8 == CPS4041_SYS_MODE_EMPTY) {
-			dev_err(chgr->dev, "Empty firmware, mode reg: %#02x", val8);
-			return -FWUPDATE_ERROR_CRC;
-		}
-		dev_err(chgr->dev, "Not in backpower mode, mode reg: %#02x", val8);
-		ret = -FWUPDATE_ERROR_BACKPOWER;
+
+		if (val8 == CPS4041_SYS_MODE_EMPTY)
+			ret = -FWUPDATE_ERROR_CRC;
+		else
+			ret = -FWUPDATE_ERROR_BACKPOWER;
 	}
 
-	if (ret != 0)
-		return ret;
+	if (ret != 0) {
+		if (ret == -FWUPDATE_ERROR_CRC)
+			dev_err(chgr->dev, "Empty firmware, mode reg: %#02x", val8);
+		else if (ret == -FWUPDATE_ERROR_BACKPOWER)
+			dev_err(chgr->dev, "Not in backpower mode, mode reg: %#02x", val8);
 
-	for (int i = 0; i < 20; i++) {
-		msleep(100);
+		return ret;
+	}
+
+	/*
+	 * it takes up to 1s + 2s for setting crc computation and reading crc
+	 * even though cps suggests waiting up to 2s for setting command
+	 */
+	msleep(BACKPOWER_CHECK_DELAY_MS);
+	ret = cps4041_chip_set_cmd_reg(chgr, CPS4041_COMMAND_CRC_CHECK, 1000);
+	if (ret != 0)
+		return -FWUPDATE_ERROR_I2C;
+
+	for (int i = 0; i < CRC_CHECK_RETRY_COUNT; i++) {
+		msleep(CRC_CHECK_DELAY_MS);
 		ret = chgr->chip->reg_read_16(chgr, CPS4041_CRC_VAL_REG, &val);
 		if (ret != 0)
 			return -FWUPDATE_ERROR_I2C;
@@ -1621,37 +1635,46 @@ static int cps4041_chip_fwupdate(struct google_wlc_data *chgr, int step)
 			mutex_unlock(&chgr->fwupdate_lock);
 			break;
 		}
+
+		if (chgr->fw_data.erase_fw) {
+			logbuffer_devlog(chgr->fw_log, chgr->dev, "firmware erase complete");
+			break;
+		}
 		logbuffer_devlog(chgr->fw_log, chgr->dev, "firmware programming successful");
 
 		DEBUG_I2C_LOG(chgr, "firmware verify start");
 		ret = cps4041_firmware_verify(chgr);
-		if (ret < 0)
+		if (ret < 0) {
 			logbuffer_devlog(chgr->fw_log, chgr->dev, "firmware verify failed");
+			ret = -FWUPDATE_ERROR_FLASH;
+			mutex_unlock(&chgr->fwupdate_lock);
+			break;
+		}
+
+		/* update is done once the firmware is verified */
+		chgr->fw_data.update_done = true;
+
 		logbuffer_devlog(chgr->fw_log, chgr->dev, "chip reset");
-		ret |= cps4041_chip_reset(chgr);
+		ret = cps4041_chip_reset(chgr);
+
 		mutex_unlock(&chgr->fwupdate_lock);
-		if (ret == 0 || chgr->fw_data.erase_fw) {
+		if (ret == 0) {
 			ret = cps4041_read_firmware_version(chgr, &chgr->fw_data.ver);
 			if (ret < 0)
 				logbuffer_devlog(chgr->fw_log, chgr->dev,
 						 "fail to read fw version, ret=%d", ret);
 			ret = cps4041_crc_check(chgr, &chgr->fw_data.ver.crc);
-			if (ret < 0) {
+			if (ret == 0 && chgr->fw_data.ver.crc == 0)
+				ret = -FWUPDATE_ERROR_CRC;
+			if (ret < 0)
 				logbuffer_devlog(chgr->fw_log, chgr->dev,
 						 "fail to read crc, ret=%d", ret);
-			} else if (ret == 0 && chgr->fw_data.ver.crc == 0) {
-				ret = -FWUPDATE_ERROR_FLASH;
-			} else {
-				ret = 0;
-				chgr->fw_data.update_done = true;
-			}
 
-			if (ret == 0)
-				logbuffer_devlog(chgr->fw_log, chgr->dev,
-					"major=%02x,minor=%02x,project_id=%02x,crc=%04llx",
-					chgr->fw_data.ver.major, chgr->fw_data.ver.minor,
-					chgr->fw_data.ver.project_id,
-					chgr->fw_data.ver.crc);
+			logbuffer_devlog(chgr->fw_log, chgr->dev,
+					 "major=%02x,minor=%02x,project_id=%02x,crc=%04llx",
+					 chgr->fw_data.ver.major, chgr->fw_data.ver.minor,
+					 chgr->fw_data.ver.project_id,
+					 chgr->fw_data.ver.crc);
 			logbuffer_devlog(chgr->fw_log, chgr->dev,
 					 "firmware download is completed successfully\n");
 			if (chgr->fw_data.ver_tag <= 0)
@@ -1666,35 +1689,34 @@ static int cps4041_chip_fwupdate(struct google_wlc_data *chgr, int step)
 				logbuffer_devlog(chgr->fw_log, chgr->dev,
 						 "store fw_tag=0x%08x\n", fw_tag);
 		} else {
-			ret = -FWUPDATE_ERROR_FLASH;
-			logbuffer_devlog(chgr->fw_log, chgr->dev, "firmware download failed\n");
+			logbuffer_devlog(chgr->fw_log, chgr->dev, "firmware reset failed\n");
 		}
 
 		break;
 	case CRC_VERIFY_STEP:
-		if (chgr->fw_data.ver.crc > 0)
+		if (chgr->fw_data.cur_ver.crc > 0)
 			break;
 		logbuffer_devlog(chgr->fw_log, chgr->dev, "CRC check start");
-		chgr->fw_data.ver.crc = 0;
-		ret = cps4041_crc_check(chgr, &chgr->fw_data.ver.crc);
-		if (ret < 0 || chgr->fw_data.ver.crc == 0) {
+		chgr->fw_data.cur_ver.crc = 0;
+		ret = cps4041_crc_check(chgr, &chgr->fw_data.cur_ver.crc);
+		if (ret == 0 && chgr->fw_data.cur_ver.crc == 0)
+			ret = -FWUPDATE_ERROR_CRC;
+
+		if (ret < 0) {
 			chgr->fw_data.update_done = false;
-			chgr->fw_data.ver.project_id = chgr->pdata->project_id;
-			chgr->fw_data.status = (ret < 0) ? ret : -FWUPDATE_ERROR_CRC;
-			if (chgr->fw_data.status == -FWUPDATE_ERROR_CRC)
+			chgr->fw_data.cur_ver.project_id = chgr->pdata->project_id;
+			if (ret == -FWUPDATE_ERROR_CRC)
 				chgr->fw_data.update_option = FWUPDATE_FORCE;
 			logbuffer_devlog(chgr->fw_log, chgr->dev,
 					 "CRC check failed,ret=%d,crc=0x%04llx\n",
-					 ret, chgr->fw_data.ver.crc);
+					 ret, chgr->fw_data.cur_ver.crc);
 			break;
 		}
-		chgr->fw_data.status = FWUPDATE_STATUS_SUCCESS;
-		ret = cps4041_read_firmware_version(chgr, &chgr->fw_data.ver);
-		if (ret < 0)
+		if (cps4041_read_firmware_version(chgr, &chgr->fw_data.cur_ver))
 			logbuffer_devlog(chgr->fw_log, chgr->dev, "Fail to read fw version");
 		logbuffer_devlog(chgr->fw_log, chgr->dev, "fw.major=%02x,minor=%02x,crc=%04llx\n",
-				 chgr->fw_data.ver.major, chgr->fw_data.ver.minor,
-				 chgr->fw_data.ver.crc);
+				 chgr->fw_data.cur_ver.major, chgr->fw_data.cur_ver.minor,
+				 chgr->fw_data.cur_ver.crc);
 		break;
 	case READ_REQ_FWVER:
 		ret = cps4041_read_request_firmware(chgr);
@@ -1754,14 +1776,6 @@ static int cps4041_pdet_en_store(void *data, u64 val)
 	return cps4041_pdet_en(chgr, val);
 }
 DEFINE_SIMPLE_ATTRIBUTE(debug_pdet_fops, NULL, cps4041_pdet_en_store, "%lld\n");
-
-static int cps4041_crc_check_show(void *data, u64 *val)
-{
-	struct google_wlc_data *chgr = data;
-
-	return cps4041_crc_check(chgr, val);
-}
-DEFINE_SIMPLE_ATTRIBUTE(debug_crc_fops, cps4041_crc_check_show, NULL, "%04llx\n");
 
 static int cps4041_powermode_show(void *data, u64 *val)
 {
@@ -1881,6 +1895,7 @@ int cps4041_chip_init(struct google_wlc_data *chgr)
 	chip->reg_alpha_fm_itx = CPS4041_ALPHA_FM_ITX_REG;
 	chip->reg_alpha_fm_vrect = CPS4041_ALPHA_FM_VRECT_REG;
 	chip->reg_alpha_fm_irect = CPS4041_ALPHA_FM_IRECT_REG;
+	chip->reg_qi_id = CPS4041_QI_ID_REG;
 
 	chip->chip_get_sys_mode = cps4041_get_sys_mode;
 	chip->chip_get_vout_set = cps4041_get_vout_set;
@@ -1918,7 +1933,6 @@ int cps4041_chip_init(struct google_wlc_data *chgr)
 	chip->chip_set_dynamic_mod = cps4041_chip_set_dynamic_mod;
 
 	debugfs_create_file("pdet_en", 0200, chgr->debug_entry, chgr, &debug_pdet_fops);
-	debugfs_create_file("crc_check", 0200, chgr->debug_entry, chgr, &debug_crc_fops);
 	debugfs_create_file("wlc_dc_powermode", 0644, chgr->debug_entry, chgr,
 				&debug_powermode_fops);
 	debugfs_create_file("wlc_dc_gain_linear", 0644, chgr->debug_entry, chgr,

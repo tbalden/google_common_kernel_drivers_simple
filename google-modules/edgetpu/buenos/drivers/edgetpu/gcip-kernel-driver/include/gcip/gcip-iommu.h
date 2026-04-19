@@ -25,6 +25,7 @@
 #include <linux/idr.h>
 #include <linux/iommu.h>
 #include <linux/iova.h>
+#include <linux/mutex.h>
 #include <linux/scatterlist.h>
 #include <linux/seq_file.h>
 
@@ -32,40 +33,43 @@
 #include <gcip/gcip-domain-pool.h>
 #include <gcip/gcip-mem-pool.h>
 
-/*
- * Helpers for manipulating @gcip_map_flags parameter of the `gcip_iommu_domain_{map,unmap}_sg`
- * functions.
- */
-#define GCIP_MAP_FLAGS_DMA_DIRECTION_OFFSET 0
-#define GCIP_MAP_FLAGS_DMA_DIRECTION_BIT_SIZE 2
-#define GCIP_MAP_FLAGS_DMA_DIRECTION_TO_FLAGS(dir) \
-	((u64)(dir) << GCIP_MAP_FLAGS_DMA_DIRECTION_OFFSET)
+/* Helpers to get/set @gcip_map_flags of the `gcip_iommu_domain_{map,unmap}_sg` functions. */
 
+/* Bitfield sizes of gcip_map_flags. */
+#define GCIP_MAP_FLAGS_DMA_DIRECTION_BIT_SIZE 2
+#define GCIP_MAP_FLAGS_DMA_COHERENT_BIT_SIZE 1
+#define GCIP_MAP_FLAGS_RESTRICT_IOVA_BIT_SIZE 1
+#define GCIP_MAP_FLAGS_DMA_ATTR_BIT_SIZE 10
+#define GCIP_MAP_FLAGS_MMIO_BIT_SIZE 1
+
+/* Offsets of gcip_map_flags. */
+#define GCIP_MAP_FLAGS_DMA_DIRECTION_OFFSET 0
 #define GCIP_MAP_FLAGS_DMA_COHERENT_OFFSET \
 	(GCIP_MAP_FLAGS_DMA_DIRECTION_OFFSET + GCIP_MAP_FLAGS_DMA_DIRECTION_BIT_SIZE)
-#define GCIP_MAP_FLAGS_DMA_COHERENT_BIT_SIZE 1
-#define GCIP_MAP_FLAGS_DMA_COHERENT_TO_FLAGS(coherent) \
-	((u64)(coherent) << GCIP_MAP_FLAGS_DMA_COHERENT_OFFSET)
-
 #define GCIP_MAP_FLAGS_DMA_ATTR_OFFSET \
 	(GCIP_MAP_FLAGS_DMA_COHERENT_OFFSET + GCIP_MAP_FLAGS_DMA_COHERENT_BIT_SIZE)
-#define GCIP_MAP_FLAGS_DMA_ATTR_BIT_SIZE 10
-#define GCIP_MAP_FLAGS_DMA_ATTR_TO_FLAGS(attr) ((u64)(attr) << GCIP_MAP_FLAGS_DMA_ATTR_OFFSET)
-
 #define GCIP_MAP_FLAGS_RESTRICT_IOVA_OFFSET \
 	(GCIP_MAP_FLAGS_DMA_ATTR_OFFSET + GCIP_MAP_FLAGS_DMA_ATTR_BIT_SIZE)
-#define GCIP_MAP_FLAGS_RESTRICT_IOVA_BIT_SIZE 1
-#define GCIP_MAP_FLAGS_RESTRICT_IOVA_TO_FLAGS(restrict) \
-	((u64)(restrict) << GCIP_MAP_FLAGS_RESTRICT_IOVA_OFFSET)
-
 #define GCIP_MAP_FLAGS_MMIO_OFFSET \
 	(GCIP_MAP_FLAGS_RESTRICT_IOVA_OFFSET + GCIP_MAP_FLAGS_RESTRICT_IOVA_BIT_SIZE)
-#define GCIP_MAP_FLAGS_MMIO_BIT_SIZE 1
-#define GCIP_MAP_FLAGS_MMIO_TO_FLAGS(mmio) ((u64)(mmio) << GCIP_MAP_FLAGS_MMIO_OFFSET)
 
-/* Helper macros to easily create the mapping direction flags. */
-#define GCIP_MAP_FLAGS_DMA_RW GCIP_MAP_FLAGS_DMA_DIRECTION_TO_FLAGS(DMA_BIDIRECTIONAL)
-#define GCIP_MAP_FLAGS_DMA_RO GCIP_MAP_FLAGS_DMA_DIRECTION_TO_FLAGS(DMA_TO_DEVICE)
+/* Masks of gcip_map_flags. */
+#define GCIP_MAP_MASK(ATTR) \
+	((BIT_ULL(GCIP_MAP_FLAGS_##ATTR##_BIT_SIZE) - 1) << (GCIP_MAP_FLAGS_##ATTR##_OFFSET))
+#define GCIP_MAP_MASK_DMA_DIRECTION GCIP_MAP_MASK(DMA_DIRECTION)
+#define GCIP_MAP_MASK_DMA_COHERENT GCIP_MAP_MASK(DMA_COHERENT)
+#define GCIP_MAP_MASK_DMA_ATTR GCIP_MAP_MASK(DMA_ATTR)
+#define GCIP_MAP_MASK_RESTRICT_IOVA GCIP_MAP_MASK(RESTRICT_IOVA)
+#define GCIP_MAP_MASK_MMIO GCIP_MAP_MASK(MMIO)
+
+/* Get functions of gcip_map_flags. */
+#define GCIP_MAP_FLAGS_GET_VALUE(ATTR, flags) \
+	(((flags) & GCIP_MAP_MASK(ATTR)) >> (GCIP_MAP_FLAGS_##ATTR##_OFFSET))
+#define GCIP_MAP_FLAGS_GET_DMA_DIRECTION(flags) GCIP_MAP_FLAGS_GET_VALUE(DMA_DIRECTION, flags)
+#define GCIP_MAP_FLAGS_GET_DMA_COHERENT(flags) GCIP_MAP_FLAGS_GET_VALUE(DMA_COHERENT, flags)
+#define GCIP_MAP_FLAGS_GET_DMA_ATTR(flags) GCIP_MAP_FLAGS_GET_VALUE(DMA_ATTR, flags)
+#define GCIP_MAP_FLAGS_GET_RESTRICT_IOVA(flags) GCIP_MAP_FLAGS_GET_VALUE(RESTRICT_IOVA, flags)
+#define GCIP_MAP_FLAGS_GET_MMIO(flags) GCIP_MAP_FLAGS_GET_VALUE(MMIO, flags)
 
 /*
  * Bitfields of @gcip_map_flags:
@@ -86,8 +90,7 @@
  *   [63:15] - RESERVED
  *               Set RESERVED bits to 0 to ensure backwards compatibility.
  *
- * One can use gcip_iommu_encode_gcip_map_flags or `GCIP_MAP_FLAGS_DMA_*_TO_FLAGS` macros to
- * generate a flag.
+ * One should use gcip_iommu_encode_gcip_map_flags to generate the gcip_map_flags.
  */
 
 struct gcip_iommu_domain_ops;
@@ -144,12 +147,9 @@ struct gcip_iommu_mapping_ops {
  *       This value is the real one that was used for mapping and should be the same as the one
  *       encoded in gcip_map_flags.
  *       This field should be used in revert functions and dma sync functions.
- * @gcip_map_flags: The flags used to create the mapping, which can be encoded with
- *                  gcip_iommu_encode_gcip_map_flags() or `GCIP_MAP_FLAGS_DMA_*_TO_FLAGS` macros.
+ * @gcip_map_flags: The flags used to create the mapping, which should be encoded with
+ *                  gcip_iommu_encode_gcip_map_flags().
  * @map_debug_flags: debug flags for reporting and diagnosis purposes.
- * @host_address: Start address of buffer in the virtual address space of the mapping process, for
- *                buffer mappings only.
- * @owning_mm: Holds a reference to the owning process MM, for buffer mappings only.
  * @user_specified_daddr: If true, its IOVA address was specified by the user from the `*_to_iova`
  *                        mapping functions and it won't free that when it's going to be unmapped.
  *                        It's user's responsibility to manage the IOVA region.
@@ -166,12 +166,6 @@ struct gcip_iommu_mapping {
 	enum dma_data_direction dir;
 	u64 gcip_map_flags;
 	enum gcip_map_debug_flags map_debug_flags;
-	/*
-	 * TODO(b/302510715): Use another wrapper struct to contain the following 2 fields because
-	 *                    these are used for buffer mappings only.
-	 */
-	u64 host_address;
-	struct mm_struct *owning_mm;
 	bool user_specified_daddr;
 	const struct gcip_iommu_mapping_ops *ops;
 	void *data;
@@ -462,7 +456,27 @@ gcip_iommu_get_domain_for_dev_from_pool(struct device *dev, struct gcip_iommu_do
 
 /*  Encodes the gcip_map_flags from dma_data_direct, coherent, dma_attrs, and restrict_iova info. */
 u64 gcip_iommu_encode_gcip_map_flags(enum dma_data_direction dir, bool coherent,
-				     unsigned long dma_attrs, bool restrict_iova);
+				     unsigned long dma_attrs, bool restrict_iova, bool mmio);
+
+/**
+ * gcip_iommu_map_flags_dma_rw() - Encodes gcip_map_flags with DMA_BIDIRECTIONAL and default values.
+ *
+ * Return: The encoded value.
+ */
+static inline u64 gcip_iommu_map_flags_dma_rw(void)
+{
+	return gcip_iommu_encode_gcip_map_flags(DMA_BIDIRECTIONAL, false, 0, false, false);
+}
+
+/**
+ * gcip_iommu_map_flags_dma_rw() - Encodes gcip_map_flags with DMA_TO_DEVICE and default values.
+ *
+ * Return: The encoded value.
+ */
+static inline u64 gcip_iommu_map_flags_dma_ro(void)
+{
+	return gcip_iommu_encode_gcip_map_flags(DMA_TO_DEVICE, false, 0, false, false);
+}
 
 /**
  * gcip_iommu_dmabuf_map_show() - Write the dma-buf mapping information to the seq_file.
@@ -488,8 +502,8 @@ size_t gcip_iommu_dmabuf_hiorder_size(struct gcip_iommu_mapping *mapping);
  * gcip_iommu_domain_map_dma_buf() - Maps the DMA buffer to the target IOMMU domain.
  * @domain: The desired IOMMU domain where the DMA buffer should be mapped.
  * @dmabuf: The dma_buf to map to @domain.
- * @gcip_map_flags: The flags used to create the mapping, which can be encoded with
- *                  gcip_iommu_encode_gcip_map_flags() or `GCIP_MAP_FLAGS_DMA_*_TO_FLAGS` macros.
+ * @gcip_map_flags: The flags used to create the mapping, which should be encoded with
+ *                  gcip_iommu_encode_gcip_map_flags().
  *
  * The DMA buffer will be mapped to the default domain first to get a scatter-gather table.
  * The received sgt will be copied to a new sgt and the new one will be mapped to the target domain.
@@ -520,8 +534,8 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_dma_buf_to_iova(struct gcip_iom
  * @domain: The desired IOMMU domain where the buffer should be mapped.
  * @host_address: The starting address of the buffer.
  * @size: The size of the buffer.
- * @gcip_map_flags: The flags used to create the mapping, which can be encoded with
- *                  gcip_iommu_encode_gcip_map_flags() or `GCIP_MAP_FLAGS_DMA_*_TO_FLAGS` macros.
+ * @gcip_map_flags: The flags used to create the mapping, which should be encoded with
+ *                  gcip_iommu_encode_gcip_map_flags().
  * @pin_user_pages_lock: The lock for pinning user pages, or NULL if none.
  *
  * Following things are done in this function:
@@ -564,6 +578,21 @@ struct gcip_iommu_mapping *gcip_iommu_domain_map_buffer_to_iova(struct gcip_iomm
 void gcip_iommu_mapping_unmap(struct gcip_iommu_mapping *mapping);
 
 /**
+ * gcip_iommu_mapping_sync() - Sync a mapped buffer for either CPU or device.
+ * @mapping: The pointer of the mapping instance to be synced.
+ * @dev: The device that the mapping belongs to.
+ * @offset: The offset, in bytes, into the mapped buffer where the region to be synced begins.
+ * @size: The size, in bytes, of the region to be synced.
+ * @for_cpu: True to sync for CPU access, false to sync for device access.
+ *
+ * This function only supports mappings with type GCIP_IOMMU_MAPPING_BUFFER.
+ *
+ * Return: 0 on success, or a negative errno otherwise.
+ */
+int gcip_iommu_mapping_sync(struct gcip_iommu_mapping *mapping, struct device *dev, u64 offset,
+			    u64 size, bool for_cpu);
+
+/**
  * gcip_iommu_mapping_trim() - Trim a buffer mapping, unpinning pages and unmapping from TPU,
  *                             but leaving the IOVA allocation and mapping metadata in place.
  * @mapping: The mapping instance to be trimmed.
@@ -591,8 +620,8 @@ int gcip_iommu_mapping_remap(struct gcip_iommu_mapping *mapping, struct mutex *p
  * gcip_iommu_alloc_iova() - Allocates IOVA with size @size.
  * @domain: The GCIP domain to allocate IOVA.
  * @size: Size in bytes.
- * @gcip_map_flags: Flags indicating mapping attributes, which can be encoded with
- *                  gcip_iommu_encode_gcip_map_flags() or `GCIP_MAP_FLAGS_DMA_*_TO_FLAGS` macros.
+ * @gcip_map_flags: The flags used to create the mapping, which should be encoded with
+ *                  gcip_iommu_encode_gcip_map_flags().
  *
  * Return: The allocated IOVA. Returns 0 on failure.
  */
@@ -630,8 +659,8 @@ static inline size_t gcip_iommu_domain_granule(struct gcip_iommu_domain *domain)
  * @iova: The device address.
  * @paddr: The target address to be mapped to.
  * @size: Map size in bytes.
- * @gcip_map_flags: Flags indicating mapping attributes, which can be encoded with
- *                  gcip_iommu_encode_gcip_map_flags() or `GCIP_MAP_FLAGS_DMA_*_TO_FLAGS` macros.
+ * @gcip_map_flags: The flags used to create the mapping, which should be encoded with
+ *                  gcip_iommu_encode_gcip_map_flags().
  *
  * Return: 0 on success, otherwise a negative errno.
  */

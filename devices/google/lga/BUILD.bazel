@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 load(
-    "//build/kernel/kleaf:kernel.bzl",
+    "@kleaf//build/kernel/kleaf:kernel.bzl",
     "checkpatch",
     "kernel_module",
 )
@@ -32,6 +32,7 @@ kernel_module(
         "drivers/dma-buf/heaps/samsung/samsung_dma_heap.ko",
         "drivers/input/keycombo.ko",
         "drivers/input/keydebug.ko",
+        "drivers/iommu/iommu_map_benchmark.ko",
         "drivers/iommu/samsung-secure-iova.ko",
         "drivers/mfd/slg51002-core.ko",
         "drivers/misc/sbb-mux/sbb-mux.ko",
@@ -129,6 +130,7 @@ kernel_module(
         "drivers/i2c/busses/i2c-designware-core.ko",
         "drivers/i2c/busses/i2c-designware-platform.ko",
         "drivers/i3c/master/dw-i3c-master.ko",
+        "drivers/input/power_keydebug.ko",
         "drivers/irqchip/irq-extended-sysfs.ko",
         "drivers/irqchip/irq-gia-google.ko",
         "drivers/irqchip/irq-gia-google-test.ko",
@@ -305,6 +307,7 @@ device_build(
     ],
     kunit_modules = [
         # keep sorted
+        "//private/google-modules/perf/core/gs_domain_idle:gs_domain_idle_kunit_test",
         "//private/google-modules/perf/thermal:cdev_helper_test",
         "//private/google-modules/perf/thermal:devfreq_tj_cdev_test",
         "//private/google-modules/perf/thermal:powercap_test",

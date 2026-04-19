@@ -157,6 +157,14 @@ static inline IMG_INT OSAtomicOr(ATOMIC_T *pCounter, IMG_INT iVal)
 #define OSAtomicSubtract(pCounter, incr) atomic_add_return(-(incr),pCounter)
 #define OSAtomicSubtractUnless(pCounter, incr, test) OSAtomicAddUnless(pCounter, -(incr), (test))
 
+#define OSAtomic64Read(pCounter)	atomic64_read_acquire(pCounter)
+#define OSAtomic64Write(pCounter, i)	atomic64_set_release(pCounter, i)
+#define OSAtomic64Increment(pCounter) atomic64_inc_return(pCounter)
+#define OSAtomic64Decrement(pCounter) atomic64_dec_return(pCounter)
+#define OSAtomic64Add(incr, pCounter) atomic64_add_return(incr,pCounter)
+#define OSAtomic64Subtract(incr, pCounter) atomic64_sub_return(incr,pCounter)
+#define OSAtomic64CmpXchg(pCounter, pOld, new) atomic64_try_cmpxchg(pCounter, pOld, new)
+
 #else /* defined(__linux__) && defined(__KERNEL__) */
 
 #include "img_types.h"

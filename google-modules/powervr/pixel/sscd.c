@@ -91,7 +91,7 @@ void gpu_sscd_dump(struct pixel_gpu_device *pixel_dev, PVRSRV_ROBUSTNESS_NOTIFY_
 	struct sscd_segment segs[NUM_SEGMENTS];
 	char sscd_title[CRASHINFO_REASON_SIZE] = {0};
 	struct sscd_platform_data *pdata = dev_get_platdata(&sscd_dev.dev);
-	char dm_string[16] = {0};
+	char fault_info[32] = {0};
 	char reset_reason[64] = {0};
 	char pid_tid_string[16] = {0};
 	char process_thread_group_name[(TASK_COMM_LEN * 2) + 5] = {0};
@@ -119,11 +119,17 @@ void gpu_sscd_dump(struct pixel_gpu_device *pixel_dev, PVRSRV_ROBUSTNESS_NOTIFY_
 	}
 
 	if (error->eResetReason == RGX_CONTEXT_RESET_REASON_GUILTY_LOCKUP)
-		snprintf(dm_string,
-			 ARRAY_SIZE(dm_string),
+		snprintf(fault_info,
+			 ARRAY_SIZE(fault_info),
 			 "[%s]:",
 			 rgxfwif_dm_str(
 				error->uErrData.sGuiltyLockupData.eDM));
+	if (error->eResetReason == RGX_CONTEXT_RESET_REASON_FW_PAGEFAULT)
+		snprintf(fault_info,
+			 ARRAY_SIZE(fault_info),
+			 "[addr=0x%llx]:",
+			 error->uErrData.sFwPFErrData.sFWFaultAddr.uiAddr);
+
 	snprintf(pid_tid_string,
 		 ARRAY_SIZE(pid_tid_string),
 		 "[%u]:",
@@ -172,7 +178,7 @@ void gpu_sscd_dump(struct pixel_gpu_device *pixel_dev, PVRSRV_ROBUSTNESS_NOTIFY_
 		 "%s%s%s%s",
 		 pid_tid_string,
 		 process_thread_group_name,
-		 dm_string,
+		 fault_info,
 		 reset_reason);
 
 	dev_info(pixel_dev->dev, "PowerVR subsystem core dump in progress");

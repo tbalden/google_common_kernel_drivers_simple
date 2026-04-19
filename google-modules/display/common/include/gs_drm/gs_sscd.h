@@ -4,7 +4,7 @@
 
 #include <linux/platform_device.h>
 
-#define MAX_DISPLAY_SSCD_SEG_COUNT 8
+#define MAX_DISPLAY_SSCD_SEG_COUNT 16
 #define SEGMENT_MAX_NAME_LEN 64
 #define SCM_VERSION_STRING_MAX_LEN 32
 

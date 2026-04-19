@@ -77,6 +77,17 @@ static bool disable_coredump;
 module_param(disable_coredump, bool, 0644);
 MODULE_PARM_DESC(disable_coredump, "Whether to disable subsystem coredump for this module");
 
+static u32 coredump_sources = BIT(SSCD_SRC_MANUAL) | BIT(SSCD_SRC_FRAME_UPDATE_TIMEOUT) |
+			      BIT(SSCD_SRC_DISABLE_TIMEOUT) | BIT(SSCD_SRC_GRAM_COLLISION);
+module_param(coredump_sources, uint, 0644);
+MODULE_PARM_DESC(coredump_sources,
+		 "Bitmask of which coredump sources are allowed to trigger subsystem coredump");
+
+bool dc_is_coredump_source_enabled(const struct vs_dc *dc, enum coredump_source source)
+{
+	return (coredump_sources & BIT(source)) != 0;
+}
+
 int vs_dc_power_get(struct device *dev, bool sync)
 {
 	int ret;
@@ -290,7 +301,8 @@ static const struct dev_pm_ops vs_dc_pm_ops = {
 };
 #endif
 
-static ssize_t _get_sscd_regdump(struct vs_dc *dc, char *buffer, ssize_t count)
+static ssize_t _get_sscd_regdump(struct vs_dc *dc, char *buffer, ssize_t count,
+				 enum dc_hw_reg_bank_type reg_bank)
 {
 	struct drm_print_iterator iter;
 	struct drm_printer p;
@@ -301,32 +313,37 @@ static ssize_t _get_sscd_regdump(struct vs_dc *dc, char *buffer, ssize_t count)
 
 	p = drm_coredump_printer(&iter);
 
-	dc_hw_reg_dump_custom(&dc->hw, &p, "DPU", 0, dc->hw.reg_size);
+	dc_hw_reg_dump(&dc->hw, &p, reg_bank);
 
 	return count - iter.remain;
 }
 
-static ssize_t get_sscd_regdump(struct vs_dc *dc, char **regdump_buf)
+static ssize_t get_sscd_regdump(struct vs_dc *dc, char **regdump_buf,
+				enum dc_hw_reg_bank_type reg_bank)
 {
 	ssize_t count;
 
-	count = _get_sscd_regdump(dc, NULL, INT_MAX);
+	count = _get_sscd_regdump(dc, NULL, INT_MAX, reg_bank);
 	*regdump_buf = vmalloc(count);
 	if (!regdump_buf)
 		return -ENOMEM;
-	_get_sscd_regdump(dc, *regdump_buf, count);
+	_get_sscd_regdump(dc, *regdump_buf, count, reg_bank);
 
 	return count;
 }
 
-static ssize_t prepare_sscd_regdump(struct vs_dc *dc, char **regdump_buf)
+static ssize_t prepare_sscd_regdump(struct vs_dc *dc, char **regdump_buf,
+				    enum dc_hw_reg_bank_type reg_bank)
 {
 	struct display_sscd_section_config hexdump_cfg;
 	ssize_t regdump_buf_size;
+	char *sec_name = reg_bank == DC_HW_REG_BANK_ACTIVE ? "dpu act register dump" :
+			 reg_bank == DC_HW_REG_BANK_SHADOW ? "dpu shd register dump" :
+							     "unknown";
 
-	regdump_buf_size = get_sscd_regdump(dc, regdump_buf);
+	regdump_buf_size = get_sscd_regdump(dc, regdump_buf, reg_bank);
 	if (regdump_buf_size > 0) {
-		display_sscd_configure_phys_hexdump_section(&hexdump_cfg, "dpu register dump",
+		display_sscd_configure_phys_hexdump_section(&hexdump_cfg, sec_name,
 							    (void *)(*regdump_buf),
 							    dc->hw.reg_base_phys, regdump_buf_size);
 		display_sscd_push_section(dc->disp_sscd, &hexdump_cfg);
@@ -338,11 +355,9 @@ static ssize_t prepare_sscd_regdump(struct vs_dc *dc, char **regdump_buf)
 int vs_dc_coredump(struct vs_dc *dc, const char *reason)
 {
 	struct device *dev = dc->hw.dev;
-	char *regdump_buf;
-	ssize_t regdump_buf_size = 0;
-	struct vs_drm_private *priv = dc->drm_dev->dev_private;
+	char *regdump_act_buf, *regdump_shd_buf;
+	ssize_t regdump_act_buf_size = 0, regdump_shd_buf_size = 0;
 	struct drm_state_history_data sh_data;
-	struct drm_state_history_record *sh_record = priv->sh_record;
 	int ret, i, num_recorded_drm_states;
 
 	ret = pm_runtime_get_if_in_use(dev);
@@ -355,13 +370,16 @@ int vs_dc_coredump(struct vs_dc *dc, const char *reason)
 		dev_info(dev, "DPU off, skipping register coredump\n");
 	} else {
 		/* Get regdump */
-		regdump_buf_size = prepare_sscd_regdump(dc, &regdump_buf);
+		regdump_act_buf_size =
+			prepare_sscd_regdump(dc, &regdump_act_buf, DC_HW_REG_BANK_ACTIVE);
+		regdump_shd_buf_size =
+			prepare_sscd_regdump(dc, &regdump_shd_buf, DC_HW_REG_BANK_SHADOW);
 
 		/* No need for power any more */
 		ret = pm_runtime_put(dev);
 	}
 
-	num_recorded_drm_states = vs_drm_recorded_states_prepare(&sh_data, sh_record);
+	num_recorded_drm_states = vs_drm_recorded_states_prepare(&sh_data, dc->drm_dev);
 
 	for (i = 0; i < num_recorded_drm_states; ++i) {
 		struct display_sscd_section_config drm_state_cfg;
@@ -379,10 +397,15 @@ int vs_dc_coredump(struct vs_dc *dc, const char *reason)
 		display_sscd_pop_section(dc->disp_sscd);
 	vs_drm_recorded_states_destroy(&sh_data);
 
-	if (regdump_buf_size > 0) {
+	if (regdump_shd_buf_size > 0) {
 		display_sscd_pop_section(dc->disp_sscd);
 		/* free sscd regdump buffer */
-		vfree(regdump_buf);
+		vfree(regdump_shd_buf);
+	}
+	if (regdump_act_buf_size > 0) {
+		display_sscd_pop_section(dc->disp_sscd);
+		/* free sscd regdump buffer */
+		vfree(regdump_act_buf);
 	}
 
 	if (ret < 0)
@@ -573,35 +596,172 @@ static void vs_dc_underrun_workaround(struct vs_dc *dc, struct drm_crtc *crtc,
 	}
 }
 
-static void _vs_dc_handle_underrun(struct vs_dc *dc, struct vs_crtc *vs_crtc, u8 display_id,
+static void _vs_dc_handle_underrun(struct vs_dc *dc, struct vs_crtc *vs_crtc,
 				   bool cmd_mode_start_scan_now)
 {
 	struct device *dev = dc->hw.dev;
 	struct dc_hw_display *display = &dc->hw.display[vs_crtc->id];
+	u32 output_id = display->output_id;
 
 	if (!vs_crtc->frame_transfer_pending) {
-		dev_dbg(dev, "display[%d] underrun false positive, no transfer, mode:%#x\n",
-			display_id, display->mode.output_mode);
+		dev_dbg(dev, "output_id[%d] underrun false positive, no transfer, mode:%#x\n",
+			output_id, display->mode.output_mode);
 		return;
 	}
 
 	if (is_display_cmd_sw_trigger(display) &&
 	    (!vs_crtc->ddic_cmd_mode_start_scan || cmd_mode_start_scan_now)) {
-		dev_dbg(dev, "display[%d] underrun false positive, %s, mode:%#x\n", display_id,
+		dev_dbg(dev, "output_id[%d] underrun false positive, %s, mode:%#x\n", output_id,
 			(!vs_crtc->ddic_cmd_mode_start_scan) ? "no panel scan out yet" :
 							       "panel just start scan out",
 			display->mode.output_mode);
 		return;
 	}
 
-	trace_disp_dpu_underrun(display_id, atomic_read(&vs_crtc->frames_pending),
+	atomic_inc(&vs_crtc->underrun_count);
+	trace_disp_dpu_underrun(output_id, atomic_read(&vs_crtc->frames_pending),
 				atomic_read(&vs_crtc->te_count));
 	if (is_display_cmd_sw_trigger(display))
-		dev_dbg(dev, "display[%d] underrun detected, mode:%#x (te count %d)\n", display_id,
-			display->mode.output_mode, atomic_read(&vs_crtc->te_count));
+		dev_dbg(dev,
+			"output_id[%d] underrun detected, mode:%#x (te count %d, underrun count %d)\n",
+			output_id, display->mode.output_mode, atomic_read(&vs_crtc->te_count),
+			atomic_read(&vs_crtc->underrun_count));
 	else
-		dev_warn(dev, "display[%d] underrun detected, mode:%#x (te count %d)\n", display_id,
-			 display->mode.output_mode, atomic_read(&vs_crtc->te_count));
+		dev_warn(
+			dev,
+			"output_id[%d] underrun detected, mode:%#x (te count %d, underrun count %d)\n",
+			output_id, display->mode.output_mode, atomic_read(&vs_crtc->te_count),
+			atomic_read(&vs_crtc->underrun_count));
+}
+
+static void _vs_dc_handle_frame_start(struct vs_dc *dc, struct vs_crtc *vs_crtc, u8 display_id)
+{
+	struct dc_hw_display *display = &dc->hw.display[display_id];
+	u8 output_id = display->output_id;
+	pid_t pid = vs_crtc->trace_pid;
+
+	vs_dc_underrun_workaround(dc, &vs_crtc->base, display, display_id, true);
+	DPU_ATRACE_INT_PID_FMT(1, pid, "frame_tx[%d]", output_id);
+	trace_disp_frame_start(display_id, output_id, vs_crtc);
+	vs_crtc->frame_transfer_pending = true;
+	vs_crtc_handle_frm_start(&vs_crtc->base);
+}
+
+static void _vs_dc_handle_frame_done(struct vs_dc *dc, struct vs_crtc *vs_crtc, u8 display_id)
+{
+	struct dc_hw_display *display = &dc->hw.display[display_id];
+	u8 output_id = display->output_id;
+	pid_t pid = vs_crtc->trace_pid;
+	unsigned int crtc_index = vs_crtc->base.index;
+
+	DPU_ATRACE_INT_PID_FMT(0, pid, "frame_tx[%d]", output_id);
+	dc_hw_display_frame_done(&dc->hw, display_id);
+	vs_crtc->ltm_hist_query_pending = false;
+	if (!atomic_dec_if_positive(&vs_crtc->frames_pending))
+		vs_dc_underrun_workaround(dc, &vs_crtc->base, display, display_id, false);
+	DPU_ATRACE_INT_PID_FMT(atomic_read(&vs_crtc->frames_pending), pid, "frames_pending[%u]",
+			       crtc_index);
+	trace_disp_frame_done(display_id, output_id, vs_crtc);
+	vs_crtc->frame_transfer_pending = false;
+	atomic_inc(&vs_crtc->frame_done_count);
+	wake_up_all(&vs_crtc->framedone_waitq);
+
+	if (!dc->disable_hw_reset)
+		vs_crtc->needs_hw_reset = false;
+
+	vs_crtc->recovery.count = 0;
+}
+
+static void _vs_dc_handle_frame_interrupts(struct vs_dc *dc, struct vs_crtc *vs_crtc, u8 display_id,
+					   const struct dc_hw_interrupt_status *status)
+{
+	struct device *dev = dc->hw.dev;
+	struct dc_hw_display *display = &dc->hw.display[display_id];
+	u8 output_id = display->output_id;
+	u8 output_mask = BIT(output_id);
+	int frm_start, frm_done;
+	bool command_mode = is_display_cmd_sw_trigger(display);
+	struct frame_irq_err_counters *err_counters = &vs_crtc->frame_irq_err_counters;
+
+	frm_start = (output_mask & status->output_frm_start) ? 1 : 0;
+	if (output_mask & status->of_output_frm_start) {
+		if (!frm_start) {
+			dev_err(dev, "invalid irq state[%u]: frm_start overflow without status\n",
+				output_id);
+			err_counters->illegal_irq_state++;
+		}
+		frm_start++;
+	}
+	frm_done = (output_mask & status->output_frm_done) ? 1 : 0;
+	if (output_mask & status->of_output_frm_done) {
+		if (!frm_done) {
+			dev_err(dev, "invalid irq state[%u]: frm_done overflow without status\n",
+				output_id);
+			err_counters->illegal_irq_state++;
+		}
+		frm_done++;
+	}
+	if ((frm_done == 2) && (frm_start == 0)) {
+		dev_err(dev, "invalid irq state[%u]: adjacent frm_done\n", output_id);
+		err_counters->illegal_irq_state++;
+	}
+	if ((frm_start == 2) && (frm_done == 0)) {
+		dev_err(dev, "invalid irq state[%u]: adjacent frm_start\n", output_id);
+		err_counters->illegal_irq_state++;
+	}
+	if ((frm_start == 2) && (frm_done == 2)) {
+		dev_warn(dev, "invalid irq state[%u]: unknown how many frame irqs missed\n",
+			 output_id);
+		err_counters->full_frame_overflow++;
+	}
+	if (command_mode && (frm_start == 2) && (frm_done == 1)) {
+		dev_warn(dev, "invalid irq state[%u]: frame started w/o waiting for prev done\n",
+			 output_id);
+		err_counters->frame_start_overflow_cmd++;
+	}
+
+	/* Log states implying large interrupt handling delays */
+	if (frm_start >= 1 && frm_done >= 1 &&
+	    (frm_start == 2 || frm_done == 2 || !vs_crtc->frame_transfer_pending)) {
+		dev_warn(
+			dev,
+			"dpu irq gap[%u]: irq handling gap larger than frame transfer duration (frm_start:%u frm_done:%u)\n",
+			output_id, frm_start, frm_done);
+		err_counters->full_frame_length_irq_gap++;
+	}
+
+	/*
+	 * Execute frame handlers based on combination of irq conditions
+	 *
+	 * This is meant to account for presumed order of events in reality,
+	 * given that simultaneous handling of these interrupts is indicative of
+	 * interrupt handling being delayed enough for the first handler to find
+	 * multiple irq bits set.
+	 */
+	if (!frm_start && !frm_done) {
+		/* no additional handling needed */
+		return;
+	} else if (frm_start > frm_done) {
+		_vs_dc_handle_frame_start(dc, vs_crtc, display_id);
+
+		if (frm_start > 1) // unexpected frm_start overflow
+			atomic_dec_if_positive(&vs_crtc->frames_pending);
+	} else if (frm_start < frm_done) {
+		_vs_dc_handle_frame_done(dc, vs_crtc, display_id);
+
+		if (frm_done > 1) { // frm_done overflow
+			_vs_dc_handle_frame_start(dc, vs_crtc, display_id);
+			_vs_dc_handle_frame_done(dc, vs_crtc, display_id);
+		}
+	} else { // frm_done == frm_start
+		if (vs_crtc->frame_transfer_pending) {
+			_vs_dc_handle_frame_done(dc, vs_crtc, display_id);
+			_vs_dc_handle_frame_start(dc, vs_crtc, display_id);
+		} else {
+			_vs_dc_handle_frame_start(dc, vs_crtc, display_id);
+			_vs_dc_handle_frame_done(dc, vs_crtc, display_id);
+		}
+	}
 }
 
 static void vs_dc_handle_interrupts(struct vs_dc *dc)
@@ -611,13 +771,16 @@ static void vs_dc_handle_interrupts(struct vs_dc *dc)
 	const struct vs_wb_info *wb_info = dc_info->write_back;
 	u32 i;
 	struct dc_hw_interrupt_status status = { 0 };
+	struct dc_hw_display *display;
+	u8 display_id, display_mask;
+	u8 output_id, output_mask;
 
 	dc_hw_get_interrupt(&dc->hw, &status);
 
 	dev_dbg(dev,
 		"%s: te_r=%#x te_f=%#x frm_start=%#x layer_done=%x frm_done=%#x wb_frm_done=%#x\n",
-		__func__, status.display_te_rising, status.display_te_falling,
-		status.display_frm_start, status.layer_frm_done, status.display_frm_done,
+		__func__, status.output_te_rising, status.output_te_falling,
+		status.output_frm_start, status.layer_frm_done, status.output_frm_done,
 		status.wb_frm_done);
 
 	dev_dbg(dev, "%s: layer_rst_done=%#x fe0_rst_done=%d fe1_rst_done=%d be_reset_done=%d\n",
@@ -642,31 +805,56 @@ static void vs_dc_handle_interrupts(struct vs_dc *dc)
 		dc->hw.be_has_bus_errors = true;
 	}
 
-	trace_disp_frame_irqs(status.display_te_rising, status.display_te_falling,
-			      status.display_frm_start, status.layer_frm_done,
-			      status.display_frm_done, status.wb_frm_done);
-	trace_disp_err_irqs(status.pvric_decode_err, status.display_underrun, status.wb_datalost);
+	trace_disp_frame_irqs(status.output_te_rising, status.output_te_falling,
+			      status.output_frm_start, status.layer_frm_done,
+			      status.output_frm_done, status.wb_frm_done);
+	trace_disp_frame_irqs_overflow(status.of_output_te_rising, status.of_output_te_falling,
+				       status.of_output_frm_start, 0x0, status.of_output_frm_done,
+				       status.of_wb_frm_done);
+	trace_disp_err_irqs(status.pvric_decode_err, status.output_underrun, status.wb_datalost);
 	trace_disp_reset_irqs(status.layer_reset_done, status.reset_status[FE0_SW_RESET],
 			      status.reset_status[FE1_SW_RESET], status.reset_status[BE_SW_RESET]);
 
 	for (i = 0; i < dc_info->display_num; i++) {
-		u8 display_id = dc_info->displays[i].id;
-		u8 display_mask = BIT(display_id);
 		struct vs_crtc *vs_crtc = dc->crtc[i];
 		struct drm_crtc *crtc = &vs_crtc->base;
-		struct dc_hw_display *display = &dc->hw.display[i];
 		pid_t pid;
 		bool ddic_cmd_mode_start_scan_now = false;
+
+		display = &dc->hw.display[i];
+		display_id = dc_info->displays[i].id;
+		display_mask = BIT(display_id);
+		output_id = display->output_id;
+		output_mask = BIT(output_id);
 
 		if (!vs_crtc)
 			continue;
 
+		/* skip disabled displays */
+		if (!display->config_status)
+			continue;
+
 		pid = vs_crtc->trace_pid;
+
+		dev_dbg(dev,
+			"%s: i=%u display_id=%u display_mask=%#x config_status=%d output_id=%u output_mask=%#x\n",
+			__func__, i, display_id, display_mask, display->config_status, output_id,
+			output_mask);
 
 		if (display->mode.output_mode & VS_OUTPUT_MODE_CMD &&
 		    !(display->mode.output_mode & VS_OUTPUT_MODE_CMD_DE_SYNC)) {
-			if (display_mask & status.display_te_rising) {
-				DPU_ATRACE_INT_PID_FMT(1, pid, "TE[%d]", display_id);
+			if (output_mask & status.output_te_rising) {
+				int te_high_level = 1;
+				/* if seeing TE rising edge during dpu scanout, warn underrun */
+				if (vs_crtc->frame_transfer_pending) {
+					te_high_level = 2;
+					DPU_ATRACE_INT_PID_FMT(
+						atomic_add_return(1, &vs_crtc->unexpected_te_count),
+						pid, "unexpected_te_count[%d]", output_id);
+					dev_dbg(dev, "%s: unexpected TE(%d)\n", __func__,
+						atomic_read(&vs_crtc->unexpected_te_count));
+				}
+				DPU_ATRACE_INT_PID_FMT(te_high_level, pid, "TE[%d]", output_id);
 				if (display->mode.v_sync_polarity) {
 					drm_crtc_handle_vblank(crtc);
 					atomic_inc(&vs_crtc->te_count);
@@ -677,8 +865,8 @@ static void vs_dc_handle_interrupts(struct vs_dc *dc)
 				}
 			}
 
-			if (display_mask & status.display_te_falling) {
-				DPU_ATRACE_INT_PID_FMT(0, pid, "TE[%d]", display_id);
+			if (output_mask & status.output_te_falling) {
+				DPU_ATRACE_INT_PID_FMT(0, pid, "TE[%d]", output_id);
 				if (!display->mode.v_sync_polarity) {
 					drm_crtc_handle_vblank(crtc);
 					atomic_inc(&vs_crtc->te_count);
@@ -689,44 +877,17 @@ static void vs_dc_handle_interrupts(struct vs_dc *dc)
 				}
 			}
 		} else {
-			if (display_mask & status.display_frm_start) {
+			if (output_mask & status.output_frm_start) {
 				display->vblank_count++;
 				drm_crtc_handle_vblank(crtc);
 			}
 		}
 
-		if (display_mask & status.display_frm_done) {
-			DPU_ATRACE_INT_PID_FMT(0, pid, "frame_tx[%d]", display_id);
-			dc_hw_display_frame_done(&dc->hw, i, &status);
-			vs_crtc->ltm_hist_query_pending = false;
-			if (!atomic_dec_if_positive(&vs_crtc->frames_pending))
-				vs_dc_underrun_workaround(dc, crtc, display, display_id, false);
-			DPU_ATRACE_INT_PID_FMT(atomic_read(&vs_crtc->frames_pending),
-					       vs_crtc->trace_pid, "frames_pending[%u]",
-					       crtc->index);
-			trace_disp_frame_done(display_id, vs_crtc);
-			vs_crtc->frame_transfer_pending = false;
-			atomic_inc(&vs_crtc->frame_done_count);
-			wake_up_all(&vs_crtc->framedone_waitq);
+		/* For both frame_start and frame_done interrupts */
+		_vs_dc_handle_frame_interrupts(dc, vs_crtc, i, &status);
 
-			if (!dc->disable_hw_reset)
-				vs_crtc->needs_hw_reset = false;
-
-			vs_crtc->recovery.count = 0;
-		}
-
-		if ((display_mask & status.display_frm_start) && display->config_status) {
-			vs_dc_underrun_workaround(dc, crtc, display, display_id, true);
-			DPU_ATRACE_INT_PID_FMT(1, pid, "frame_tx[%d]", display_id);
-			trace_disp_frame_start(display_id, vs_crtc);
-			vs_crtc->frame_transfer_pending = true;
-			vs_crtc_handle_frm_start(crtc,
-						 (display_mask & status.display_underrun) != 0);
-		}
-
-		if (display_mask & status.display_underrun)
-			_vs_dc_handle_underrun(dc, vs_crtc, display_id,
-					       ddic_cmd_mode_start_scan_now);
+		if (output_mask & status.output_underrun)
+			_vs_dc_handle_underrun(dc, vs_crtc, ddic_cmd_mode_start_scan_now);
 	}
 
 	if (status.wb_frm_done || status.wb_datalost) {
@@ -764,10 +925,12 @@ static void vs_dc_handle_interrupts(struct vs_dc *dc)
 
 #if IS_ENABLED(CONFIG_DEBUG_FS)
 	for (i = 0; i < dc_info->plane_num; i++) {
-		u32 display_id = dc->hw.plane[i].fb.display_id;
-		u8 display_mask = BIT(dc_info->displays[display_id].id);
 		u8 plane_mask = 0;
 		u8 temp = 0;
+
+		display = &dc->hw.display[display_id];
+		output_id = display->output_id;
+		output_mask = BIT(output_id);
 
 		if (i >= dc_info->plane_fe0_num) {
 			temp = i - dc_info->plane_fe0_num;
@@ -775,14 +938,17 @@ static void vs_dc_handle_interrupts(struct vs_dc *dc)
 		} else {
 			plane_mask = BIT(dc_info->planes_fe0[i].id);
 		}
-		if ((display_mask & status.display_frm_done) ||
-		    (plane_mask & status.layer_frm_done))
+
+		if ((output_mask & status.output_frm_done) || (plane_mask & status.layer_frm_done))
 			vs_dc_get_plane_crc(dc, dc->planes[i].base);
 	}
-	for (i = 0; i < dc_info->display_num; i++) {
-		u8 display_mask = BIT(dc_info->displays[i].id);
 
-		if (dc->hw.display[i].crc.enable && (display_mask & status.display_frm_done))
+	for (i = 0; i < dc_info->display_num; i++) {
+		display = &dc->hw.display[display_id];
+		output_id = display->output_id;
+		output_mask = BIT(output_id);
+
+		if (dc->hw.display[i].crc.enable && (output_mask & status.output_frm_done))
 			vs_dc_get_display_crc(dc, &dc->crtc[i]->base);
 	}
 #endif
@@ -1187,8 +1353,11 @@ static int dc_bind(struct device *dev, struct device *master, void *data)
 
 	device_create_file(dev, &dev_attr_early_wakeup);
 
-	if (dc->coredump_en)
-		dc_init_sscd(dc, dev);
+	if (dc->coredump_en) {
+		ret = dc_init_sscd(dc, dev);
+		if (ret < 0)
+			goto err_clean_dc;
+	}
 
 	return 0;
 
@@ -1253,7 +1422,7 @@ static int attach_power_domain(struct device *dev, struct vs_dc *dc)
 		dc->num_pds = 0;
 		return 0;
 	}
-	if (dc->num_pds < 0) {
+	if (dc->num_pds <= 0) {
 		dev_err(dev, "failed to read power-domain-names property\n");
 		return -EINVAL;
 	}
@@ -1263,9 +1432,9 @@ static int attach_power_domain(struct device *dev, struct vs_dc *dc)
 
 	for (i = 0; i < dc->num_pds; i++) {
 		dc->pds[i].dev = dev_pm_domain_attach_by_id(dev, i);
-		if (IS_ERR(dc->pds[i].dev)) {
+		if (IS_ERR_OR_NULL(dc->pds[i].dev)) {
 			dev_err(dev, "failed to attach power domain at index %d\n", i);
-			ret = PTR_ERR(dc->pds[i].dev);
+			ret = (dc->pds[i].dev) ? PTR_ERR(dc->pds[i].dev) : -EINVAL;
 			goto clean_up;
 		}
 

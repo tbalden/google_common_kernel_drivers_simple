@@ -84,6 +84,7 @@ static const struct maxfg_reg max77779_fg[] = {
 	[MAXFG_TAG_status] = { ATOM_INIT_REG16(MAX77779_FG_Status)},
 	[MAXFG_TAG_fullsocthr] = { ATOM_INIT_REG16(MAX77779_FG_FullSocThr)},
 	[MAXFG_TAG_misccfg] = { ATOM_INIT_REG16(MAX77779_FG_MiscCfg)},
+	[MAXFG_TAG_ichgterm] = { ATOM_INIT_REG16(MAX77779_FG_IChgTerm)},
 };
 
 static const struct maxfg_reg max77779_debug_fg[] = {
@@ -204,6 +205,9 @@ struct max77779_fg_chip {
 	int aafv_cur_idx;
 	bool aafv_modified_fus;
 	struct aafv_fg_config aafv_cfgs[GBMS_AAFV_DATA_MAX];
+
+	/* index of battery EEPROM history */
+	int history_idx;
 
 	/* information for PROP_NEED_CHARGE_TO_FULL */
 	struct maxfg_bypss_charglimt bypass_chargelimit;

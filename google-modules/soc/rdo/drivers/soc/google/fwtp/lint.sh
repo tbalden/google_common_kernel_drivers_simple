@@ -11,10 +11,17 @@
 SCRIPT_FILE_PATH="$(realpath "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "${SCRIPT_FILE_PATH}")"
 
+# Define the files to exclude from lint using a grep pattern.
+# cpm_decoder has multiple lint findings that won't be fixed.
+EXCLUDE_FILES="cpm_decoder/"
+
 # Define the files to lint.
-C_FILES="$(find ${SCRIPT_DIR} -name "*.[c,h]" -printf "%P\n")"
-SH_FILES="$(find ${SCRIPT_DIR} -name "*.sh" -printf "%P\n")"
-BUILD_FILES="$(find ${SCRIPT_DIR} -name "BUILD*" -printf "%P\n")"
+C_FILES="$(find ${SCRIPT_DIR} -name "*.[c,h]" -printf "%P\n" | \
+           grep -v "${EXCLUDE_FILES}")"
+SH_FILES="$(find ${SCRIPT_DIR} -name "*.sh" -printf "%P\n" | \
+            grep -v "${EXCLUDE_FILES}")"
+BUILD_FILES="$(find ${SCRIPT_DIR} -name "BUILD*" -printf "%P\n" | \
+               grep -v "${EXCLUDE_FILES}")"
 
 # Define the set of checkpatch violations to ignore.
 # Files copied from Pixel FW use some typedefs (e.g., fwtp_error_code_t).

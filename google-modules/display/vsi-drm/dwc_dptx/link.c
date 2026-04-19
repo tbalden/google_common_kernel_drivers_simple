@@ -339,9 +339,9 @@ static int dptx_link_cr(struct dptx *dptx)
 	/* Set PHY lanes */
 	dptx_phy_set_lanes(dptx, dptx->link.lanes);
 
-	/* Move PHY to INTER_P2_POWER (P2) */
+	/* Move PHY to DPTX_PHY_POWER_DOWN (P3) */
 	//dptx_phy_set_lanes_powerdown_state(dptx, DPTX_PHY_INTER_P2_POWER);
-	dptx_write_regfield(dptx, ctrl_fields->field_phy_powerdown, DPTX_PHY_INTER_P2_POWER);
+	dptx_write_regfield(dptx, ctrl_fields->field_phy_powerdown, DPTX_PHY_POWER_DOWN);
 	byte = dptx_read_regfield(dptx, ctrl_fields->field_phy_powerdown);
 	dptx_dbg_link(dptx, "PHY POWERDOWN STATE: %u\n", byte);
 	dptx_dbg_link(dptx, "Lanes to wait PHY BUSY: %u\n", dptx->link.lanes);
@@ -518,7 +518,7 @@ static int dptx_link_ch_eq(struct dptx *dptx)
 	if (retval)
 		return retval;
 
-	/* Check and adjust max 6 times */
+	/* Check status and adjust max 5 times. On the 6th iteration, only check status. */
 	for (i = 0; i < 6; i++) {
 		retval = dptx_link_check_ch_eq_done(dptx, &cr_done, &ch_eq_done);
 
@@ -534,6 +534,9 @@ static int dptx_link_ch_eq(struct dptx *dptx)
 
 		if (ch_eq_done)
 			return 0;
+
+		if (i == 5)
+			continue;
 
 		retval = dptx_link_adjust_drive_settings(dptx, NULL);
 		if (retval)
@@ -782,7 +785,7 @@ int dptx_fast_link_training(struct dptx *dptx)
 	return 0;
 }
 
-int dptx_link_check_status(struct dptx *dptx)
+int dptx_link_check_status(struct dptx *dptx, u8 *irq_vector)
 {
 	int retval;
 	u8 byte;
@@ -796,6 +799,17 @@ int dptx_link_check_status(struct dptx *dptx)
 
 	sink_count = DP_GET_SINK_COUNT(byte);
 	dptx_dbg_link(dptx, "%s: sink count = %d\n", __func__, sink_count);
+
+	retval = dptx_read_dpcd(dptx, DP_DEVICE_SERVICE_IRQ_VECTOR, irq_vector);
+	if (retval) {
+		dptx_dbg_link(dptx, "%s: cannot read DP_IRQ_VECTOR\n", __func__);
+		return retval;
+	}
+
+	if (*irq_vector != 0)
+		dptx_write_dpcd(dptx, DP_DEVICE_SERVICE_IRQ_VECTOR, *irq_vector);
+
+	dptx_dbg_link(dptx, "%s: irq vector = 0x%02x\n", __func__, *irq_vector);
 
 	if (dptx->branch_dev) {
 		/* Check the sink count */

@@ -5,7 +5,7 @@
  * Copyright 2025 Google LLC
  *
  * These pinctrl mappings are generated based on the Platform IO pin definitions.
- * Build id: 13133772
+ * Build id: 14538277
  */
 
 #include <dt-bindings/gpio/google,lga.h>
@@ -1042,6 +1042,7 @@
 		drive-strength = <1>;
 		input-enable;
 		output-enable;
+		output-high;
 		function = "aoc_i2c2";
 	};
 
@@ -1061,6 +1062,7 @@
 		drive-strength = <1>;
 		input-enable;
 		output-enable;
+		output-high;
 		function = "aoc_i2c2";
 	};
 
@@ -2453,97 +2455,97 @@
 
 	pmic_s_gpio16_1v2: pmic_s_gpio16_1v2 {
 		/* Dev - Spare */
-		pins = "DA9188_SUB_GPIO_16";
+		pins = "gpio16";
 	};
 
 	pmicm2cam_lvbuck_en: pmicm2cam_lvbuck_en {
 		/* Dev - Spare */
-		pins = "DA9188_MAIN_GPIO_0";
+		pins = "gpio0";
 	};
 
 	pmicm2disp1_buck_en: pmicm2disp1_buck_en {
 		/* Display - Display */
-		pins = "DA9188_MAIN_GPIO_3";
+		pins = "gpio3";
 	};
 
 	pmicm2disp1_buck_vsel: pmicm2disp1_buck_vsel {
 		/* Display - Display */
-		pins = "DA9188_MAIN_GPIO_4";
+		pins = "gpio4";
 	};
 
 	pmicm2rcam_ois_vm_en: pmicm2rcam_ois_vm_en {
 		/* Imagers - Rear Wide */
-		pins = "DA9188_MAIN_GPIO_1";
+		pins = "gpio1";
 	};
 
 	pmicm2rcam_vana_en: pmicm2rcam_vana_en {
 		/* Imagers - Rear Wide */
-		pins = "DA9188_MAIN_GPIO_2";
+		pins = "gpio2";
 	};
 
 	pmicm2rcam_vdig_ldo_en: pmicm2rcam_vdig_ldo_en {
 		/* Imagers - Rear Wide */
-		pins = "DA9188_MAIN_GPIO_5";
+		pins = "gpio5";
 	};
 
 	pmicm_gpio_6_1v2: pmicm_gpio_6_1v2 {
 		/* Dev - Spare */
-		pins = "DA9188_MAIN_GPIO_6";
+		pins = "gpio6";
 	};
 
 	pmicm_gpio_7_1v2: pmicm_gpio_7_1v2 {
 		/* Dev - Spare */
-		pins = "DA9188_MAIN_GPIO_7";
+		pins = "gpio7";
 	};
 
 	pmics2cam_bb_en: pmics2cam_bb_en {
 		/* Imagers - Imagers */
-		pins = "DA9188_SUB_GPIO_9";
+		pins = "gpio9";
 	};
 
 	pmics2cam_mvbuck_en: pmics2cam_mvbuck_en {
 		/* Dev - Spare */
-		pins = "DA9188_SUB_GPIO_10";
+		pins = "gpio10";
 	};
 
 	pmics2cam_pmic_en: pmics2cam_pmic_en {
 		/* Imagers - Imagers */
-		pins = "DA9188_SUB_GPIO_8";
+		pins = "gpio8";
 	};
 
 	pmics2disp0_buck_en: pmics2disp0_buck_en {
 		/* Display - Display */
-		pins = "DA9188_SUB_GPIO_13";
+		pins = "gpio13";
 	};
 
 	pmics2disp0_reset_l: pmics2disp0_reset_l {
 		/* Display - Display */
-		pins = "DA9188_SUB_GPIO_11";
+		pins = "gpio11";
 	};
 
 	pmics2disp1_reset_l: pmics2disp1_reset_l {
 		/* Display - Display */
-		pins = "DA9188_SUB_GPIO_12";
+		pins = "gpio12";
 	};
 
 	pmics2hac_amp_en: pmics2hac_amp_en {
 		/* Audio - Amp */
-		pins = "DA9188_SUB_GPIO_14";
+		pins = "gpio14";
 	};
 
 	pmics2ts0_reset_l_1v2: pmics2ts0_reset_l_1v2 {
 		/* Display - Touch */
-		pins = "DA9188_SUB_GPIO_17";
+		pins = "gpio17";
 	};
 
 	pmics2ts1_reset_l_1v2: pmics2ts1_reset_l_1v2 {
 		/* Display - Touch */
-		pins = "DA9188_SUB_GPIO_18";
+		pins = "gpio18";
 	};
 
 	pmics_gpio_15: pmics_gpio_15 {
 		/* Imagers - Imagers */
-		pins = "DA9188_SUB_GPIO_15";
+		pins = "gpio15";
 	};
 };
 
@@ -2698,6 +2700,14 @@
 		function = "gdmc_int";
 	};
 
+	cp_ps_hold_1v2_sleep: cp_ps_hold_1v2_sleep {
+		/* Connectivity - Modem - Sleep */
+		pins = "XGDMC_IN_DEBUG_1";
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
+	};
+
 	dbg2ap_uart_sda: dbg2ap_uart_sda {
 		/* Debug - UART */
 		pins = "XGDMC_SOC_DEBUG_UART_RXD";
@@ -2716,6 +2726,15 @@
 		function = "gdmc_int";
 	};
 
+	disp0_err_fg_sleep: disp0_err_fg_sleep {
+		/* Display - Display - Sleep */
+		pins = "XGDMC_CTI_0";
+		bias-pull-down;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
+	};
+
 	disp1_err_fg: disp1_err_fg {
 		/* Display - Display */
 		pins = "XGDMC_CTI_1";
@@ -2725,8 +2744,26 @@
 		function = "gdmc_int";
 	};
 
+	disp1_err_fg_sleep: disp1_err_fg_sleep {
+		/* Display - Display - Sleep */
+		pins = "XGDMC_CTI_1";
+		bias-pull-down;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
+	};
+
 	ese2ap_irq_l_1v2: ese2ap_irq_l_1v2 {
 		/* Security - ESE */
+		pins = "XGDMC_UART0_RXD";
+		bias-pull-up;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
+	};
+
+	ese2ap_irq_l_1v2_sleep: ese2ap_irq_l_1v2_sleep {
+		/* Security - ESE - Sleep */
 		pins = "XGDMC_UART0_RXD";
 		bias-pull-up;
 		input-enable;
@@ -2761,6 +2798,15 @@
 		function = "gdmc_int";
 	};
 
+	nfc2ap_host_irq_1v2_sleep: nfc2ap_host_irq_1v2_sleep {
+		/* Connectivity - NFC - Sleep */
+		pins = "XGDMC_DEBUG_DEFAULT_1";
+		bias-pull-down;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
+	};
+
 	xgdmc_uart0_txd: xgdmc_uart0_txd {
 		/* Debug - UART */
 		pins = "XGDMC_UART0_TXD";
@@ -2771,6 +2817,14 @@
 		function = "gdmc_uart";
 	};
 
+	xgdmc_uart0_txd_sleep: xgdmc_uart0_txd_sleep {
+		/* Debug - UART - Sleep */
+		pins = "XGDMC_UART0_TXD";
+		input-enable;
+		output-high;
+		function = "gdmc_int";
+	};
+
 	xgdmc_uart_gsc_rxd: xgdmc_uart_gsc_rxd {
 		/* Debug - UART */
 		pins = "XGDMC_UART_GSC_RXD";
@@ -2778,6 +2832,15 @@
 		input-enable;
 		output-disable;
 		function = "gdmc_uart";
+	};
+
+	xgdmc_uart_gsc_rxd_sleep: xgdmc_uart_gsc_rxd_sleep {
+		/* Debug - UART - Sleep */
+		pins = "XGDMC_UART_GSC_RXD";
+		bias-pull-up;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
 	};
 
 	xgdmc_uart_gsc_txd: xgdmc_uart_gsc_txd {
@@ -2790,6 +2853,14 @@
 		function = "gdmc_uart";
 	};
 
+	xgdmc_uart_gsc_txd_sleep: xgdmc_uart_gsc_txd_sleep {
+		/* Debug - UART - Sleep */
+		pins = "XGDMC_UART_GSC_TXD";
+		input-enable;
+		output-high;
+		function = "gdmc_int";
+	};
+
 	xgdmc_uart_modem_rxd: xgdmc_uart_modem_rxd {
 		/* Connectivity - Modem */
 		pins = "XGDMC_UART_MODEM_RXD";
@@ -2797,6 +2868,15 @@
 		input-enable;
 		output-disable;
 		function = "gdmc_uart";
+	};
+
+	xgdmc_uart_modem_rxd_sleep: xgdmc_uart_modem_rxd_sleep {
+		/* Connectivity - Modem - Sleep */
+		pins = "XGDMC_UART_MODEM_RXD";
+		bias-pull-up;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
 	};
 
 	xgdmc_uart_modem_txd: xgdmc_uart_modem_txd {
@@ -2807,6 +2887,14 @@
 		input-enable;
 		output-enable;
 		function = "gdmc_uart";
+	};
+
+	xgdmc_uart_modem_txd_sleep: xgdmc_uart_modem_txd_sleep {
+		/* Connectivity - Modem - Sleep */
+		pins = "XGDMC_UART_MODEM_TXD";
+		input-enable;
+		output-high;
+		function = "gdmc_int";
 	};
 };
 
@@ -4104,8 +4192,8 @@
 		"AP2FLASH_EN",
 		"AP2FLASH_STROBE",
 		"AP2CSID_RST_L",
-		"RUWCAM2AP_VSYNC",
 		"RCAM2AP_VSYNC",
+		"_K39",
 		"FCAM2AP_VSYNC",
 		"RTCAM2AP_VSYNC",
 		"DISP0_2_AP_PROX1_TOUT",
@@ -4134,6 +4222,22 @@
 		"GNSS2AP_SPI_MISO_1V2",
 		"AP2GNSS_SPI_CS_L_1V2",
 		"LSIOS_CAMERA_MUTE_1V2";
+
+	_k39: _k39 {
+		/* Imagers - Rear Wide */
+		pins = "XLSIOS_VSYNC2";
+		bias-pull-down;
+		function = "lsios_vsync";
+	};
+
+	_k39_sleep: _k39_sleep {
+		/* Imagers - Rear Wide - Sleep */
+		pins = "XLSIOS_VSYNC2";
+		bias-pull-down;
+		input-enable;
+		output-disable;
+		function = "lsios_gpio";
+	};
 
 	ap2cp_wakeup_1v2: ap2cp_wakeup_1v2 {
 		/* Connectivity - Modem */
@@ -4298,7 +4402,7 @@
 	};
 
 	ap2flash_en: ap2flash_en {
-		/* Imagers - Flash */
+		/* Imagers - Imagers */
 		pins = "XLSIOS_CLI3_PIN3";
 		bias-disable;
 		drive-strength = <0>;
@@ -4308,7 +4412,7 @@
 	};
 
 	ap2flash_en_sleep: ap2flash_en_sleep {
-		/* Imagers - Flash - Sleep */
+		/* Imagers - Imagers - Sleep */
 		pins = "XLSIOS_CLI3_PIN3";
 		input-enable;
 		output-low;
@@ -4316,7 +4420,7 @@
 	};
 
 	ap2flash_strobe: ap2flash_strobe {
-		/* Imagers - Flash */
+		/* Imagers - Imagers */
 		pins = "XLSIOS_PWM_0";
 		bias-disable;
 		drive-strength = <1>;
@@ -4326,7 +4430,7 @@
 	};
 
 	ap2flash_strobe_sleep: ap2flash_strobe_sleep {
-		/* Imagers - Flash - Sleep */
+		/* Imagers - Imagers - Sleep */
 		pins = "XLSIOS_PWM_0";
 		input-enable;
 		output-low;
@@ -4588,7 +4692,7 @@
 	disp1_tout_1v2: disp1_tout_1v2 {
 		/* Display - Display */
 		pins = "XLSIOS_VSYNC0";
-		bias-pull-down;
+		bias-disable;
 		input-enable;
 		output-disable;
 		function = "lsios_gpio";
@@ -4676,8 +4780,8 @@
 	};
 
 	rcam2ap_vsync: rcam2ap_vsync {
-		/* Imagers - Rear Wide */
-		pins = "XLSIOS_VSYNC2";
+		/* Imagers - Rear UW */
+		pins = "XLSIOS_VSYNC1";
 		bias-pull-down;
 		input-enable;
 		output-disable;
@@ -4685,8 +4789,8 @@
 	};
 
 	rcam2ap_vsync_sleep: rcam2ap_vsync_sleep {
-		/* Imagers - Rear Wide - Sleep */
-		pins = "XLSIOS_VSYNC2";
+		/* Imagers - Rear UW - Sleep */
+		pins = "XLSIOS_VSYNC1";
 		bias-pull-down;
 		input-enable;
 		output-disable;
@@ -4705,24 +4809,6 @@
 	rtcam2ap_vsync_sleep: rtcam2ap_vsync_sleep {
 		/* Imagers - Rear Tele - Sleep */
 		pins = "XLSIOS_VSYNC6";
-		bias-pull-down;
-		input-enable;
-		output-disable;
-		function = "lsios_gpio";
-	};
-
-	ruwcam2ap_vsync: ruwcam2ap_vsync {
-		/* Imagers - Rear UW */
-		pins = "XLSIOS_VSYNC1";
-		bias-pull-down;
-		input-enable;
-		output-disable;
-		function = "lsios_vsync";
-	};
-
-	ruwcam2ap_vsync_sleep: ruwcam2ap_vsync_sleep {
-		/* Imagers - Rear UW - Sleep */
-		pins = "XLSIOS_VSYNC1";
 		bias-pull-down;
 		input-enable;
 		output-disable;
@@ -5218,25 +5304,25 @@
 #define VSYS_VDROOP2_1V2_AV6(x) &cpm_pinctrl XCPM_VDROOP2 x
 #define WLAN2AP_HOST_WAKE_1V2(x) &cpm_pinctrl XCPM_EINT_8 x
 #define XCPM_SPI0_SSB_AJ5(x) &cpm_pinctrl XCPM_SPI0_SSB x
-#define PMIC_S_GPIO16_1V2(x) &da9188_gpio DA9188_SUB_GPIO_16 x
-#define PMICM2CAM_LVBUCK_EN(x) &da9188_gpio DA9188_MAIN_GPIO_0 x
-#define PMICM2DISP1_BUCK_EN(x) &da9188_gpio DA9188_MAIN_GPIO_3 x
-#define PMICM2DISP1_BUCK_VSEL(x) &da9188_gpio DA9188_MAIN_GPIO_4 x
-#define PMICM2RCAM_OIS_VM_EN(x) &da9188_gpio DA9188_MAIN_GPIO_1 x
-#define PMICM2RCAM_VANA_EN(x) &da9188_gpio DA9188_MAIN_GPIO_2 x
-#define PMICM2RCAM_VDIG_LDO_EN(x) &da9188_gpio DA9188_MAIN_GPIO_5 x
-#define PMICM_GPIO_6_1V2(x) &da9188_gpio DA9188_MAIN_GPIO_6 x
-#define PMICM_GPIO_7_1V2(x) &da9188_gpio DA9188_MAIN_GPIO_7 x
-#define PMICS2CAM_BB_EN(x) &da9188_gpio DA9188_SUB_GPIO_9 x
-#define PMICS2CAM_MVBUCK_EN(x) &da9188_gpio DA9188_SUB_GPIO_10 x
-#define PMICS2CAM_PMIC_EN(x) &da9188_gpio DA9188_SUB_GPIO_8 x
-#define PMICS2DISP0_BUCK_EN(x) &da9188_gpio DA9188_SUB_GPIO_13 x
-#define PMICS2DISP0_RESET_L(x) &da9188_gpio DA9188_SUB_GPIO_11 x
-#define PMICS2DISP1_RESET_L(x) &da9188_gpio DA9188_SUB_GPIO_12 x
-#define PMICS2HAC_AMP_EN(x) &da9188_gpio DA9188_SUB_GPIO_14 x
-#define PMICS2TS0_RESET_L_1V2(x) &da9188_gpio DA9188_SUB_GPIO_17 x
-#define PMICS2TS1_RESET_L_1V2(x) &da9188_gpio DA9188_SUB_GPIO_18 x
-#define PMICS_GPIO_15(x) &da9188_gpio DA9188_SUB_GPIO_15 x
+#define PMIC_S_GPIO16_1V2(x) &da9188_gpio GPIO_16 x
+#define PMICM2CAM_LVBUCK_EN(x) &da9188_gpio GPIO_0 x
+#define PMICM2DISP1_BUCK_EN(x) &da9188_gpio GPIO_3 x
+#define PMICM2DISP1_BUCK_VSEL(x) &da9188_gpio GPIO_4 x
+#define PMICM2RCAM_OIS_VM_EN(x) &da9188_gpio GPIO_1 x
+#define PMICM2RCAM_VANA_EN(x) &da9188_gpio GPIO_2 x
+#define PMICM2RCAM_VDIG_LDO_EN(x) &da9188_gpio GPIO_5 x
+#define PMICM_GPIO_6_1V2(x) &da9188_gpio GPIO_6 x
+#define PMICM_GPIO_7_1V2(x) &da9188_gpio GPIO_7 x
+#define PMICS2CAM_BB_EN(x) &da9188_gpio GPIO_9 x
+#define PMICS2CAM_MVBUCK_EN(x) &da9188_gpio GPIO_10 x
+#define PMICS2CAM_PMIC_EN(x) &da9188_gpio GPIO_8 x
+#define PMICS2DISP0_BUCK_EN(x) &da9188_gpio GPIO_13 x
+#define PMICS2DISP0_RESET_L(x) &da9188_gpio GPIO_11 x
+#define PMICS2DISP1_RESET_L(x) &da9188_gpio GPIO_12 x
+#define PMICS2HAC_AMP_EN(x) &da9188_gpio GPIO_14 x
+#define PMICS2TS0_RESET_L_1V2(x) &da9188_gpio GPIO_17 x
+#define PMICS2TS1_RESET_L_1V2(x) &da9188_gpio GPIO_18 x
+#define PMICS_GPIO_15(x) &da9188_gpio GPIO_15 x
 #define DISP0_2_AP_TE(x) &dpu_pinctrl XDPU_TE0 x
 #define DISP1_2_AP_TE(x) &dpu_pinctrl XDPU_TE1 x
 #define AP2DBG_UART_SDA(x) &gdmc_pinctrl XGDMC_SOC_DEBUG_UART_TXD x
@@ -5305,6 +5391,7 @@
 #define AP2LTAMP_SD_L_1V2(x) &lsion_pinctrl XLSION_CLI16_PIN1 x
 #define AP2UWB_RST_L_1V2(x) &lsion_pinctrl XLSION_CLI16_PIN0 x
 #define XLSION_CLI15_PIN3_AC6(x) &lsion_pinctrl XLSION_CLI15_PIN3 x
+#define _K39(x) &lsios_pinctrl XLSIOS_VSYNC2 x
 #define AP2CP_WAKEUP_1V2(x) &lsios_pinctrl XLSIOS_GPIO3 x
 #define AP2CSID_MCLK4(x) &lsios_pinctrl XLSIOS_MCLK4 x
 #define AP2CSID_RST_L(x) &lsios_pinctrl XLSIOS_PWM_1 x
@@ -5336,9 +5423,8 @@
 #define HALL1_2_AP_OUT_OD_L_1V2(x) &lsios_pinctrl XLSIOS_GPIO4 x
 #define LSIOS_CAMERA_MUTE_1V2(x) &lsios_pinctrl XLSIOS_CAMERA_MUTE x
 #define PRE_OCP_GPU_1V2(x) &lsios_pinctrl XLSIOS_PRE_OCP_GPU x
-#define RCAM2AP_VSYNC(x) &lsios_pinctrl XLSIOS_VSYNC2 x
+#define RCAM2AP_VSYNC(x) &lsios_pinctrl XLSIOS_VSYNC1 x
 #define RTCAM2AP_VSYNC(x) &lsios_pinctrl XLSIOS_VSYNC6 x
-#define RUWCAM2AP_VSYNC(x) &lsios_pinctrl XLSIOS_VSYNC1 x
 #define SOFT_PRE_OCP_GPU_1V2(x) &lsios_pinctrl XLSIOS_SOFT_PRE_OCP_GPU x
 #define SPARE_MCLK0_1V2(x) &lsios_pinctrl XLSIOS_MCLK0 x
 #define XLSIOS_CLI4_PIN3_P40(x) &lsios_pinctrl XLSIOS_CLI4_PIN3 x

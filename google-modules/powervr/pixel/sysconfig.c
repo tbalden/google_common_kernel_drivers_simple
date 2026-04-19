@@ -18,6 +18,7 @@
 #include <pvrsrvkm/rgx_memallocflags.h>
 
 #include <pvr_drv.h>
+#include <pvrversion.h>
 
 #include "sysconfig.h"
 #include "pm_domain.h"
@@ -344,6 +345,13 @@ static void gpu_error_notify(IMG_HANDLE sysdata, PVRSRV_ROBUSTNESS_NOTIFY_DATA *
 	{
 		PVRSRV_ROBUSTNESS_ERR_DATA_GUILTY_LOCKUP *lockup_data =
 			&error->uErrData.sGuiltyLockupData;
+		struct gpu_uevent evt = {
+			.type = GPU_UEVENT_TYPE_KMD_ERROR,
+			.info = GPU_UEVENT_INFO_GUILTY_LOCKUP,
+			.uid = 0
+		};
+
+		OSGetUID(error->pid, &evt.uid);
 
 		if (lockup_data->ui32Flags &
 		    RGXFWIF_FWCCB_CMD_CONTEXT_RESET_FLAG_PF) {
@@ -357,7 +365,7 @@ static void gpu_error_notify(IMG_HANDLE sysdata, PVRSRV_ROBUSTNESS_NOTIFY_DATA *
 			dev_warn(dev, "  DataMaster=%s",
 				 rgxfwif_dm_str(lockup_data->eDM));
 
-		gpu_uevent_kmd_error_send(pixel_dev, GPU_UEVENT_INFO_GUILTY_LOCKUP);
+		gpu_uevent_send(pixel_dev, &evt);
 		break;
 	}
 
@@ -828,3 +836,4 @@ MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Google LLC");
 MODULE_DESCRIPTION("Pixel PowerVR GPU Driver");
 MODULE_INFO(fw_abi_ver, __stringify(FW_ABI_VERSION));
+MODULE_INFO(ddk_version, PVRVERSION_BRANCHNAME);

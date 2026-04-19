@@ -37,5 +37,8 @@ int fwtp_dev_get_memio_ring(struct fwtp_dev *fwtp_dev, int ring_num,
 			    struct tracepoint_ring *ring);
 void fwtp_dev_free_memio_ring(struct fwtp_dev *fwtp_dev,
 			      struct tracepoint_ring *ring);
+void fwtp_dev_trace_fwtp_perfetto_counter(u64 timestamp, u32 track_id,
+					  const char *category, const char *str,
+					  u32 data);
 
 #endif /* __FWTP_H */

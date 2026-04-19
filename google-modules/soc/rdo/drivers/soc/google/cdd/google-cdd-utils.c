@@ -13,10 +13,12 @@
 #include <linux/panic_notifier.h>
 #include <linux/platform_device.h>
 #include <linux/reboot.h>
+#include <linux/rtc.h>
 #include <linux/sched/debug.h>
 #include <soc/google/google-cdd.h>
 #include <soc/google/google-smc.h>
 #include <soc/google/google_wdt.h>
+#include <soc/google/google-ufs.h>
 #include <trace/hooks/debug.h>
 #include <uapi/linux/psci.h>
 
@@ -305,7 +307,7 @@ static void google_cdd_dump_one_task_info(struct task_struct *tsk, bool is_main)
 	unsigned char idx = 0;
 	unsigned long state, pc = 0;
 
-	if ((!tsk) || !try_get_task_stack(tsk) || (tsk->flags & TASK_FROZEN) ||
+	if ((!tsk) || !try_get_task_stack(tsk) || (tsk->__state & TASK_FROZEN) ||
 	    !(tsk->__state == TASK_RUNNING ||
 	    tsk->__state == TASK_UNINTERRUPTIBLE ||
 	    tsk->__state == TASK_KILLABLE))
@@ -530,6 +532,17 @@ static int google_cdd_reboot_handler(struct notifier_block *nb,
 	return NOTIFY_DONE;
 }
 
+static void google_cdd_print_timestamp(void)
+{
+	struct timespec64 ts;
+	struct rtc_time tm;
+
+	ktime_get_real_ts64(&ts);
+	rtc_time64_to_tm(ts.tv_sec - (sys_tz.tz_minuteswest * 60), &tm);
+	pr_info("GCDD Timestamp (%02d-%02d %02d:%02d:%02d)\n",
+		tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+}
+
 static int google_cdd_restart_handler(struct notifier_block *nb,
 				    unsigned long mode, void *cmd)
 {
@@ -549,6 +562,11 @@ static int google_cdd_restart_handler(struct notifier_block *nb,
 	} else if (cdd_ctx.in_reboot) {
 		dev_emerg(cdd_ctx.dev, "normal reboot starting\n");
 		google_cdd_report_reason(CDD_SIGN_NORMAL_REBOOT);
+	} else if (cdd_ctx.long_press_power) {
+		dev_emerg(cdd_ctx.dev, "Power key been hold for 18s : Do restart\n");
+		google_cdd_report_reason(CDD_SIGN_REBOOT_LONGKEY_POWER_WARM);
+		google_cdd_set_reboot_mode(REBOOT_WARM);
+		google_cdd_dump_task_info();
 	} else {
 		dev_emerg(cdd_ctx.dev, "emergency restart\n");
 		google_cdd_report_reason(CDD_SIGN_EMERGENCY_REBOOT);
@@ -562,6 +580,7 @@ static int google_cdd_restart_handler(struct notifier_block *nb,
 	}
 
 exit:
+	google_cdd_print_timestamp();
 	dev_info(cdd_ctx.dev, "ready to do restart.\n");
 	if ((reboot_mode == REBOOT_WARM || reboot_mode == REBOOT_SOFT) &&
 		google_cdd_psci_system_reset2_supported) {
@@ -632,7 +651,12 @@ static int google_cdd_panic_handler(struct notifier_block *nb, unsigned long l, 
 	google_cdd_dump_task_info();
 	google_cdd_output();
 	google_cdd_log_output();
+	google_cdd_print_timestamp();
 	google_cdd_print_log_report();
+
+#if IS_ENABLED(CONFIG_UFS_DW_GOOGLE)
+	ufs_google_kp_dump(cdd_ctx.ufs_pdev);
+#endif
 
 	google_cdd_do_dpm_policy(cdd_ctx.panic_action, kernel_panic_msg);
 

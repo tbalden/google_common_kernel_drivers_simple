@@ -34,7 +34,7 @@
 #include <drm/vs_drm_fourcc.h>
 #include <drm/drm_vblank.h>
 
-static inline void update_format(u32 format, struct dc_hw_fb *fb)
+static inline u8 to_vs_format(u32 format)
 {
 	u8 f = FORMAT_A8R8G8B8;
 
@@ -117,7 +117,7 @@ static inline void update_format(u32 format, struct dc_hw_fb *fb)
 		break;
 	}
 
-	fb->format = f;
+	return f;
 }
 
 static inline void update_swizzle(u32 format, struct dc_hw_fb *fb)
@@ -170,7 +170,7 @@ static inline void update_swizzle(u32 format, struct dc_hw_fb *fb)
 	}
 }
 
-static inline void update_tile_mode(const struct drm_framebuffer *fb, struct dc_hw_fb *dc_fb)
+static inline u8 to_vs_tile_mode(const struct drm_framebuffer *fb)
 {
 	u8 norm_mode, tile = TILE_MODE_LINEAR;
 
@@ -205,7 +205,7 @@ static inline void update_tile_mode(const struct drm_framebuffer *fb, struct dc_
 		break;
 	}
 
-	dc_fb->tile_mode = tile;
+	return tile;
 }
 
 bool vs_dc_is_yuv_format(u32 format)
@@ -241,11 +241,35 @@ static inline u8 to_vs_display_id(struct vs_dc *dc, struct drm_crtc *crtc)
 	return id;
 }
 
+static inline u16 get_dma_image_width(const struct dc_hw_roi *roi, const struct dc_hw_fb *fb)
+{
+	u16 width = 0, height = 0;
+
+	if (roi) {
+		switch (roi->mode) {
+		case VS_DMA_ONE_ROI:
+			width = roi->in_rect[0].w;
+			height = roi->in_rect[0].h;
+			break;
+		default:
+			width = fb->width;
+			height = fb->height;
+			break;
+		}
+	} else {
+		width = fb->width;
+		height = fb->height;
+	}
+
+	return (fb->rotation == ROT_90 || fb->rotation == ROT_270) ? height : width;
+}
+
 static void vs_dc_update_sram(struct vs_dc *dc, struct vs_plane *plane, struct dc_hw_fb *fb,
 			      struct dc_hw_plane *hw_plane, const struct dc_hw_scale *scale)
 {
 	struct device *dev = dc->hw.dev;
 	u32 sp_size = 0;
+	u16 width = 0;
 	int32_t ret = 0;
 	bool sp_dirty = false;
 	bool dma_sram_alloc = false;
@@ -256,6 +280,7 @@ static void vs_dc_update_sram(struct vs_dc *dc, struct vs_plane *plane, struct d
 	u32 hw_id = hw_plane->info->id;
 	u16 sp_alignment = dc->hw.info->dma_sram_alignment;
 	bool sp_extra_buffer = dc->hw.info->dma_sram_extra_buffer;
+
 	plane->sram.sp_unit_size = dc->hw.info->dma_sram_unit_size;
 
 	/* cursor layer doesn't use sram pool */
@@ -270,9 +295,11 @@ static void vs_dc_update_sram(struct vs_dc *dc, struct vs_plane *plane, struct d
 		enum vs_dpu_sram_pool_type type = (hw_id < 8) ? VS_DPU_SPOOL_FE0_DMA :
 								VS_DPU_SPOOL_FE1_DMA;
 
-		vs_dpu_get_dma_sram_size(fb->format, fb->tile_mode, fb->rotation, fb->width,
-					 &sp_size, sp_alignment, sp_extra_buffer,
-					 plane->sram.sp_unit_size);
+		/* b/451837126: pass (NULL, fb) to force using full FB dimensions */
+		width = get_dma_image_width(NULL, fb);
+
+		vs_dpu_get_dma_sram_size(fb->format, fb->tile_mode, fb->rotation, width, &sp_size,
+					 sp_alignment, sp_extra_buffer, plane->sram.sp_unit_size);
 		if (plane->sram.sp_handle && plane->sram.sp_size != sp_size) {
 			realloc = 1;
 			dma_sram_alloc = true;
@@ -299,8 +326,8 @@ static void vs_dc_update_sram(struct vs_dc *dc, struct vs_plane *plane, struct d
 		/* Manage SRAM allocation for Scaling */
 		type = (hw_id < 8) ? VS_DPU_SPOOL_FE0_SCL : VS_DPU_SPOOL_FE1_SCL;
 		if (scale_enable) {
-			vs_dpu_get_fescl_sram_size(fb->format, min(scale->src_w, scale->dst_w),
-						   &sp_size);
+			vs_dpu_get_fescl_sram_size(fb->format,
+						   min(scale->src_w >> 16, scale->dst_w), &sp_size);
 			if (plane->sram.scl_sp_handle && plane->sram.scl_sp_size != sp_size) {
 				realloc = 1;
 				scaler_sram_alloc = true;
@@ -317,7 +344,7 @@ static void vs_dc_update_sram(struct vs_dc *dc, struct vs_plane *plane, struct d
 						"request Scaler SRAM failed. err:%d plane:%d pool:%d realloc:%d old_size:%uK requested_size:%uK format:%d rot:%d src_w:%u dst_w:%u alignment:%d",
 						ret, plane->id, type, realloc,
 						plane->sram.scl_sp_size >> 10, sp_size >> 10,
-						fb->format, fb->rotation, scale->src_w,
+						fb->format, fb->rotation, scale->src_w >> 16,
 						scale->dst_w, sp_alignment);
 					vs_dpu_sram_pool_dump_usage(dev, type);
 				}
@@ -394,9 +421,9 @@ static void update_plane_fb(struct vs_plane *plane, u8 display_id, struct dc_hw_
 	fb->zpos = vs_plane_state->blend_id;
 	fb->enable = state->visible;
 	fb->secure = is_secure;
-	update_format(drm_fb->format->format, fb);
+	fb->format = to_vs_format(drm_fb->format->format);
 	update_swizzle(drm_fb->format->format, fb);
-	update_tile_mode(drm_fb, fb);
+	fb->tile_mode = to_vs_tile_mode(drm_fb);
 
 	vs_plane_state->status.tile_mode = fb->tile_mode;
 }
@@ -982,6 +1009,122 @@ static bool vs_dc_mod_supported(const struct vs_plane_info *plane_info, u64 modi
 	return false;
 }
 
+static int check_plane_sram_dma_size(const struct vs_dc_info *info,
+				     const struct dc_hw_plane *hw_plane,
+				     struct vs_plane_state *vs_plane_state,
+				     const struct vs_plane_info *plane_info)
+{
+	int ret;
+	struct device *dev = vs_plane_state->base.plane->dev->dev;
+	const struct drm_plane_state *plane_state = &vs_plane_state->base;
+	const struct drm_framebuffer *fb = plane_state->fb;
+	u32 dma_sram_unit_size = info->dma_sram_unit_size;
+	u16 dma_sram_alignment = info->dma_sram_alignment;
+	bool dma_sram_extra_buffer = info->dma_sram_extra_buffer;
+	u32 dma_sram_max_size_kb = plane_info->dma_sram_max_size_kb;
+	u32 dma_sram_max_size = dma_sram_max_size_kb << 10;
+	u32 dma_sram_size = 0;
+
+	if (!dma_sram_max_size_kb)
+		return 0;
+
+	ret = vs_dpu_get_dma_sram_size(to_vs_format(fb->format->format), to_vs_tile_mode(fb),
+				       to_vs_rotation(plane_state->rotation), fb->width,
+				       &dma_sram_size, dma_sram_alignment, dma_sram_extra_buffer,
+				       dma_sram_unit_size);
+	if (ret) {
+		dev_warn(dev, "[Reject] plane %d failed to calculate sram dma size\n",
+			 plane_info->id);
+		return ret;
+	}
+
+	dev_dbg(dev, "%s: plane %d dma_sram_size %u, dma_sram_max_size %u\n", __func__,
+		plane_info->id, dma_sram_size, dma_sram_max_size);
+
+	if (dma_sram_size > dma_sram_max_size) {
+		dev_warn(dev, "[Reject] plane %d dma_sram_size %u > %u\n", plane_info->id,
+			 dma_sram_size, dma_sram_max_size);
+		return -EINVAL;
+	}
+
+	/* save calculated plane dma sram size */
+	vs_plane_state->dma_sram_size = dma_sram_size;
+
+	return 0;
+}
+
+static int check_plane_sram_scl_size(const struct vs_dc_info *info,
+				     const struct dc_hw_plane *hw_plane,
+				     struct vs_plane_state *vs_plane_state,
+				     const struct vs_plane_info *plane_info)
+{
+	int ret;
+	struct device *dev = vs_plane_state->base.plane->dev->dev;
+	const struct drm_plane_state *plane_state = &vs_plane_state->base;
+	const struct drm_framebuffer *fb = plane_state->fb;
+	u32 scl_sram_max_size_kb = plane_info->scl_sram_max_size_kb;
+	u32 scl_sram_max_size = scl_sram_max_size_kb << 10;
+	struct dc_hw_scale scale = { 0 };
+	u32 scl_sram_size = 0;
+
+	if (!scl_sram_max_size_kb)
+		return 0;
+
+	ret = populate_layer_scale(plane_state, &scale);
+	if (ret)
+		return ret;
+
+	if (!scale.enable)
+		return 0;
+
+	ret = vs_dpu_get_fescl_sram_size(to_vs_format(fb->format->format),
+					 min(scale.src_w >> 16, scale.dst_w), &scl_sram_size);
+	if (ret) {
+		dev_warn(dev, "[Reject] plane %d failed to calculate sram scaler size\n",
+			 plane_info->id);
+		return ret;
+	}
+
+	dev_dbg(dev, "%s: plane %d scl_sram_size %u, scl_sram_max_size %u\n", __func__,
+		plane_info->id, scl_sram_size, scl_sram_max_size);
+
+	if (scl_sram_size > scl_sram_max_size) {
+		dev_warn(dev, "[Reject] plane %d scl_sram_size %u > %u\n", plane_info->id,
+			 scl_sram_size, scl_sram_max_size);
+		return -EINVAL;
+	}
+
+	/* save calculated plane scl sram size */
+	vs_plane_state->scl_sram_size = scl_sram_size;
+
+	return 0;
+}
+
+static int check_plane_sram(const struct vs_dc_info *info, const struct dc_hw_plane *hw_plane,
+			    struct vs_plane_state *vs_plane_state,
+			    const struct vs_plane_info *plane_info)
+{
+	int ret;
+	const struct drm_plane_state *plane_state = &vs_plane_state->base;
+	const struct drm_framebuffer *fb = plane_state->fb;
+
+	if (vs_fb_is_shallow(fb->modifier))
+		return 0;
+
+	if (hw_plane->info->type == DRM_PLANE_TYPE_CURSOR)
+		return 0;
+
+	ret = check_plane_sram_dma_size(info, hw_plane, vs_plane_state, plane_info);
+	if (ret)
+		return ret;
+
+	ret = check_plane_sram_scl_size(info, hw_plane, vs_plane_state, plane_info);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
 static int check_dma_constraints(struct vs_plane_state *vs_plane_state,
 				 const struct vs_plane_info *plane_info,
 				 const struct drm_framebuffer *fb, struct drm_rect *roi)
@@ -1198,7 +1341,7 @@ static int check_plane_rotation(struct drm_plane_state *plane_state,
 		return 0;
 
 	if (!is_yuv) {
-		dev_dbg(dev, "[Reject] Rotation/flip only supported for YUV.\n");
+		dev_err(dev, "[Reject] Rotation/flip only supported for YUV.\n");
 		return -EINVAL;
 	}
 
@@ -1237,12 +1380,12 @@ static int check_plane_rotation(struct drm_plane_state *plane_state,
 
 	if (rotate_mask & (DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270)) {
 		if (flip_mask != 0) {
-			dev_dbg(dev, "[Reject] Rotate 90/270 + flip_x/flip_y not supported!\n");
+			dev_err(dev, "[Reject] Rotate 90/270 + flip_x/flip_y not supported!\n");
 			return -EINVAL;
 		}
 
 		if (src_w < src_h) {
-			dev_dbg(dev,
+			dev_err(dev,
 				"[Reject] Rotation not supported on portrait aspect ratios!\n");
 			return -EINVAL;
 		}
@@ -1250,7 +1393,7 @@ static int check_plane_rotation(struct drm_plane_state *plane_state,
 		if (!size_supported_for_rotation(src_w, src_h, is_pvric, fb->format->format,
 						 dc_info->max_nv12_uncomp_rot_width,
 						 dc_info->max_nv12_uncomp_rot_height)) {
-			dev_dbg(dev, "[Reject] Plane size exceeds TCU limits for rotation.\n");
+			dev_err(dev, "[Reject] Plane size exceeds TCU limits for rotation.\n");
 			return -EINVAL;
 		}
 	}
@@ -1310,10 +1453,15 @@ static int check_plane_ext_fb(struct vs_plane_state *plane_state,
 			return 0;
 		}
 
+		if (!fb_ext) {
+			dev_err(dev, "%s Invalid fb_ext with DMA_CONFIG mode\n", __func__);
+			return -EINVAL;
+		}
+
 		/* Check VS_DMA_EXT_LAYER or VS_DMA_EXT_LAYER_EX ROI-1 DMA constraints */
 		drm_rect_init(&roi1, dma_blob->in_rect.x, dma_blob->in_rect.y, dma_blob->in_rect.w,
 			      dma_blob->in_rect.h);
-		ret = check_dma_constraints(plane_state, plane_info, fb, &roi1);
+		ret = check_dma_constraints(plane_state, plane_info, fb_ext, &roi1);
 		if (ret) {
 			dev_err(dev,
 				"%s: Invalid DMA constraints for fb_ext and in_rect " DRM_RECT_FMT
@@ -1342,19 +1490,26 @@ static int check_plane_scale(struct drm_plane_state *plane_state,
 
 	struct drm_plane_state *old_plane_state = NULL;
 	struct dc_hw_scale scale = { 0 };
+	struct device *dev = plane->dev->dev;
 	int ret;
 
 	if ((plane_state->src_w >> 16 != fb->width || plane_state->src_h >> 16 != fb->height) &&
-	    !plane_info->roi)
+	    !plane_info->roi) {
+		dev_err(dev, "%s src roi not match to fb dimension\n", __func__);
 		return -EINVAL;
+	}
 
 	ret = populate_layer_scale(plane_state, &scale);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "%s populate_layer_scale fail: %d\n", __func__, ret);
 		return ret;
+	}
 
 	if (plane_info->min_scale == VS_PLANE_NO_SCALING &&
-	    (scale.factor_x != VS_PLANE_NO_SCALING || scale.factor_y != VS_PLANE_NO_SCALING))
+	    (scale.factor_x != VS_PLANE_NO_SCALING || scale.factor_y != VS_PLANE_NO_SCALING)) {
+		dev_err(dev, "%s scaling factor mismatch\n", __func__);
 		return -EINVAL;
+	}
 
 	if (state && plane)
 		old_plane_state = drm_atomic_get_old_plane_state(state, plane);
@@ -1366,8 +1521,10 @@ static int check_plane_scale(struct drm_plane_state *plane_state,
 		const struct drm_vs_preprocess_scale_config *new_coeff;
 
 		ret = populate_layer_scale(old_plane_state, &old_scale);
-		if (ret)
+		if (ret) {
+			dev_err(dev, "%s populate_layer_scale fail: %d\n", __func__, ret);
 			return ret;
+		}
 
 		/*
 		 * Dirty bit should be based on dimensions, not scale factor. Even if the scale
@@ -1522,13 +1679,17 @@ static int vs_dc_check_plane(struct device *dev, struct vs_plane *plane,
 		sbs = vs_dc_drm_plane_property_get(vs_plane_state, "SBS", NULL);
 
 	crtc_state = drm_atomic_get_existing_crtc_state(state->state, crtc);
-	if (IS_ERR(crtc_state))
+	if (IS_ERR(crtc_state)) {
+		dev_err(dev, "%s: plane id %d has invalid crtc_state\n", __func__, plane->id);
 		return -EINVAL;
+	}
 
 	ret = drm_atomic_helper_check_plane_state(state, crtc_state, plane_info->min_scale,
 						  plane_info->max_scale, true, true);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "%s: plane id %d check_plane_state fail\n", __func__, plane->id);
 		return ret;
+	}
 
 	if (!state->visible)
 		return 0;
@@ -1554,6 +1715,10 @@ static int vs_dc_check_plane(struct device *dev, struct vs_plane *plane,
 	if (!vs_dc_check_drm_property(dc, plane_info->id, vs_plane_state->drm_states,
 				      plane->properties.num, vs_plane_state))
 		return -EINVAL;
+
+	ret = check_plane_sram(dc->hw.info, hw_plane, vs_plane_state, plane_info);
+	if (ret)
+		return ret;
 
 	/* Configure the related display connection planes side by side split info in plane check insted of in update plane,
 	 * because the writeback configure needs to use the dirty state.

@@ -7,5 +7,6 @@
 #include "cpm_tracepoint_decoder.h"
 
 extern struct client_tracepoint thermal_tj_pid_curr_state;
+extern struct client_tracepoint thermal_tj_sensors;
 
 #endif /* _THERMAL_TRACEPOINTS_H */

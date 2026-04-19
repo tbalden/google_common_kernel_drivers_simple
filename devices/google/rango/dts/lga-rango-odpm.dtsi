@@ -54,3 +54,13 @@
 	google,subsystem-name = "Display_Outer";
 	google,shunt-res-uohm = <5000>;
 };
+
+/* b/430203693: remap CH8 from S9M_VDD_TPU_M to L26M_INNER_TS_AVDD */
+&ch8 {
+	rail-name = "ldo_26m";
+};
+
+/* b/430203693: remap CH45 from S5S_VDDQ_MEM to L26S_OUTER_TS_AVDD */
+&ch45 {
+	rail-name = "ldo_26s";
+};

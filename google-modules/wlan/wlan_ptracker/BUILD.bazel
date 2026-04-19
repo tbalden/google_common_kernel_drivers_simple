@@ -2,7 +2,7 @@
 
 # WiFi performance tracker driver
 
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_module")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_module")
 
 checkpatch(
     name = "checkpatch",

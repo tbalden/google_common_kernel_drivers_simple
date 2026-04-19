@@ -41,6 +41,9 @@
 /* The mapping must be replicated for each PASID/context. */
 #define GCIP_IMAGE_CONFIG_MAP_SHARED_BIT	BIT(1)
 #define GCIP_IMAGE_CONFIG_MAP_SHARED(flags)	((flags) & GCIP_IMAGE_CONFIG_MAP_SHARED_BIT)
+/* The mapping is read-only. */
+#define GCIP_IMAGE_CONFIG_MAP_RO_BIT		BIT(2)
+#define GCIP_IMAGE_CONFIG_MAP_RO(flags)		((flags) & GCIP_IMAGE_CONFIG_MAP_RO_BIT)
 /* The mapping uses a 36-bit IOVA. The incoming value needs to be shifted left 4 bits */
 #define GCIP_IMAGE_CONFIG_MAP_36BIT_BIT		BIT(3)
 #define GCIP_IMAGE_CONFIG_MAP_36BIT(flags)	((flags) & GCIP_IMAGE_CONFIG_MAP_36BIT_BIT)

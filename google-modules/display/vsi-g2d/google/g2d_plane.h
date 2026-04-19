@@ -32,7 +32,8 @@ struct g2d_plane {
 	struct drm_property *hw_caps_prop;
 };
 
-struct g2d_plane *g2d_plane_init(struct g2d_device *gdevice, unsigned int possible_crtcs);
+struct g2d_plane *g2d_plane_init(struct g2d_device *g2d_device, unsigned int possible_crtcs,
+				 int idx);
 #define to_g2d_plane(plane) container_of(plane, struct g2d_plane, base)
 #define to_g2d_plane_state(state) container_of(state, struct g2d_plane_state, base)
 

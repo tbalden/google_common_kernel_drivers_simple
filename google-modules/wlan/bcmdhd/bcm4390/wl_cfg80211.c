@@ -275,9 +275,9 @@ _Pragma("GCC diagnostic ignored \"-Wmissing-field-initializers\"")
 #endif
 static const struct ieee80211_regdomain brcm_regdom = {
 #ifdef WL_6G_BAND
-	.n_reg_rules = 5,
+	.n_reg_rules = 6,
 #else
-	.n_reg_rules = 4,
+	.n_reg_rules = 5,
 #endif
 	.alpha2 =  "99",
 	.reg_rules = {
@@ -288,14 +288,15 @@ static const struct ieee80211_regdomain brcm_regdom = {
 		 * this and for 802.11b only
 		 */
 		REG_RULE(2484-10, 2484+10, 20, 6, 20, 0),
-		/* IEEE 802.11a, channel 36..64 */
-		REG_RULE(5150-10, 5350+10, 160, 6, 20, 0),
+		/* UNII-1: 5150 - 5250 MHz, indoor only, no DFS */
+		REG_RULE(5150-10, 5250+10, 80, 6, 20, 0),
+		/* UNII-2A and 2C: 5250 - 5725 MHz, DFS required (RADAR channels) */
+		REG_RULE(5250-10, 5725+10, 80, 6, 20, 0),
 #ifdef WL_5P9G
-		/* IEEE 802.11a, channel 100..181 */
-		REG_RULE(5470-10, 5910+10, 160, 6, 20, 0),
+		/* UNII-3 + UNII-4 combined: 5725 - 5925 MHz, no DFS, allow 160 MHz */
+		REG_RULE(5725-10, 5925+10, 160, 6, 20, 0),
 #else
-		/* IEEE 802.11a, channel 100..165 */
-		REG_RULE(5470-10, 5850+10, 160, 6, 20, 0),
+		REG_RULE(5725-10, 5850+10, 80, 6, 20, 0),
 #endif /* WL_5P9G */
 #ifdef WL_6G_BAND
 		REG_RULE(5935-10, 7115+10, 160, 6, 20, 0),
@@ -4123,6 +4124,11 @@ exit:
 	return ret;
 }
 
+static bool bss_add_condition(struct bcm_cfg80211 *cfg, struct net_device *ndev)
+{
+	return !cfg->bss_pending_add_op;
+}
+
 /* Create a Generic Network Interface and initialize it depending up on
  * the interface type
  */
@@ -4136,12 +4142,11 @@ wl_cfg80211_create_iface(struct wiphy *wiphy,
 	struct net_device *primary_ndev = NULL;
 	s32 ret = BCME_OK;
 	s32 bsscfg_idx = 0;
-	long timeout;
-	long time_to_wait = MAX_WAIT_TIME;
-	unsigned long start_wait_time;
+	ktime_t time_to_wait = MAX_WAIT_TIME;
 	wl_if_event_info *event = NULL;
 	u8 addr[ETH_ALEN];
 	struct net_info *iter, *next;
+	long timeout = 0;
 
 	WL_DBG(("Enter\n"));
 	if (!name) {
@@ -4205,28 +4210,12 @@ wl_cfg80211_create_iface(struct wiphy *wiphy,
 	 */
 	WL_DBG(("Wait for the FW I/F Event\n"));
 
-	while (TRUE) {
-		start_wait_time = get_jiffies_64();
-		timeout = wait_event_interruptible_timeout(cfg->netif_change_event,
-			!cfg->bss_pending_add_op, msecs_to_jiffies(time_to_wait));
-		if (timeout == -ERESTARTSYS) {
-			time_to_wait -= jiffies_to_msecs(get_jiffies_64() - start_wait_time);
-			WL_DBG_MEM(("waitqueue was interrupted by a signal. remaining time %ld\n",
-				time_to_wait));
-			if (time_to_wait <= 0) {
-				WL_ERR(("Timed out. time_to_wait:%ld, timeout:%ld\n",
-					time_to_wait, timeout));
-				goto exit;
-			}
-
-		} else if (timeout <= 0 || cfg->bss_pending_add_op) {
-			WL_ERR(("ADD_IF event, didn't come. "
-				"Return. timeout:%ld bss_pending_add_op:%d\n",
+	timeout = wl_cfg80211_wait_interruptible(cfg, primary_ndev,
+			bss_add_condition, time_to_wait);
+	if (timeout <= 0 || cfg->bss_pending_add_op) {
+		WL_ERR(("ADD_IF event, didn't come. Return. timeout:%ld bss_pending_add_op:%d\n",
 				timeout, cfg->bss_pending_add_op));
-			goto exit;
-		} else {
-			break;
-		}
+		goto exit;
 	}
 
 	event = &cfg->if_event_info;
@@ -16683,12 +16672,14 @@ wl_cfg80211_verify_bss(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	*bss = CFG80211_GET_BSS(wiphy, NULL, curbssid,
 		ssid->SSID, ssid->SSID_len);
 	if (*bss) {
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0))
-		/* Update the reference count after use. In case of kernel version >= 4.7
-		* the cfg802_put_bss is called in cfg80211_connect_bss context
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0)) || \
+		(LINUX_VERSION_CODE > KERNEL_VERSION(4, 11, 0))
+		/* For cases where bss is passed onto the connect_result API, the cfg8011
+		 * does PUT operation. For other cases, where cfg80211_connect_done is used,
+		 * do the PUT operation here itself.
 		*/
 		CFG80211_PUT_BSS(wiphy, *bss);
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0) */
+#endif /* KERNEL_VER < (4, 7, 0) || KERNEL_VER > (4,11,0) */
 		ret = true;
 	} else {
 		WL_ERR(("No bss entry for bssid:"MACDBG" ssid_len:%d\n",
@@ -27908,3 +27899,50 @@ wl_cfg80211_set_mrsno(struct bcm_cfg80211 *cfg, struct net_device *ndev, bool en
 	return ret;
 }
 #endif /* defined(WL_MRSNO_OFFLD) */
+
+/**
+ * wl_cfg80211_wait_interruptible - Waits (interruptibly) for a condition/event or timeout.
+ *
+ * This wrapper waits for a user-specified condition to be met or until the specified
+ * timeout (in milliseconds) elapses. It handles signal interruptions and updates the
+ * remaining wait time accordingly. Returns the actual timeout value from the wait,
+ * allowing the caller to distinguish between timeout, signal interruption, and event received.
+ *
+ * Returns:
+ *   >0 : Number of jiffies left if condition met before timeout
+ *    0 : Timeout occurred (condition not met)
+ *   <0 : Error or interrupted by signal
+ */
+long
+wl_cfg80211_wait_interruptible(struct bcm_cfg80211 *cfg, struct net_device *ndev,
+		bool (*validate_wake_condition_fn)(struct bcm_cfg80211 *cfg,
+		struct net_device *ndev), u32 wait_dur_ms)
+{
+	long timeout;
+	u32 dwell_time = wait_dur_ms;
+
+	while (TRUE) {
+		s64 start_wait_time = get_jiffies_64();
+		timeout = wait_event_interruptible_timeout(cfg->netif_change_event,
+				validate_wake_condition_fn(cfg, ndev),
+				msecs_to_jiffies(dwell_time));
+		if (timeout == -ERESTARTSYS) {
+			dwell_time -= jiffies_to_msecs(get_jiffies_64() - start_wait_time);
+			WL_DBG_MEM(("waitqueue was interrupted by a signal,"
+					"remaining dwell time %u\n", dwell_time));
+			if (dwell_time <= 0) {
+				WL_ERR(("Timed out. dwell_time:%u, timeout:%ld\n",
+						dwell_time, timeout));
+				return timeout;
+			}
+		} else if (timeout < 0) {
+			WL_ERR(("ACTION_FRAME_OFFCHAN_COMPLETE Event, didn't come. timeout:%ld\n",
+					timeout));
+			return timeout;
+		} else {
+			/* wait event interrupt, break and process */
+			CFGP2P_DBG(("event interrupt recevd, break and process\n"));
+			return timeout;
+		}
+	}
+}

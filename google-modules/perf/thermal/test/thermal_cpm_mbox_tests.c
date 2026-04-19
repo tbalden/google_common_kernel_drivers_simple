@@ -219,8 +219,6 @@ static void hw_cdev_id_to_tzid_test(struct kunit *test)
 	}
 }
 
-
-
 static int thermal_cpm_mbox_rx_notifier_test(struct notifier_block *nb, unsigned long event,
 					     void *data)
 {
@@ -287,7 +285,7 @@ static void thermal_cpm_mbox_rx_callback_test(struct kunit *test)
 	req->req_rsvd0 = 0x2;
 	cpm_mbox_rx_callback(0, &cpm_msg, mock_drv_data);
 
-	flush_work(&mock_drv_data->rx_work[HW_CDEV_BIG].work);
+	flush_work(&mock_drv_data->rx_work[HW_RX_CB_NTC].work);
 	cpm_msg.payload[0] = req->tzid;
 	cpm_msg.payload[1] = req->req_rsvd0;
 	cpm_msg.payload[2] = 0;

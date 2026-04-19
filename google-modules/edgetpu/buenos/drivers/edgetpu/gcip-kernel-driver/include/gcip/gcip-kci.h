@@ -8,6 +8,8 @@
 #ifndef __GCIP_KCI_H__
 #define __GCIP_KCI_H__
 
+#include <linux/atomic.h>
+#include <linux/bits.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
@@ -90,7 +92,8 @@ enum gcip_kci_code {
 	GCIP_KCI_CODE_DEBUG_CMD = 25,
 	GCIP_KCI_CODE_DEBUG_RESET = 26,
 	GCIP_KCI_CODE_DEBUG_INIT = 27,
-	GCIP_KCI_CODE_MAP_HWTRACE_BUFFER = 28,
+	GCIP_KCI_CODE_LOG_STATE_INFO = 28,
+	GCIP_KCI_CODE_MAP_HWTRACE_BUFFER = 29,
 
 	GCIP_KCI_CODE_RKCI_ACK = 256,
 };
@@ -137,6 +140,10 @@ enum gcip_kci_doorbell_reason {
 	GCIP_KCI_PUSH_CMD,
 	GCIP_KCI_CONSUME_RESP,
 };
+
+/* GCIP_KCI_CODE_LOG_STATE_INFO flags values. */
+#define GCIP_KCI_LOG_STATE_INFO_ALL		(0)
+#define GCIP_KCI_LOG_STATE_INFO_SCHEDULER	(BIT(0))
 
 /* Struct to hold a circular buffer for incoming KCI responses. */
 struct gcip_reverse_kci {
@@ -237,6 +244,8 @@ struct gcip_kci {
 	struct device *dev;
 	/* Mailbox used by KCI. */
 	struct gcip_mailbox mailbox;
+	/* The last assigned sequence number of commands, the assignment starts from 1. */
+	atomic64_t cur_seq;
 	/* Protects cmd_queue. */
 	struct mutex cmd_queue_lock;
 	/* Protects resp_queue. */
@@ -342,7 +351,7 @@ static inline u32 gcip_kci_queue_element_size(enum gcip_mailbox_queue_type type)
 
 static inline u64 gcip_kci_get_cur_seq(struct gcip_kci *kci)
 {
-	return gcip_mailbox_get_cur_seq(&kci->mailbox);
+	return atomic64_read(&kci->cur_seq);
 }
 
 static inline struct gcip_kci_command_element *gcip_kci_get_cmd_queue(struct gcip_kci *kci)

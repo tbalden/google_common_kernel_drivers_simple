@@ -26,10 +26,4 @@
 		gslc_dump		= <1>;
 		apc_cache_dump		= <1>;
 	};
-
-	feature {
-		dump-mode {
-			enabled = <1>;
-		};
-	};
 }; /* end of dpm */

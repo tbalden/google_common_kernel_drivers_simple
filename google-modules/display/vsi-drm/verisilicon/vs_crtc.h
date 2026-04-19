@@ -12,6 +12,7 @@
 
 #include <linux/kthread.h>
 #include <linux/pm_qos.h>
+#include <linux/types.h>
 
 #include "vs_dc_drm_property.h"
 #include "vs_dc_hw.h"
@@ -65,7 +66,8 @@ struct vs_crtc;
 struct vs_crtc_funcs {
 	void (*enable)(struct device *dev, struct drm_crtc *crtc,
 		       struct drm_atomic_state *atomic_state);
-	void (*disable)(struct device *dev, struct drm_crtc *crtc);
+	void (*disable)(struct device *dev, struct drm_crtc *crtc,
+			struct drm_crtc_state *old_state);
 #if IS_ENABLED(CONFIG_DEBUG_FS)
 	int (*show_pattern_config)(struct seq_file *s);
 	void (*set_pattern)(struct drm_crtc *crtc, const char __user *ubuf, size_t len);
@@ -127,7 +129,7 @@ struct vs_crtc_state {
 	struct vs_drm_blob_state roi0_gamma;
 	struct vs_drm_blob_state roi1_gamma;
 	struct vs_drm_blob_state hist_chan[VS_HIST_CHAN_IDX_COUNT];
-
+	bool hist_rgb_enable;
 	struct vs_qos_config qos_config;
 	struct vs_qos_config requested_qos_config;
 	DECLARE_BITMAP(qos_override, VS_QOS_OVERRIDE_COUNT);
@@ -139,10 +141,14 @@ struct vs_crtc_state {
 	enum drm_vs_data_extend_mode data_ext_mode;
 
 	bool sync_enable;
-	bool underrun;
 	bool out_dp;
 
 	bool seamless_mode_change;
+
+	/** @commit_begin_ts: utc time at which commit began */
+	ktime_t commit_begin_ts;
+	/** @commit_done_ts: utc time at which commit done occurred */
+	ktime_t commit_done_ts;
 
 	bool skip_update;
 	bool force_skip_update;
@@ -150,11 +156,53 @@ struct vs_crtc_state {
 	bool wb_connectors_updated;
 	bool need_boost_fabrt;
 
+	bool recovery_disabled;
 	bool needs_recovery;
+	bool needs_hard_reset;
 
 	struct vs_drm_property_state drm_states[VS_DC_MAX_PROPERTY_NUM];
 
 	struct kthread_work commit_work;
+};
+
+/**
+ * struct frame_irq_err_counters - counts frame irq errors on crtc
+ *
+ * Counts both errors related to illegal states (ex. overflow bit set without
+ * interrupt being set), as well as cases where logical operation of a
+ * responsive irq handling system would not lead to the indicated state (such as
+ * where the irq handling has been delayed for a significant gap in time)
+ */
+struct frame_irq_err_counters {
+	/**
+	 * @illegal_irq_state: irq status/overflow combination should not exist
+	 *                     as indicated (ex. overflow without status, two
+	 *                     frame_done's without frame_start)
+	 */
+	u32 illegal_irq_state;
+	/**
+	 * @frame_done_overflow: two frame_done's with only one frame_start
+	 */
+	u32 frame_done_overflow;
+	/**
+	 * @frame_start_overflow_cmd: two frame_start's with only one frame_done
+	 *			      in command mode, where one frame starting
+	 *			      should be dependent on the previous
+	 *			      frame's ending being handled
+	 */
+	u32 frame_start_overflow_cmd;
+	/**
+	 * @full_frame_overflow: status and overflow both set for frame_start
+	 *			 and frame_done, implying interrupt gap for more
+	 *			 than two full frame lengths
+	 */
+	u32 full_frame_overflow;
+	/**
+	 * @full_frame_length_irq_gap: tracks all cases where implied irq gap
+	 *			       extends past the length of a frame
+	 *			       transfer
+	 */
+	u32 full_frame_length_irq_gap;
 };
 
 struct vs_crtc {
@@ -189,6 +237,7 @@ struct vs_crtc {
 	struct drm_property *brightness_mask_prop;
 	struct drm_property *hw_caps_prop;
 	struct drm_property *hist_chan_prop[VS_HIST_CHAN_IDX_COUNT];
+	struct drm_property *hist_rgb_prop;
 	struct drm_property *core_clk;
 	struct drm_property *rd_avg_bw_mbps;
 	struct drm_property *rd_peak_bw_mbps;
@@ -198,6 +247,7 @@ struct vs_crtc {
 	struct drm_property *wr_rt_bw_mbps;
 	struct drm_property *expected_present_time;
 	struct drm_property *power_off_mode;
+	struct drm_property *recovery_disabled;
 
 	struct vs_drm_property_group properties;
 
@@ -206,7 +256,10 @@ struct vs_crtc {
 	bool frame_transfer_pending;
 	bool ddic_cmd_mode_start_scan;
 	bool ltm_hist_query_pending;
-	atomic_t frame_start_timeout, frame_done_timeout, frame_start_missing;
+	atomic_t frame_start_timeout, frame_done_timeout;
+	atomic_t frame_start_missing, frame_done_missing;
+	atomic_t underrun_count;
+	struct frame_irq_err_counters frame_irq_err_counters;
 	bool needs_hw_reset;
 	atomic_t hw_reset_count;
 	wait_queue_head_t framedone_waitq;
@@ -222,6 +275,7 @@ struct vs_crtc {
 	struct vs_recovery recovery;
 
 	atomic_t te_count;
+	atomic_t unexpected_te_count;
 	atomic_t frame_done_count;
 
 	struct dev_pm_qos_request core_devfreq_req;
@@ -253,7 +307,7 @@ void vs_crtc_destroy(struct drm_crtc *crtc);
 
 struct vs_crtc *vs_crtc_create(const struct dc_hw_display *display, struct drm_device *drm_dev,
 			       struct vs_dc *dc, const struct vs_dc_info *info, u8 index);
-void vs_crtc_handle_frm_start(struct drm_crtc *crtc, bool underrun);
+void vs_crtc_handle_frm_start(struct drm_crtc *crtc);
 int vs_crtc_get_ltm_hist(struct drm_file *file_priv, struct vs_crtc *crtc, struct dc_hw *hw,
 			 struct drm_vs_ltm_histogram_data *out);
 
@@ -264,6 +318,11 @@ dma_addr_t vs_crtc_get_ltm_hist_dma_addr(struct device *dev, u8 hw_id);
 struct drm_atomic_state *vs_crtc_suspend(struct vs_crtc *vs_crtc,
 					 struct drm_modeset_acquire_ctx *ctx);
 int vs_crtc_resume(struct drm_atomic_state *suspend_state, struct drm_modeset_acquire_ctx *ctx);
+void vs_crtc_record_frame_timeout(struct vs_crtc *vs_crtc, int old_te_count,
+				  struct drm_crtc_state *old_crtc_state,
+				  unsigned long wait_time_jiffies, bool during_disable);
+void vs_crtc_trigger_gram_collision_coredump(struct vs_crtc *vs_crtc,
+					     struct drm_crtc_state *crtc_state);
 
 #define to_vs_crtc(crtc) container_of(crtc, struct vs_crtc, base)
 

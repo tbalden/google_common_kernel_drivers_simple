@@ -258,7 +258,7 @@ static int syna_tcm_v1_check_max_rw_size(struct tcm_dev *tcm_dev)
 		if (tcm_dev->max_wr_size == 0)
 			wr_size = tcm_dev->max_wr_size;
 		else
-			wr_size = MIN(wr_size, tcm_dev->max_wr_size);
+			wr_size = min(wr_size, tcm_dev->max_wr_size);
 	}
 
 	/* no such definition of the max read size in v1, so use the platform's settings */
@@ -302,7 +302,7 @@ static int syna_tcm_v1_parse_idinfo(struct tcm_dev *tcm_dev,
 			sizeof(struct tcm_identification_info),
 			data,
 			size,
-			MIN(sizeof(*id_info), data_len));
+			min(sizeof(*id_info), data_len));
 	if (retval < 0) {
 		LOGE("Fail to copy identification info\n");
 		return retval;
@@ -1168,7 +1168,7 @@ do_dispatch:
 		if (tcm_dev->max_rd_size == 0)
 			tcm_msg->predict_length = tcm_msg->payload_length;
 		else
-			tcm_msg->predict_length = MIN(tcm_msg->payload_length,
+			tcm_msg->predict_length = min(tcm_msg->payload_length,
 				tcm_dev->max_rd_size - MESSAGE_HEADER_SIZE - 1);
 
 		if (tcm_msg->status_report_code < REPORT_IDENTIFY)

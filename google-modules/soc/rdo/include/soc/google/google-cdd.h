@@ -38,6 +38,7 @@ extern void google_cdd_set_item_enable(const char *name, int en);
 extern int google_cdd_get_enable(void);
 extern void google_cdd_output(void);
 extern unsigned int google_cdd_get_max_core_num(void);
+extern void google_cdd_set_powerkey_status(bool val);
 
 /* google-cdd-dpm functions */
 extern void google_cdd_do_dpm_policy(unsigned int policy, const char *str);
@@ -132,7 +133,7 @@ enum google_cdd_system_device {
 	CDD_SYSTEM_DEVICE_FINGERPRINT,
 	CDD_SYSTEM_DEVICE_GNSS,
 	CDD_SYSTEM_DEVICE_MODEM,
-	CDD_SYSTEM_DEVICE_SENSOR,
+	CDD_SYSTEM_DEVICE_TEMP,
 	CDD_SYSTEM_DEVICE_USB,
 	CDD_SYSTEM_DEVICE_VPU,
 	CDD_SYSTEM_DEVICE_WIFI,

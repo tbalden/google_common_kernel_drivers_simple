@@ -811,7 +811,7 @@ static int syna_tcm_romboot_multichip_get_boot_info(struct tcm_dev *tcm_dev,
 	if (boot_info == NULL)
 		goto exit;
 
-	copy_size = MIN(sizeof(struct tcm_boot_info), resp_data_len);
+	copy_size = min(sizeof(struct tcm_boot_info), resp_data_len);
 
 	retval = syna_tcm_tddi_romboot_multichip_get_resp(tcm_dev, copy_size,
 			(unsigned char *)boot_info, sizeof(struct tcm_boot_info), resp_reading);
@@ -3363,7 +3363,7 @@ int syna_tcm_tddi_get_romboot_info(struct tcm_dev *tcm_dev,
 	if (rom_boot_info == NULL)
 		goto exit;
 
-	copy_size = MIN(sizeof(struct tcm_romboot_info),
+	copy_size = min(sizeof(struct tcm_romboot_info),
 		tcm_dev->resp_buf.data_length);
 
 	/* copy romboot_info to caller */

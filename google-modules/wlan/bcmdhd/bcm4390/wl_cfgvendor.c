@@ -5136,6 +5136,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_TRANSAC_ID:
 			if (nla_len(iter) != sizeof(uint16)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong transaction id len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->token = nla_get_u16(iter);
@@ -5147,6 +5148,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_PUBLISH_ID:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong publish id len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->pub_id = nla_get_u32(iter);
@@ -5155,6 +5157,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_MAC_ADDR:
 			if (nla_len(iter) != ETHER_ADDR_LEN) {
 				ret = -EINVAL;
+				WL_ERR(("wrong mac addr len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			ret = memcpy_s((char*)&cmd_data->mac_addr, ETHER_ADDR_LEN,
@@ -5167,6 +5170,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SERVICE_SPECIFIC_INFO_LEN:
 			if (nla_len(iter) != sizeof(uint16)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong service specific info len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (cmd_data->svc_info.dlen) {
@@ -5213,6 +5217,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SUBSCRIBE_ID:
 			if (nla_len(iter) != sizeof(uint16)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong subscribe id len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->sub_id = nla_get_u16(iter);
@@ -5221,6 +5226,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SUBSCRIBE_TYPE:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong subscribe type len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->flags |= nla_get_u8(iter) ? WL_NAN_SUB_ACTIVE : 0;
@@ -5228,6 +5234,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_PUBLISH_COUNT:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong publish count len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->life_count = nla_get_u8(iter);
@@ -5235,6 +5242,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_PUBLISH_TYPE: {
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong publish type len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			val_u8 = nla_get_u8(iter);
@@ -5250,6 +5258,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_PERIOD: {
 			if (nla_len(iter) != sizeof(uint16)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong period len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (nla_get_u16(iter) > NAN_MAX_AWAKE_DW_INTERVAL) {
@@ -5267,6 +5276,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_TTL:
 			if (nla_len(iter) != sizeof(uint16)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong ttl len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->ttl = nla_get_u16(iter);
@@ -5322,6 +5332,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_PEER_ID:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong peer id len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->remote_id = nla_get_u32(iter);
@@ -5329,6 +5340,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_INST_ID:
 			if (nla_len(iter) != sizeof(uint16)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong instance id len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->local_id = nla_get_u16(iter);
@@ -5336,6 +5348,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SUBSCRIBE_COUNT:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong subscribe count len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->life_count = nla_get_u8(iter);
@@ -5343,6 +5356,8 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SSIREQUIREDFORMATCHINDICATION: {
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong ssid required for match indication len:%d\n",
+					nla_len(iter)));
 				goto exit;
 			}
 			bit_flag = (u32)nla_get_u8(iter);
@@ -5354,6 +5369,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_PUBLISH_MATCH: {
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong flag match len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			flag_match = nla_get_u8(iter);
@@ -5378,6 +5394,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SERVICERESPONSEFILTER:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong srf type len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->srf_type = nla_get_u8(iter);
@@ -5385,6 +5402,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SERVICERESPONSEINCLUDE:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong srf include len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->srf_include = nla_get_u8(iter);
@@ -5392,6 +5410,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_USESERVICERESPONSEFILTER:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong use srf len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->use_srf = nla_get_u8(iter);
@@ -5399,6 +5418,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_RX_MATCH_FILTER_LEN:
 			if (nla_len(iter) != sizeof(uint16)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong rx match filter len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (cmd_data->rx_match.dlen) {
@@ -5444,6 +5464,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_TX_MATCH_FILTER_LEN:
 			if (nla_len(iter) != sizeof(uint16)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong tx match filter len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (cmd_data->tx_match.dlen) {
@@ -5489,6 +5510,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_MAC_ADDR_LIST_NUM_ENTRIES:
 			if (nla_len(iter) != sizeof(uint16)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong mac addr list num entries len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (cmd_data->mac_list.num_mac_addr) {
@@ -5538,6 +5560,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_TX_TYPE:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong tx type len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			val_u8 =  nla_get_u8(iter);
@@ -5549,6 +5572,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SDE_CONTROL_CONFIG_DP:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong dp len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (nla_get_u8(iter) == 1) {
@@ -5560,6 +5584,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SDE_CONTROL_RANGE_SUPPORT:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong range support len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->sde_control_config = TRUE;
@@ -5572,6 +5597,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SDE_CONTROL_DP_TYPE:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong dp type len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (nla_get_u8(iter) == 1) {
@@ -5583,6 +5609,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SDE_CONTROL_SECURITY:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong security len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (nla_get_u8(iter) == 1) {
@@ -5594,6 +5621,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_RECV_IND_CFG:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong recv ind cfg len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->recv_ind_flag = nla_get_u8(iter);
@@ -5601,6 +5629,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_CIPHER_SUITE_TYPE:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong csid len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->csid = nla_get_u8(iter);
@@ -5608,6 +5637,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 			break;
 		case NAN_ATTRIBUTE_KEY_TYPE:
 			if (nla_len(iter) != sizeof(uint8)) {
+				WL_ERR(("wrong key type len:%d\n", nla_len(iter)));
 				ret = -EINVAL;
 				goto exit;
 			}
@@ -5617,6 +5647,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_KEY_LEN:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong key len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (cmd_data->key.dlen) {
@@ -5672,6 +5703,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 			break;
 		case NAN_ATTRIBUTE_RSSI_THRESHOLD_FLAG:
 			if (nla_len(iter) != sizeof(uint8)) {
+				WL_ERR(("wrong rssi threshold flag len:%d\n", nla_len(iter)));
 				ret = -EINVAL;
 				goto exit;
 			}
@@ -5684,12 +5716,15 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_DISC_IND_CFG:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong disc ind cfg len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->disc_ind_cfg = nla_get_u8(iter);
 			break;
 		case NAN_ATTRIBUTE_SDEA_SERVICE_SPECIFIC_INFO_LEN:
 			if (nla_len(iter) != sizeof(uint16)) {
+				WL_ERR(("wrong sdea service specific info len:%d\n",
+					nla_len(iter)));
 				ret = -EINVAL;
 				goto exit;
 			}
@@ -5715,6 +5750,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 			}
 			if (cmd_data->sde_svc_info.data) {
 				WL_ERR(("trying to overwrite:%d\n", attr_type));
+				WL_ERR_RLMT(("Not allowed beyond %d\n", MAX_SDEA_SVC_INFO_LEN));
 				ret = -EINVAL;
 				goto exit;
 			}
@@ -5737,6 +5773,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SECURITY:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong security len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->ndp_cfg.security_cfg = nla_get_u8(iter);
@@ -5744,6 +5781,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_RANGING_INTERVAL:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong ranging interval len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->ranging_intvl_msec = nla_get_u32(iter);
@@ -5751,6 +5789,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_RANGING_INGRESS_LIMIT:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong ingress limit len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->ingress_limit = nla_get_u32(iter);
@@ -5758,6 +5797,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_RANGING_EGRESS_LIMIT:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong egress limit len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->egress_limit = nla_get_u32(iter);
@@ -5765,6 +5805,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_RANGING_INDICATION:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong ranging indication len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->ranging_indication = nla_get_u32(iter);
@@ -5776,6 +5817,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_SVC_RESPONDER_POLICY:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong svc responder policy len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->service_responder_policy = nla_get_u8(iter);
@@ -5783,6 +5825,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		/* pub/sub service can be suspendable */
 		case NAN_ATTRIBUTE_SVC_CFG_SUSPENDABLE:
 			if (nla_len(iter) != sizeof(uint8)) {
+				WL_ERR(("wrong svc suspendable len:%d\n", nla_len(iter)));
 				ret = -EINVAL;
 				goto exit;
 			}
@@ -5815,7 +5858,8 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 			}
 			break;
 		case NAN_ATTRIBUTE_COOKIE_LEN:
-			if (nla_len(iter) != sizeof(uint16)) {
+			if (nla_len(iter) != sizeof(uint32)) {
+				WL_ERR(("wrong cookie len:%d\n", nla_len(iter)));
 				ret = -EINVAL;
 				goto exit;
 			}
@@ -5824,7 +5868,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 				ret = -EINVAL;
 				goto exit;
 			}
-			cmd_data->cookie.dlen = nla_get_u16(iter);
+			cmd_data->cookie.dlen = nla_get_u32(iter);
 			if (cmd_data->cookie.dlen > NAN_MAX_COOKIE_LEN) {
 				ret = -EINVAL;
 				WL_ERR_RLMT(("Not allowed beyond %d\n", NAN_MAX_COOKIE_LEN));
@@ -5834,7 +5878,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_COOKIE:
 			if ((!cmd_data->cookie.dlen) ||
 			    (nla_len(iter) != cmd_data->cookie.dlen)) {
-				WL_ERR(("wrong cookie len:%d,%d\n",
+				WL_ERR(("wrong cookie len:%d, expected %d\n",
 					cmd_data->cookie.dlen, nla_len(iter)));
 				ret = -EINVAL;
 				goto exit;
@@ -5858,15 +5902,26 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 				return ret;
 			}
 			break;
+		case NAN_ATTRIBUTE_COME_BACK:
+			if (nla_len(iter) != sizeof(uint8)) {
+				WL_ERR(("failed to parse comeback, len=%d\n",
+					nla_len(iter)));
+				ret = -EINVAL;
+				goto exit;
+			}
+			cmd_data->comeback = nla_get_u8(iter);
+			break;
 		case NAN_ATTRIBUTE_COME_BACK_DELAY:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong comeback delay len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->comeback_delay = nla_get_u32(iter);
 			break;
 		case NAN_ATTRIBUTE_BS_METHODS:
 			if (nla_len(iter) != sizeof(uint16)) {
+				WL_ERR(("wrong bs methods len:%d\n", nla_len(iter)));
 				ret = -EINVAL;
 				goto exit;
 			}
@@ -5876,6 +5931,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_PAIRING_CACHE:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong pairing cache len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (nla_get_u32(iter)) {
@@ -5885,6 +5941,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_ENAB_PAIRING_SETUP:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong pairing setup len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (nla_get_u32(iter)) {
@@ -5894,6 +5951,7 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_ENAB_PAIRING_VERIFICATION:
 			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong pairing verification len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			if (nla_get_u32(iter)) {
@@ -5904,13 +5962,15 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 		case NAN_ATTRIBUTE_RSP_CODE:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong response code len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->response = nla_get_u8(iter);
 			break;
-		case  NAN_ATTRIBUTE_GTK_CSID:
+		case NAN_ATTRIBUTE_GTK_CSID:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong gtk csid len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->gtk_csid = nla_get_u8(iter);
@@ -5919,9 +5979,10 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 				cmd_data->sde_control_flag |= NAN_SDE_CF_GTK_REQUIRED;
 			}
 			break;
-		case   NAN_ATTRIBUTE_CSIA_CAPABILITIES:
+		case NAN_ATTRIBUTE_CSIA_CAPABILITIES:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
+				WL_ERR(("wrong csia capabilities len:%d\n", nla_len(iter)));
 				goto exit;
 			}
 			cmd_data->csia_cap = nla_get_u8(iter);
@@ -6920,12 +6981,12 @@ wl_cfgvendor_nan_bootstrapping_req_ind_event_data_filler(struct sk_buff *msg,
 {
 	int ret = BCME_OK;
 
-	ret = nla_put_u16(msg, NAN_ATTRIBUTE_SUBSCRIBE_ID, event_data->local_inst_id);
+	ret = nla_put_u16(msg, NAN_ATTRIBUTE_SUBSCRIBE_ID, event_data->requestor_id);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put local instance ID, ret=%d\n", ret));
 		goto fail;
 	}
-	ret = nla_put_u32(msg, NAN_ATTRIBUTE_PUBLISH_ID, event_data->requestor_id);
+	ret = nla_put_u32(msg, NAN_ATTRIBUTE_PUBLISH_ID, event_data->local_inst_id);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put requestor instance ID, ret=%d\n", ret));
 		goto fail;
@@ -8928,7 +8989,7 @@ wl_cfgvendor_nan_cmn_process_bootstrapping_cmd(struct wiphy *wiphy,
 	wdev = bcmcfg_to_prmry_wdev(cfg);
 	ret = wl_cfgvendor_nan_parse_discover_args(wiphy, data, len, cmd_data);
 	if (ret) {
-		WL_ERR((" Failed to parse nan pairing and BS vendor args, ret = %d\n",
+		WL_ERR((" Failed to parse nan BS vendor args, ret = %d\n",
 				ret));
 		goto exit;
 	}
@@ -9973,6 +10034,11 @@ static int wl_update_multi_link_stat(struct bcm_cfg80211 *cfg, struct net_device
 			link_idx = mld_netinfo->mlinfo.links[i].link_idx;
 			link_id = mld_netinfo->mlinfo.links[i].link_id;
 			link_pwrst = mld_netinfo->mlinfo.links[i].link_power_state;
+			WL_DBG_MEM(("[MLO] num_links:%d Index: %d link_id:%d link_idx %d "
+					"ifidx:%d bsscfgidx:%d pwrst:%d\n",
+					ml_iface.num_links, i, link_id, link_idx,
+					mld_netinfo->mlinfo.links[i].if_idx,
+					mld_netinfo->mlinfo.links[i].cfg_idx, link_pwrst));
 		}
 		err = wl_update_ml_link_stat(cfg, inet_ndev, link_idx, link_id,
 			link_pwrst, output, total_len);
@@ -14314,6 +14380,7 @@ const struct nla_policy nan_attr_policy[NAN_ATTRIBUTE_MAX] = {
 	[NAN_ATTRIBUTE_KEY_DATA_PASSPHRASE] = { .type = NLA_BINARY, .len = NAN_MAX_PASSPHRASE_LEN},
 	[NAN_ATTRIBUTE_GTK_CSID] = { .type = NLA_U8, .len = sizeof(uint8) },
 	[NAN_ATTRIBUTE_CSIA_CAPABILITIES] = { .type = NLA_U8, .len = sizeof(uint8) },
+	[NAN_ATTRIBUTE_COME_BACK] = { .type = NLA_U8, .len = sizeof(uint8) },
 };
 #endif /* WL_NAN */
 

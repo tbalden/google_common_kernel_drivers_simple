@@ -1411,7 +1411,7 @@ static ssize_t phy_release_date_show(struct device *dev,
 	char *phy_release_date;
 	int count;
 
-	if (!ufs->pixel_ops->get_phy_version)
+	if (!ufs->pixel_ops->get_phy_release_date)
 		return -EINVAL;
 
 	phy_release_date = ufs->pixel_ops->get_phy_release_date(hba);

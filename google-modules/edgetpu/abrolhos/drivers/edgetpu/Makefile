@@ -5,15 +5,15 @@
 
 KBUILD_OPTIONS += CONFIG_ABROLHOS=m
 
-include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
+include $(ROOT_DIR)/private/google-modules/soc/gs/Makefile.include
 
 # TODO(b/361346732): This should be only used during a transient migration phase. Support for this
 # may be discontinued without notice. It is recommended that all kernel_module's are converted to
 # ddk_module.
-EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/power/mitigation/google_bcl_Module.symvers
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/power/mitigation/google_bcl_Module.symvers
 
-ifneq ("$(wildcard $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/gsa_ko_Module.symvers)","")
-EXTRA_SYMBOLS	+= $(OUT_DIR)/../private/google-modules/soc/gs/drivers/soc/google/gsa/gsa_ko_Module.symvers
+ifneq ("$(wildcard $(COMMON_OUT_DIR)/private/google-modules/soc/gs/drivers/soc/google/gsa/gsa_ko_Module.symvers)","")
+EXTRA_SYMBOLS	+= $(COMMON_OUT_DIR)/private/google-modules/soc/gs/drivers/soc/google/gsa/gsa_ko_Module.symvers
 endif
 
 modules modules_install clean compile_commands.json:

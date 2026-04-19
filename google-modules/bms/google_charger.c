@@ -75,12 +75,15 @@
 #define USER_VOTER			"USER_VOTER"	/* same as QCOM */
 #define MSC_CHG_VOTER			"msc_chg"
 #define MSC_CHG_FULL_VOTER		"msc_chg_full"
+#define MSC_CHG_BOUND_VOTER		"msc_chg_bound"
 #define MSC_USER_VOTER			"msc_user"
 #define MSC_USER_CHG_LEVEL_VOTER	"msc_user_chg_level"
 #define MSC_CHG_TERM_VOTER		"msc_chg_term"
 #define MSC_PWR_VOTER			"msc_pwr_disable"
 #define MSC_HDA_VOTER			"msc_hda"
 #define TEMP_DRYRUN_VOTER		"TEMP_DRYRUN_VOTER"
+
+#define CHG_DEFAULT_BOUND_FCC		200000
 
 #define CHG_TERM_LONG_DELAY_MS		300000	/* 5 min */
 #define CHG_TERM_SHORT_DELAY_MS		60000	/* 1 min */
@@ -333,6 +336,7 @@ struct chg_drv {
 
 	int charge_stop_level;		/* retail, userspace bd config */
 	int charge_start_level;		/* retail, userspace bd config */
+	int lowerdb_reached_fcc;	/* recharge fcc */
 
 	/* pps charging */
 	bool pps_enable;
@@ -695,6 +699,10 @@ static inline int chg_reset_state(struct chg_drv *chg_drv)
 	/* TODO: handle interaction with PPS code */
 	gvotable_cast_int_vote(chg_drv->msc_interval_votable,
 			       CHG_PPS_VOTER, 0, false);
+
+	/* clear vote when disconnect */
+	gvotable_cast_int_vote(chg_drv->msc_fcc_votable, MSC_CHG_BOUND_VOTER,
+			       chg_drv->lowerdb_reached_fcc, false);
 	/* when/if enabled */
 	GPSY_SET_PROP(chg_drv->chg_psy, GBMS_PROP_TAPER_CONTROL,
 		      GBMS_TAPER_CONTROL_OFF);
@@ -1109,10 +1117,11 @@ static int chg_work_is_charging_disabled(struct chg_drv *chg_drv, int capacity)
 {
 	const int upperbd = chg_drv->charge_stop_level;
 	const int lowerbd = chg_drv->charge_start_level;
+	bool is_limit_fcc = false;
 	int disable_charging = 0;
 
 	if (!chg_is_custom_enabled(upperbd, lowerbd))
-		return 0;
+		goto done;
 
 	if (chg_drv->lowerdb_reached && upperbd <= capacity) {
 		pr_info("MSC_CHG lowerbd=%d, upperbd=%d, capacity=%d, lowerdb_reached=1->0, charging off\n",
@@ -1131,6 +1140,15 @@ static int chg_work_is_charging_disabled(struct chg_drv *chg_drv, int capacity)
 		pr_info("MSC_CHG lowerbd=%d, upperbd=%d, capacity=%d, charging on\n",
 			lowerbd, upperbd, capacity);
 	}
+
+	/* slow down the charging speed when repeated charging in a certain range */
+	if (disable_charging == 0 && capacity >= lowerbd && capacity < upperbd &&
+	    (chg_drv->charging_policy == CHARGING_POLICY_VOTE_LONGLIFE))
+		is_limit_fcc = true;
+
+done:
+	gvotable_cast_int_vote(chg_drv->msc_fcc_votable, MSC_CHG_BOUND_VOTER,
+			       chg_drv->lowerdb_reached_fcc, is_limit_fcc);
 
 	return disable_charging;
 }
@@ -1973,10 +1991,12 @@ static int bd_update_stats(struct chg_drv *chg_drv, const ktime_t now, bool onli
 }
 
 /* @return true if BD needs to be triggered */
-static int bd_recharge_logic(struct bd_data *bd_state, int val)
+static int bd_recharge_logic(struct chg_drv *chg_drv, int val)
 {
+	struct bd_data *bd_state = &chg_drv->bd_state;
 	int lowerbd, upperbd;
 	int disable_charging = 0;
+	bool is_limit_fcc = false;
 
 	if (!bd_state->triggered && bd_state->dd_triggered) {
 		lowerbd = bd_state->dd_charge_start_level;
@@ -1992,15 +2012,15 @@ static int bd_recharge_logic(struct bd_data *bd_state, int val)
 		lowerbd = bd_state->bd_recharge_voltage;
 		upperbd = bd_state->bd_trigger_voltage;
 	} else {
-		return 0;
+		goto done;
 	}
 
 	if (bd_state->bd_temp_dry_run)
-		return 0;
+		goto done;
 
 recharge_logic:
 	if (!bd_state->triggered && !bd_state->dd_triggered)
-		return 0;
+		goto done;
 
 	/* recharge logic between bd_recharge_voltage and bd_trigger_voltage */
 	if (bd_state->lowerbd_reached && val >= upperbd) {
@@ -2021,6 +2041,13 @@ recharge_logic:
 			lowerbd, upperbd, val);
 	}
 
+	/* slow down the charging speed when repeated charging in a certain range */
+	if (disable_charging == 0 && val >= lowerbd && val < upperbd)
+		is_limit_fcc = true;
+
+done:
+	gvotable_cast_int_vote(chg_drv->msc_fcc_votable, MSC_CHG_BOUND_VOTER,
+			       chg_drv->lowerdb_reached_fcc, is_limit_fcc);
 	return disable_charging;
 }
 
@@ -2039,21 +2066,6 @@ static int bd_batt_set_soc(struct chg_drv *chg_drv , int soc)
 	return 0;
 }
 
-static int bd_batt_set_overheat(struct chg_drv *chg_drv , bool hot)
-{
-	const int health = hot ? POWER_SUPPLY_HEALTH_OVERHEAT :
-				 POWER_SUPPLY_HEALTH_UNKNOWN;
-	int ret;
-
-	ret = GPSY_SET_PROP(chg_drv->bat_psy, POWER_SUPPLY_PROP_HEALTH, health);
-	if (ret == 0)
-		chg_drv->overheat = hot;
-
-	pr_debug("MSC_BD OVERHEAT hot=%d (%d)\n", hot, ret);
-
-	return ret;
-}
-
 static int bd_batt_set_state(struct chg_drv *chg_drv, bool hot, int soc)
 {
 	const bool lock_soc = false; /* b/173141442 */
@@ -2067,7 +2079,7 @@ static int bd_batt_set_state(struct chg_drv *chg_drv, bool hot, int soc)
 	 */
 	if (hot && chg_drv->overheat != hot) {
 
-		ret = bd_batt_set_overheat(chg_drv, hot);
+		chg_drv->overheat = hot;
 		if (ret == 0 && freeze != chg_drv->freeze_soc && lock_soc)
 			ret = bd_batt_set_soc(chg_drv, soc);
 
@@ -2076,7 +2088,7 @@ static int bd_batt_set_state(struct chg_drv *chg_drv, bool hot, int soc)
 		if (freeze != chg_drv->freeze_soc && lock_soc)
 			ret = bd_batt_set_soc(chg_drv, soc);
 		if (ret == 0)
-			ret = bd_batt_set_overheat(chg_drv, hot);
+			chg_drv->overheat = hot;
 	}
 
 	return ret;
@@ -2084,15 +2096,13 @@ static int bd_batt_set_state(struct chg_drv *chg_drv, bool hot, int soc)
 
 static int chg_work_read_soc(struct power_supply *bat_psy, int *soc)
 {
-	union power_supply_propval val;
 	int ret = 0;
 
-	ret = power_supply_get_property(bat_psy, POWER_SUPPLY_PROP_CAPACITY,
-					&val);
-	if (ret == 0)
-		*soc = val.intval;
+	ret = GPSY_GET_PROP(bat_psy, GBMS_PROP_CAPACITY_TO_CHARGER);
+	if (ret >= 0)
+		*soc = ret;
 
-	return ret;
+	return ret > 0 ? 0 : ret;
 }
 
 /*
@@ -2158,7 +2168,7 @@ static void bd_work(struct work_struct *work)
 bd_rerun:
 	if (!bd_state->triggered) {
 		/* disable the overheat flag, race with DWELL-DEFEND */
-		bd_batt_set_overheat(chg_drv, false);
+		chg_drv->overheat = false;
 		chg_update_charging_state(chg_drv, false, false);
 	} else {
 		schedule_delayed_work(&chg_drv->bd_work,
@@ -2306,7 +2316,7 @@ static void bd_dd_run_defender(struct chg_drv *chg_drv, int soc, int *disable_ch
 				 chg_is_custom_enabled(upperbd, lowerbd) : false;
 
 	if (bd_state->dd_triggered)
-		*disable_charging = bd_recharge_logic(bd_state, soc);
+		*disable_charging = bd_recharge_logic(chg_drv, soc);
 	if (*disable_charging)
 		*disable_pwrsrc = soc > bd_state->dd_charge_stop_level;
 
@@ -2414,12 +2424,12 @@ static int chg_run_defender(struct chg_drv *chg_drv)
 			/* recharge logic */
 			if (bd_state->bd_drainto_soc) {
 				disable_charging =
-					bd_recharge_logic(bd_state, soc);
+					bd_recharge_logic(chg_drv, soc);
 				if (disable_charging)
 					disable_pwrsrc =
 						soc > bd_state->bd_drainto_soc;
 			} else {
-				disable_charging = bd_recharge_logic(bd_state,
+				disable_charging = bd_recharge_logic(chg_drv,
 							bd_state->last_voltage);
 				if (disable_charging)
 					disable_pwrsrc =
@@ -2730,6 +2740,10 @@ static void chg_work(struct work_struct *work)
 	if (ext_psy) {
 		ext_online = PSY_GET_PROP(ext_psy, POWER_SUPPLY_PROP_ONLINE);
 		ext_present = PSY_GET_PROP(ext_psy, POWER_SUPPLY_PROP_PRESENT);
+
+		// max77759_wcin_get_prop returns -EAGAIN during suspend
+		if (ext_online == -EAGAIN || ext_present == -EAGAIN)
+			goto rerun_error;
 
 		/* set dd_enabled for dock_defend */
 		bd_dd_set_enabled(chg_drv, ext_present, ext_online);
@@ -6185,6 +6199,12 @@ static int google_charger_probe(struct platform_device *pdev)
 				      "google,enable-user-fcc-fv");
 	if (chg_drv->enable_user_fcc_fv)
 		pr_info("User can override FCC and FV\n");
+
+	ret = of_property_read_u32(pdev->dev.of_node,
+				   "google,lowerdb-reached-fcc",
+				   &chg_drv->lowerdb_reached_fcc);
+	if (ret < 0)
+		chg_drv->lowerdb_reached_fcc = CHG_DEFAULT_BOUND_FCC;
 
 	/* NOTE: newgen charging is configured in google_battery */
 	ret = chg_init_chg_profile(chg_drv);

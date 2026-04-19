@@ -34,6 +34,7 @@
 static const u32 g2d_plane_formats[] = {
 	DRM_FORMAT_ARGB8888, DRM_FORMAT_ABGR8888, DRM_FORMAT_YVU420,
 	DRM_FORMAT_YUV420,   DRM_FORMAT_NV12,	  DRM_FORMAT_NV21,
+	DRM_FORMAT_P010,
 };
 
 static const u64 g2d_plane_format_modifiers[] = {
@@ -97,7 +98,7 @@ static void g2d_plane_helper_atomic_update(struct drm_plane *plane, struct drm_a
 {
 	struct drm_device *drm = plane->dev;
 	struct g2d_plane *g2d_plane = to_g2d_plane(plane);
-	struct g2d_device *g2d_device = container_of(drm, struct g2d_device, drm);
+	struct g2d_device *g2d_device = to_g2d_device(drm);
 
 	/* TODO(b/279522245) The built in assumption here is that the address of plane 0 is
 	 * the beginning of the allocated buffer, this may not hold true for all data formats.
@@ -174,8 +175,6 @@ static int create_hw_capability_blob(struct drm_device *drm_dev, struct g2d_plan
 	hw_caps = blob->data;
 	hw_caps->min_width = constraints->min_width;
 	hw_caps->min_height = constraints->min_height;
-	hw_caps->max_width = constraints->max_width;
-	hw_caps->max_height = constraints->max_height;
 	hw_caps->min_scale = constraints->min_scale;
 	hw_caps->max_scale = constraints->max_scale;
 
@@ -198,11 +197,16 @@ static const struct drm_plane_helper_funcs g2d_plane_helper_funcs = {
 	.atomic_disable = g2d_plane_helper_atomic_disable,
 };
 
-struct g2d_plane *g2d_plane_init(struct g2d_device *gdevice, unsigned int possible_crtcs)
+struct g2d_plane *g2d_plane_init(struct g2d_device *g2d_device, unsigned int possible_crtcs,
+				 int idx)
 {
-	struct drm_device *drm = &(gdevice->drm);
+	struct drm_device *drm = &g2d_device->drm;
 	struct g2d_plane *g2d_plane;
 	int ret;
+
+	/* one plane per pipeline */
+	if (idx >= NUM_PIPELINES)
+		return NULL;
 
 	g2d_plane = drmm_universal_plane_alloc(drm, struct g2d_plane, base, possible_crtcs,
 					       &g2d_drm_plane_funcs, g2d_plane_formats,
@@ -230,6 +234,7 @@ struct g2d_plane *g2d_plane_init(struct g2d_device *gdevice, unsigned int possib
 	}
 
 	sc_plane_init(g2d_plane);
+	g2d_device->sc->plane[idx] = g2d_plane;
 
 	return g2d_plane;
 

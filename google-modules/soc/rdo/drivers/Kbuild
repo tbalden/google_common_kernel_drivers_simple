@@ -4,6 +4,7 @@ obj-y += clk/google/
 obj-y += devfreq/
 obj-y += i2c/busses/
 obj-y += i3c/master/
+obj-y += input/
 obj-y += irqchip/
 obj-y += perf/
 obj-y += pinctrl/

@@ -2,7 +2,7 @@
 
 # thermal modules configuration
 
-load("//build/kernel/kleaf:kernel.bzl", "ddk_module", "kernel_module_group")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_module", "kernel_module_group")
 
 ddk_module(
     name = "google_thermal_sensor",
@@ -67,6 +67,7 @@ ddk_module(
         "utils/google_powercap_cpu_helper.c",
         "utils/google_powercap_devfreq_helper.c",
         "utils/google_powercap_helper.c",
+        "utils/powercap_voltage_match_algo.c",
         "utils/thermal_msg_helper.c",
     ],
     out = "google_powercap.ko",
@@ -321,6 +322,7 @@ ddk_module(
         "utils/google_powercap_cpu_helper.c",
         "utils/google_powercap_devfreq_helper.c",
         "utils/google_powercap_helper.c",
+        "utils/powercap_voltage_match_algo.c",
         "utils/thermal_msg_helper.c",
     ],
     out = "powercap_test.ko",

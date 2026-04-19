@@ -20,6 +20,17 @@
 #define ARM_LPAE_MAX_ADDR_BITS		52
 #define ARM_LPAE_S2_MAX_CONCAT_PAGES	16
 
+static bool tel_enabled;
+
+static bool arm_lpae_iopte_is_mmio(struct arm_lpae_io_pgtable *data,
+				   arm_lpae_iopte pte)
+{
+	if (data->iop.fmt == ARM_64_LPAE_S1)
+		return ((pte >> ARM_LPAE_PTE_ATTRINDX_SHIFT) & 0x7) == ARM_LPAE_MAIR_ATTR_IDX_DEV;
+
+	return (pte & (0xf << 2)) == ARM_LPAE_PTE_MEMATTR_DEV;
+}
+
 int arm_lpae_adjacent_contptes(int lvl, struct arm_lpae_io_pgtable *data)
 {
 	switch (ARM_LPAE_GRANULE(data)) {
@@ -44,6 +55,16 @@ static void __arm_lpae_clear_contpte(struct arm_lpae_io_pgtable *data,
 				     int lvl, arm_lpae_iopte *ptep, int num_entries)
 {
 	struct io_pgtable *iop = &data->iop;
+	struct io_pgtable_cfg *cfg = &iop->cfg;
+
+	/*
+	 * Telemetry for splitting a contiguous block. Checking mmio once for entire block is a safe
+	 * assumption.
+	 */
+	if (tel_enabled && !arm_lpae_iopte_is_mmio(data, *ptep)) {
+		cfg->telemetry_cb->unmap(iop->cookie, size * num_entries, 1);
+		cfg->telemetry_cb->map(iop->cookie, size, num_entries);
+	}
 
 	while (num_entries) {
 		arm_lpae_iopte old, curr, new;
@@ -78,11 +99,13 @@ static void __arm_lpae_make_pte_invalid(struct arm_lpae_io_pgtable *data,
 					int num_entries)
 {
 	struct io_pgtable *iop = &data->iop;
+	unsigned int unmap_ind_count = 0;
+	unsigned int unmap_cont_count = 0;
+	int adj_contpte = arm_lpae_adjacent_contptes(lvl, data);
+	int adj_contpte_mask = adj_contpte - 1;
 
 	if (*ptep & ARM_LPAE_PTE_CONT) {
 		int lvl_idx = ARM_LPAE_LVL_IDX(iova, lvl, data);
-		int adj_contpte = arm_lpae_adjacent_contptes(lvl, data);
-		int adj_contpte_mask = adj_contpte - 1;
 		int pre_contpte = lvl_idx & adj_contpte_mask;
 
 		if (!(pre_contpte == 0 && num_entries >= adj_contpte))
@@ -93,8 +116,6 @@ static void __arm_lpae_make_pte_invalid(struct arm_lpae_io_pgtable *data,
 	if (ptep[num_entries - 1] & ARM_LPAE_PTE_CONT) {
 		unsigned long last_iova = iova + (num_entries - 1) * size;
 		int lvl_idx = ARM_LPAE_LVL_IDX(last_iova, lvl, data);
-		int adj_contpte = arm_lpae_adjacent_contptes(lvl, data);
-		int adj_contpte_mask = adj_contpte - 1;
 		int pre_contpte = lvl_idx & adj_contpte_mask;
 
 		if (!(pre_contpte == adj_contpte_mask && num_entries >= adj_contpte))
@@ -103,6 +124,40 @@ static void __arm_lpae_make_pte_invalid(struct arm_lpae_io_pgtable *data,
 						 adj_contpte);
 	}
 
+	if (!tel_enabled)
+		goto skip_telemetry;
+
+	for (int i = 0; i < num_entries;) {
+		/*
+		 * Single big unmap can't safely assume consistent attributes across the range, so a
+		 * check is required on all PTEs.
+		 */
+		if (arm_lpae_iopte_is_mmio(data, ptep[i])) {
+			i++;
+			continue;
+		}
+
+		/*
+		 * This loop for telemetry can be efficient for contig cases. Having these telemetry
+		 * operations folded into the actual PTE invalid loop (the following one) would add
+		 * overhead for extra checks in telemetry. So, this is an optimization.
+		 */
+		if (ptep[i] & ARM_LPAE_PTE_CONT) {
+			unmap_cont_count++;
+			i += adj_contpte;
+		} else {
+			unmap_ind_count++;
+			i++;
+		}
+	}
+
+	if (unmap_cont_count)
+		iop->cfg.telemetry_cb->unmap(iop->cookie, size * adj_contpte, unmap_cont_count);
+
+	if (unmap_ind_count)
+		iop->cfg.telemetry_cb->unmap(iop->cookie, size, unmap_ind_count);
+
+skip_telemetry:
 	for (int i = 0; i < num_entries; i++)
 		ptep[i] &= ~ARM_LPAE_PTE_VALID;
 
@@ -211,6 +266,56 @@ static void __arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 		__arm_lpae_sync_pte(ptep, num_entries, cfg);
 }
 
+/*
+ * For telemetry, instrumenting __arm_lpae_init_pte() is found out to be overkilling as it iterates
+ * over all the PTEs. __arm_lpae_count_map_telemetry() does things in a bit optimized way.
+ */
+static void __arm_lpae_count_map_telemetry(struct arm_lpae_io_pgtable *data,
+					   arm_lpae_iopte prot,
+					   int lvl, int num_entries,
+					   arm_lpae_iopte *ptep,
+					   unsigned int *map_count,
+					   unsigned int *map_count_cont)
+{
+	int adj = arm_lpae_adjacent_contptes(lvl, data);
+	int i = 0;
+
+	while (i < num_entries) {
+		if (!ptep[i]) {
+			i++;
+			continue;
+		}
+
+		if (ptep[i] & ARM_LPAE_PTE_CONT) {
+			(*map_count_cont)++;
+			i += adj;
+			continue;
+		}
+
+		(*map_count)++;
+		i++;
+	}
+}
+
+static void arm_lpae_count_map_telemetry(struct arm_lpae_io_pgtable *data, arm_lpae_iopte prot,
+					 int lvl, int num_entries, arm_lpae_iopte *ptep)
+{
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
+	size_t sz = ARM_LPAE_BLOCK_SIZE(lvl, data);
+	int adj = arm_lpae_adjacent_contptes(lvl, data);
+	unsigned int map_count = 0;
+	unsigned int map_count_cont = 0;
+
+	__arm_lpae_count_map_telemetry(data, prot, lvl, num_entries, ptep,
+				       &map_count, &map_count_cont);
+
+	if (map_count_cont)
+		cfg->telemetry_cb->map(data->iop.cookie, sz * adj, map_count_cont);
+
+	if (map_count)
+		cfg->telemetry_cb->map(data->iop.cookie, sz, map_count);
+}
+
 int arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 		      unsigned long iova, phys_addr_t paddr,
 		      arm_lpae_iopte prot, int lvl, int num_entries,
@@ -218,12 +323,22 @@ int arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 {
 	int i, mapped_entries = 0;
 	size_t sz = ARM_LPAE_BLOCK_SIZE(lvl, data);
+	unsigned int map_count = 0;
+	unsigned int map_count_cont = 0;
+	struct io_pgtable_cfg *cfg = &data->iop.cfg;
+	int adj = arm_lpae_adjacent_contptes(lvl, data);
+	bool rec_tel_events;
 
 	/* Check for existing mappings before we do anything else */
 	for (i = 0; i < num_entries; i++)
 		if (iopte_leaf(ptep[i], lvl, data->iop.fmt))
 			return arm_lpae_mapping_exists(data);
 
+	/*
+	 * Checking for MMIO just once and not for all PTE is a safe assumption as we don't expect
+	 * multiple mappings with mismatched attributes to be called under single mapping routine.
+	 */
+	rec_tel_events = tel_enabled && !arm_lpae_iopte_is_mmio(data, prot);
 	for (i = 0; i < num_entries; i++) {
 		arm_lpae_iopte pte = READ_ONCE(ptep[i]);
 
@@ -239,6 +354,12 @@ int arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 			if (n) {
 				__arm_lpae_init_pte(data, cur_iova, cur_paddr, prot, lvl,
 						    n, &ptep[mapped_entries], true);
+
+				if (rec_tel_events)
+					__arm_lpae_count_map_telemetry(data, prot, lvl, n,
+								       &ptep[mapped_entries],
+								       &map_count, &map_count_cont);
+
 				arm_lpae_coalesce_contptes(data, lvl, n, &ptep[mapped_entries]);
 				mapped_entries += n;
 			}
@@ -264,8 +385,22 @@ int arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
 		__arm_lpae_init_pte(data, iova, paddr, prot, lvl,
 				    num_entries - mapped_entries,
 				    &ptep[mapped_entries], true);
+
+		if (rec_tel_events)
+			__arm_lpae_count_map_telemetry(data, prot, lvl,
+						       num_entries - mapped_entries,
+						       &ptep[mapped_entries],
+						       &map_count, &map_count_cont);
+
 		arm_lpae_coalesce_contptes(data, lvl, num_entries - mapped_entries,
 					   &ptep[mapped_entries]);
+	}
+
+	if (rec_tel_events) {
+		if (map_count_cont)
+			cfg->telemetry_cb->map(data->iop.cookie, sz * adj, map_count_cont);
+		if (map_count)
+			cfg->telemetry_cb->map(data->iop.cookie, sz, map_count);
 	}
 
 	return 0;
@@ -529,29 +664,80 @@ int arm_lpae_iotlb_sync_map(struct io_pgtable_ops *ops, unsigned long iova,
 void __arm_lpae_free_pgtable(struct arm_lpae_io_pgtable *data, int lvl,
 			     arm_lpae_iopte *ptep)
 {
-	arm_lpae_iopte *start, *end;
+	arm_lpae_iopte *start = ptep;
 	unsigned long table_size;
+	unsigned int unmapped_count = 0, unmapped_cont_count = 0;
+	int ptes_per_table = ARM_LPAE_PTES_PER_TABLE(data);
+	int adj_contpte = arm_lpae_adjacent_contptes(lvl, data);
 
 	if (lvl == data->start_level)
 		table_size = ARM_LPAE_PGD_SIZE(data);
 	else
 		table_size = ARM_LPAE_GRANULE(data);
 
-	start = ptep;
+	/* For last level page tables, if telemetry is disabled, skip processing the ptes */
+	if (lvl != ARM_LPAE_MAX_LEVELS - 1) {
+		/* Keep this loop for any-pgtable-level but the last */
+		for (int i = 0; i < ptes_per_table; ) {
+			arm_lpae_iopte pte = ptep[i];
 
-	/* Only leaf entries at the last level */
-	if (lvl == ARM_LPAE_MAX_LEVELS - 1)
-		end = ptep;
-	else
-		end = (void *)ptep + table_size;
+			if (!pte) {
+				i++;
+				continue;
+			}
 
-	while (ptep != end) {
-		arm_lpae_iopte pte = *ptep++;
+			if (iopte_leaf(pte, lvl, data->iop.fmt)) {
+				/* In freeing case, we may need to check mmio mapping per PTE */
+				if (tel_enabled && !arm_lpae_iopte_is_mmio(data, pte)) {
+					if (pte & ARM_LPAE_PTE_CONT)
+						unmapped_cont_count++;
+					else
+						unmapped_count++;
+				}
 
-		if (!pte || iopte_leaf(pte, lvl, data->iop.fmt))
-			continue;
+				i += (pte & ARM_LPAE_PTE_CONT) ? adj_contpte : 1;
+			} else {
+				__arm_lpae_free_pgtable(data, lvl + 1, iopte_deref(pte, data));
+				i++;
+			}
+		}
+	} else {
+		if (tel_enabled) {
+			/* Optimized loop for last level pgtable */
+			for (int i = 0; i < ptes_per_table; ) {
+				arm_lpae_iopte pte = ptep[i];
 
-		__arm_lpae_free_pgtable(data, lvl + 1, iopte_deref(pte, data));
+				if (!pte || arm_lpae_iopte_is_mmio(data, pte)) {
+					i++;
+					continue;
+				}
+
+				if (pte & ARM_LPAE_PTE_CONT) {
+					unmapped_cont_count++;
+					i += adj_contpte;
+				} else {
+					unmapped_count++;
+					i++;
+				}
+			}
+		}
+	}
+
+	/*
+	 * Telemetry for page table free:
+	 * When a page table is freed, all the leaf entries it contains are
+	 * implicitly unmapped. Report them to the telemetry core.
+	 */
+	if (tel_enabled) {
+		size_t sz = ARM_LPAE_BLOCK_SIZE(lvl, data);
+
+		if (unmapped_cont_count)
+			data->iop.cfg.telemetry_cb->unmap(data->iop.cookie,
+							  sz * adj_contpte,
+							  unmapped_cont_count);
+		if (unmapped_count)
+			data->iop.cfg.telemetry_cb->unmap(data->iop.cookie,
+							  sz, unmapped_count);
 	}
 
 	__arm_lpae_free_pages(start, table_size, &data->iop.cfg);
@@ -607,6 +793,19 @@ static size_t arm_lpae_split_blk_unmap(struct arm_lpae_io_pgtable *data,
 	if (i < ptes_per_table)
 		__arm_lpae_init_pte(data, blk_iova + split_sz * i, blk_paddr, pte, lvl,
 				    ptes_per_table - i, &tablep[i], false);
+
+	/*
+	 * When a large block mapping is split to unmap a smaller region within
+	 * it, the telemetry must be updated. The process involves unmapping
+	 * the single large block and then reporting the full set of new,
+	 * smaller mappings, accounting for any coalescing that occurred.
+	 */
+	if (tel_enabled && !arm_lpae_iopte_is_mmio(data, blk_pte)) {
+		size_t blk_sz = ARM_LPAE_BLOCK_SIZE(lvl - 1, data);
+
+		cfg->telemetry_cb->unmap(data->iop.cookie, blk_sz, 1);
+		arm_lpae_count_map_telemetry(data, pte, lvl, ptes_per_table, tablep);
+	}
 
 	if (blk_pte & ARM_LPAE_PTE_CONT) {
 		int lvl_idx = ARM_LPAE_LVL_IDX(iova, lvl - 1, data);
@@ -1119,5 +1318,12 @@ int arm_lpae_init_pgtable_s2(struct io_pgtable_cfg *cfg,
 
 	vtcr->tsz = 64ULL - cfg->ias;
 	vtcr->sl = ~sl & ARM_LPAE_VTCR_SL0_MASK;
+
+	/*
+	 * Telemetry enabled is boot time signal. Record this for local use instead of calling
+	 * callbacks
+	 */
+	tel_enabled = cfg->telemetry_cb && cfg->telemetry_cb->is_enabled();
+
 	return 0;
 }

@@ -28,24 +28,30 @@ TRACE_EVENT(pixel_mm_kswapd_wake,
 TRACE_EVENT(pixel_mm_kswapd_done,
 	TP_PROTO(
 		unsigned long delta_nr_scanned,
-		unsigned long delta_nr_reclaimed
+		unsigned long delta_nr_reclaimed,
+		unsigned long delta_nr_allocated,
+		u64 duration_ns
 	),
 
-	TP_ARGS(delta_nr_scanned, delta_nr_reclaimed),
+	TP_ARGS(delta_nr_scanned, delta_nr_reclaimed, delta_nr_allocated, duration_ns),
 
 	TP_STRUCT__entry(
 		__field(unsigned long, delta_nr_scanned)
 		__field(unsigned long, delta_nr_reclaimed)
+		__field(unsigned long, delta_nr_allocated)
+		__field(u64, duration_ns)
 	),
 
 	TP_fast_assign(
 		__entry->delta_nr_scanned = delta_nr_scanned;
 		__entry->delta_nr_reclaimed = delta_nr_reclaimed;
+		__entry->delta_nr_allocated = delta_nr_allocated;
+		__entry->duration_ns = duration_ns;
 	),
 
-	TP_printk("delta_nr_scanned=%lu, delta_nr_reclaimed=%lu",
-		__entry->delta_nr_scanned,
-		__entry->delta_nr_reclaimed
+	TP_printk("delta_nr_scanned=%lu, delta_nr_reclaimed=%lu, delta_nr_allocated=%lu, duration_ns=%llu",
+		__entry->delta_nr_scanned, __entry->delta_nr_reclaimed,
+		__entry->delta_nr_allocated, __entry->duration_ns
 	)
 );
 

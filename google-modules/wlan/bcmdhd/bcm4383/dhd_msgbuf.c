@@ -8213,14 +8213,6 @@ BCMFASTPATH(dhd_prot_process_msgbuf_rxcpl)(dhd_pub_t *dhd, int ringtype, uint32 
 	/* must be the first check in this function */
 	(void)dhd_prot_lb_rxp_flow_ctrl(dhd);
 #endif /* DHD_LB_RXP */
-#ifdef DHD_PCIE_RUNTIMEPM
-	/* Set rx_pending_due_to_rpm if device is not in resume state */
-	if (dhdpcie_runtime_bus_wake(dhd, FALSE, dhd_prot_process_msgbuf_rxcpl)) {
-		dhd->rx_pending_due_to_rpm = TRUE;
-		return more;
-	}
-	dhd->rx_pending_due_to_rpm = FALSE;
-#endif /* DHD_PCIE_RUNTIMEPM */
 
 #ifdef DHD_HP2P
 	if (ringtype == DHD_HP2P_RING && prot->d2hring_hp2p_rxcpl)
@@ -12848,21 +12840,9 @@ BCMFASTPATH(dhd_prot_alloc_ring_space)(dhd_pub_t *dhd, msgbuf_ring_t *ring,
 	uint16 nitems, uint16 *alloced, bool exactly_nitems)
 {
 	void *ret_buf;
-	sh_addr_t base_addr;
 
 	if (nitems == 0) {
 		DHD_ERROR(("%s: nitems is 0 - ring(%s)\n", __FUNCTION__, ring->name));
-		return NULL;
-	}
-	/* sanity check */
-	if (!DHD_VIRT_ADDR_VALID(ring)) {
-		DHD_ERROR(("%s() ring virtual address is invalid\n", __FUNCTION__));
-		return NULL;
-	}
-	/* compare the saved physical address in ring sanity for memory corruption */
-	dhd_base_addr_htolpa(&base_addr, ring->dma_buf.pa);
-	if (memcmp(&base_addr, &ring->base_addr, sizeof(sh_addr_t)) != 0) {
-		DHD_ERROR(("%s() ring base_addr and dma_buf.pa did not match\n", __FUNCTION__));
 		return NULL;
 	}
 

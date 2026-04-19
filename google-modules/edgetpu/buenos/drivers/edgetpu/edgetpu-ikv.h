@@ -66,7 +66,7 @@ struct edgetpu_ikv_response {
 	spinlock_t *queue_lock;
 	/*
 	 * Mailbox awaiter this response was delivered in.
-	 * Must be released with `gcip_mailbox_release_awaiter()` after this response has been
+	 * Must be released with `gcip_mailbox_awaiter_put()` after this response has been
 	 * processed. Doing so will also free this response.
 	 */
 	struct gcip_mailbox_resp_awaiter *awaiter;
@@ -135,9 +135,9 @@ struct edgetpu_ikv {
 /*
  * Initializes a VII object.
  *
- * Will request a mailbox from @mgr and allocate cmd/resp queues.
+ * Will find the IKV mailbox and allocate an edgetpu_mailbox and cmd/resp queues for it.
  */
-int edgetpu_ikv_init(struct edgetpu_mailbox_manager *mgr, struct edgetpu_ikv *etikv);
+int edgetpu_ikv_init(struct edgetpu_dev *etdev, struct edgetpu_ikv *etikv);
 
 /*
  * Re-initializes the initialized VII object.
@@ -204,7 +204,7 @@ void edgetpu_ikv_clear_active_clients(struct edgetpu_ikv *etikv);
  * 1) Set the `processed` flag on all responses in the @pending_queue
  * 2) Release @queue_lock (so the next step can proceed)
  * 3) Cancel all responses in @pending_queue with `gcip_mailbox_cancel_awaiter()`
- * 4) Release all responses in both queues with `gcip_mailbox_release_awaiter()`
+ * 4) Release all responses in both queues with `gcip_mailbox_awaiter_put()`
  *
  * @release_callback will be called, with @release_data as an argument, immediately before the
  * command's edgetpu_ikv_response is released. This can be used to release any resources that were

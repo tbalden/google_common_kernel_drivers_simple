@@ -25,11 +25,12 @@ int main(int argc, char **argv)
 	int bits = 32, xdelay = 0;
 	/* default 1 page*/
 	int num_pages = 1;
+	int num_mappings = 0;
 
 	int cmd = IOMMU_MAP_BENCHMARK;
 	char *p;
 
-	while ((opt = getopt(argc, argv, "t:s:n:b:x:p:")) != -1) {
+	while ((opt = getopt(argc, argv, "t:s:n:b:x:p:m:")) != -1) {
 		switch (opt) {
 		case 't':
 			threads = atoi(optarg);
@@ -48,6 +49,9 @@ int main(int argc, char **argv)
 			break;
 		case 'p':
 			num_pages = atoi(optarg);
+			break;
+		case 'm':
+			num_mappings = atoi(optarg);
 			break;
 		default:
 			return -1;
@@ -96,18 +100,19 @@ int main(int argc, char **argv)
 	map.dma_bits = bits;
 	map.dma_trans_ns = xdelay;
 	map.num_pages = num_pages;
+	map.num_mappings = num_mappings;
 
 	if (ioctl(fd, cmd, &map)) {
 		perror("ioctl");
 		exit(1);
 	}
 
-	printf("iommu mapping benchmark: threads:%d seconds:%d node:%d pages:%d\n",
-			threads, seconds, node, num_pages);
-	printf("average map latency(us):%.1f standard deviation:%.1f\n",
-			map.avg_map_100ns/10.0, map.map_stddev/10.0);
-	printf("average unmap latency(us):%.1f standard deviation:%.1f\n",
-			map.avg_unmap_100ns/10.0, map.unmap_stddev/10.0);
+	printf("iommu mapping benchmark: threads:%d seconds:%d node:%d pages:%d mappings:%d\n",
+	       threads, seconds, node, num_pages, num_mappings);
+	printf("average map latency(ns):%lu standard deviation:%lu\n",
+	       (unsigned long)map.avg_map_ns, (unsigned long)map.map_stddev);
+	printf("average unmap latency(ns):%lu standard deviation:%lu\n",
+	       (unsigned long)map.avg_unmap_ns, (unsigned long)map.unmap_stddev);
 
 	return 0;
 }

@@ -15,7 +15,7 @@
 # SPDX-License-Identifier: GPL-2.0
 
 load(
-    "//build/kernel/kleaf:kernel.bzl",
+    "@kleaf//build/kernel/kleaf:kernel.bzl",
     "kernel_module",
 )
 

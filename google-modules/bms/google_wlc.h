@@ -124,6 +124,12 @@
 #define GOOGLE_WLC_IOP_FAIL_COUNT_MAX			5
 #define GOOGLE_WLC_IOP_VOUT_MV				9000
 #define GOOGLE_WLC_ICL_STABLE_TIME_MS			(30 * 1000)
+#define MPP_NPM_MIN_VOLTAGE				12000
+#define MPP_NPM_MAX_VOLTAGE				14000
+#define MPP25_MAX_OUTPUT_VOLTAGE_MV			19000
+#define GOOGLE_WLC_MPP25_MAX_POWER			25000
+#define LIMIT_REASON_RETRY_TIME_MS			(5 * 1000)
+#define LIMIT_REASON_RETRY_COUNT			3
 
 #define FWUPDATE_DATA_MINSIZE				8
 #define FWUPDATE_DATA_MAXSIZE				12
@@ -347,14 +353,15 @@ enum wlc_feature {
 };
 
 enum uevent_source {
-	UEVENT_WLC_ON = 0,
+	UEVENT_WLC_INIT = 0,
 	UEVENT_WLC_OFF,
+	UEVENT_WLC_ON,
 	UEVENT_FAN,
 	UEVENT_FWUPDATE,
 };
 
 static char *uevent_source_str[] = {
-	"WLC_ON", "WLC_OFF", "FAN", "FWUPDATE"
+	"N/A", "WLC_OFF", "WLC_ON", "FAN", "FWUPDATE"
 };
 
 enum gpio_mode {
@@ -513,8 +520,8 @@ struct wlc_fw_ver {
 };
 
 struct wlc_fw_data {
-	struct wlc_fw_ver ver;
-	struct wlc_fw_ver req_ver;
+	struct wlc_fw_ver ver;     /* target version */
+	struct wlc_fw_ver req_ver; /* only used for READ_REQ_FWVER */
 	struct wlc_fw_ver cur_ver;
 	int update_option;
 	bool update_check_pending;
@@ -617,6 +624,40 @@ struct mpp25_data {
 	struct mode_cap_data mode_capabilities;
 };
 
+struct psy_info {
+	int online;
+	int max_power;
+	int voltage_max;
+	int current_max;
+};
+
+struct wlc_adapter_capabilities_1_fields {
+	u16 ptmc;
+	u16 qi_id;
+};
+
+struct wlc_adapter_capabilities_2_fields {
+	u16 nego_power;
+	u8 limit_reason;
+	u8 mdis_level;
+};
+
+struct wlc_adapter_capabilities_4_fields {
+	u16 mpp25_state;
+	int8_t compatibility;
+	u8 reserved;
+};
+
+struct wlc_receiver_state_0_fields {
+	u16 eds_total_count;
+	u16 eds_error_count;
+};
+
+struct wlc_receiver_state_1_fields {
+	u16 disconnect_total_count;
+	u16 irq_error_count;
+};
+
 struct google_wlc_data {
 	struct device				*dev;
 	struct i2c_client			*client;
@@ -640,6 +681,7 @@ struct google_wlc_data {
 	struct gvotable_election		*cp_fcc_votable;
 	struct gvotable_election		*dc_avail_votable;
 	struct gvotable_election		*msc_last_votable;
+	struct gvotable_election		*csi_status_votable;
 	/* mutexes */
 	struct mutex				io_lock;
 	struct mutex				status_lock;
@@ -670,6 +712,7 @@ struct google_wlc_data {
 	struct delayed_work			check_iop_timeout_work;
 	struct delayed_work			set_iop_vout_work;
 	struct delayed_work			icl_stable_work;
+	struct delayed_work			limit_reason_work;
 	/* buck charger icl ramp related */
 	int					icl_now;
 	int					icl_ramp_target_mw;
@@ -690,6 +733,8 @@ struct google_wlc_data {
 	struct wakeup_source			*mpp25_ws;
 	struct wakeup_source			*wlc_disable_ws;
 	struct wakeup_source			*icl_target_ws;
+	struct wakeup_source			*eds_tx_ws;
+	struct wakeup_source			*limit_reason_ws;
 	struct logbuffer			*log;
 	struct logbuffer			*fw_log;
 	struct dentry				*debug_entry;
@@ -708,6 +753,7 @@ struct google_wlc_data {
 	int					iout_multiplier;
 	bool					usb_connected;
 	u32					tx_id;
+	u32					last_tx_id;
 	u8					tx_id_str[TX_ID_STR_LEN];
 	int					wlc_charge_enabled;
 	struct wlc_dc_data			dc_data;
@@ -730,11 +776,15 @@ struct google_wlc_data {
 	u32					trigger_dd;
 	ktime_t					online_at;
 	bool					vout_ready;
+	struct psy_info				last_psy_info;
 	bool					iop_bpp;
 	int					compatibility;
 	bool					mpp_initialized;
 	bool					mpp_restricted_set;
 	u8					limit_reason;
+	u8					limit_reason_retry_count;
+	bool					wlc_dc_to_ramp;
+	u16					qi_id;
 	/* eds or auth related */
 	u8					*tx_buf;
 	u8					*rx_buf;
@@ -753,6 +803,7 @@ struct google_wlc_data {
 	u16					eds_total_count;
 	bool					eds_event;
 	bool					wpc_auth_type;
+	int					last_event;
 	/* debug or fwupdate related values */
 	bool					force_bpp;
 	bool					manual_force_bpp;
@@ -799,6 +850,7 @@ struct google_wlc_data {
 	u16					mpla2_alpha_fm_irect;
 	u32					wlc_dc_max_vout_delta;
 	u32					wlc_dc_max_pout_delta;
+	bool					debug_force_crc_check_only;
 	/* end */
 	bool					boot_on_wlc;
 	struct wlc_fw_data			fw_data;
@@ -887,6 +939,7 @@ struct google_wlc_chip {
 	size_t tx_buf_size;
 	struct regmap *regmap;
 	struct regmap *fw_regmap;
+	int reg_qi_id;
 
 	int (*reg_read_n)(struct google_wlc_data *chgr, unsigned int reg, void *buf, size_t n);
 	int (*reg_read_8)(struct google_wlc_data *chgr, u16 reg, u8 *val);
@@ -917,6 +970,7 @@ struct google_wlc_chip {
 	int (*chip_get_project_id)(struct google_wlc_data *chgr, u8 *pid);
 	int (*chip_get_limit_rsn)(struct google_wlc_data *chgr, u8 *reason);
 	const char *(*chip_get_txid_str)(struct google_wlc_data *chgr);
+	int (*chip_set_qi_id)(struct google_wlc_data *chgr, u16 qi_id);
 
 	/* Functions that should be implemented individually by chip */
 	int (*chip_get_vout_set)(struct google_wlc_data *chgr, u32 *mv);

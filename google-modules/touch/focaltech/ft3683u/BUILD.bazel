@@ -2,7 +2,7 @@
 
 # the focaltech touchscreen drivers.
 
-load("//build/kernel/kleaf:kernel.bzl", "ddk_module", "kernel_module_group")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_module", "kernel_module_group")
 
 ddk_module(
     name = "focal_touch",

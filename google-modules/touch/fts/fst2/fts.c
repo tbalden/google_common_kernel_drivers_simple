@@ -2252,7 +2252,7 @@ static int fts_chip_init(struct fts_ts_info *info)
 	}
 
 #if IS_ENABLED(CONFIG_GOOG_TOUCH_INTERFACE)
-	goog_input_create_link(info->gti);
+	gti_sysfs_create_vendor_input_link(info->gti);
 #endif
 
 	res = fts_init_sensing(info);

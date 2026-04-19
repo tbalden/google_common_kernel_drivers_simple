@@ -144,6 +144,7 @@ struct gia_device_data {
 	u32 nr_irq_chips;
 	u32 next_bank_base_offset;
 	u32 *mask_cache;
+	bool ignore_rpm_status;
 
 	/* Telemetry */
 	struct gia_telemetry telemetry;

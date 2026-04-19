@@ -38,10 +38,13 @@ struct pixel_of_properties {
 	bool jones_force_on;
 	bool virtual_platform;
 	bool emulator;
+	bool pdvfs_com_host;
 	uint32_t apm_latency;
 	uint32_t autosuspend_latency;
 };
 
 struct pixel_of_pdevs {
+#if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
 	struct platform_device *gpu_pf_state_pdev;
+#endif
 };

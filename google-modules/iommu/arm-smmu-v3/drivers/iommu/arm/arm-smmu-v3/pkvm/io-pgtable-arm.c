@@ -32,8 +32,10 @@ void *__arm_lpae_alloc_pages(size_t size, gfp_t gfp, struct io_pgtable_cfg *cfg)
 	if (data->idmapped) {
 		addr = kvm_iommu_donate_pages_atomic(get_order(size));
 		WARN_ON(!addr);
+		cfg->telemetry_cb->atomic_pages_tel(size >> PAGE_SHIFT);
 	} else {
 		addr = kvm_iommu_donate_pages_request(get_order(size));
+		cfg->telemetry_cb->s1_pages_tel(size >> PAGE_SHIFT);
 	}
 
 	if (addr && !cfg->coherent_walk)
@@ -57,10 +59,13 @@ void __arm_lpae_free_pages(void *addr, size_t size, struct io_pgtable_cfg *cfg)
 	if (!cfg->coherent_walk)
 		kvm_flush_dcache_to_poc(addr, size);
 
-	if (data->idmapped)
+	if (data->idmapped) {
 		kvm_iommu_reclaim_pages_atomic(addr, order);
-	else
+		cfg->telemetry_cb->atomic_pages_tel(-(size >> PAGE_SHIFT));
+	} else {
 		kvm_iommu_reclaim_pages(addr, order);
+		cfg->telemetry_cb->s1_pages_tel(-(size >> PAGE_SHIFT));
+	}
 }
 
 void __arm_lpae_sync_pte(arm_lpae_iopte *ptep, int num_entries,
@@ -274,6 +279,12 @@ static void __arm_lpae_coalesce_contptes(struct arm_lpae_io_pgtable *data,
 
 	for (i = 0; i < adj_contpte; i++)
 		start_ptep[i] |= ARM_LPAE_PTE_CONT;
+
+	if (data->iop.cfg.telemetry_cb->is_enabled() &&
+	    !arm_lpae_iopte_is_mmio(data, *start_ptep)) {
+		data->iop.cfg.telemetry_cb->map(data->iop.cookie, sz * adj_contpte, 1);
+		data->iop.cfg.telemetry_cb->unmap(data->iop.cookie, sz, adj_contpte);
+	}
 }
 
 void arm_lpae_coalesce_contptes(struct arm_lpae_io_pgtable *data,

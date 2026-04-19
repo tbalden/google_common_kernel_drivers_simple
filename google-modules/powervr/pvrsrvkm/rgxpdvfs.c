@@ -50,7 +50,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define USEC_TO_MSEC 1000
 
-PVRSRV_ERROR PDVFSLimitMaxFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32MaxOPPPoint)
+PVRSRV_ERROR PDVFSLimitMaxFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32MaxFreq)
 {
 	RGXFWIF_KCCB_CMD		sGPCCBCmd;
 	PVRSRV_ERROR			eError;
@@ -60,13 +60,13 @@ PVRSRV_ERROR PDVFSLimitMaxFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui
 
 	if (!_PDVFSEnabled())
 	{
-		/* No error message to avoid excessive messages */
+		/* No log message to avoid excessive messages */
 		return PVRSRV_OK;
 	}
 
 	/* send feedback */
 	sGPCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_PDVFS_LIMIT_MAX_FREQ;
-	sGPCCBCmd.uCmdData.sPDVFSMaxFreqData.ui32MaxOPPPoint = ui32MaxOPPPoint;
+	sGPCCBCmd.uCmdData.sPDVFSMaxFreqData.ui32MaxFreq = ui32MaxFreq;
 
 	/* Submit command to the firmware.  */
 	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
@@ -82,10 +82,16 @@ PVRSRV_ERROR PDVFSLimitMaxFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui
 		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 	} END_LOOP_UNTIL_TIMEOUT_US();
 
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "%s: Unable to send command (%u). Is RGX powered?", __func__, eError));
+		return eError;
+	}
+
 	return eError;
 }
 
-PVRSRV_ERROR PDVFSLimitMinFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32MinOPPPoint)
+PVRSRV_ERROR PDVFSLimitMinFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32MinFreq)
 {
 	RGXFWIF_KCCB_CMD		sGPCCBCmd;
 	PVRSRV_ERROR			eError;
@@ -95,13 +101,13 @@ PVRSRV_ERROR PDVFSLimitMinFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui
 
 	if (!_PDVFSEnabled())
 	{
-		/* No error message to avoid excessive messages */
+		/* No log message to avoid excessive messages */
 		return PVRSRV_OK;
 	}
 
 	/* send feedback */
 	sGPCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_PDVFS_LIMIT_MIN_FREQ;
-	sGPCCBCmd.uCmdData.sPDVFSMinFreqData.ui32MinOPPPoint = ui32MinOPPPoint;
+	sGPCCBCmd.uCmdData.sPDVFSMinFreqData.ui32MinFreq = ui32MinFreq;
 
 	/* Submit command to the firmware.  */
 	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
@@ -117,10 +123,17 @@ PVRSRV_ERROR PDVFSLimitMinFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui
 		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 	} END_LOOP_UNTIL_TIMEOUT_US();
 
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "%s: Unable to send command (%u). Is RGX powered?", __func__, eError));
+		return eError;
+	}
+
 	return eError;
 }
 
-PVRSRV_ERROR PDVFSSetParams(PVRSRV_RGXDEV_INFO *psDevInfo, RGXFW_PDVFS_PARAMS *psPDVFSParams)
+#if defined(SUPPORT_PDVFS_HEADROOM_EXT)
+PVRSRV_ERROR PDVFSSetFrequencyHeadroom(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_INT32 i32Headroom)
 {
 	RGXFWIF_KCCB_CMD		sGPCCBCmd;
 	PVRSRV_ERROR			eError;
@@ -130,14 +143,14 @@ PVRSRV_ERROR PDVFSSetParams(PVRSRV_RGXDEV_INFO *psDevInfo, RGXFW_PDVFS_PARAMS *p
 
 	if (!_PDVFSEnabled())
 	{
-		/* No error message to avoid excessive messages */
+		/* No log message to avoid excessive messages */
 		return PVRSRV_OK;
 	}
 
-	sGPCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_PDVFS_SET_PARAMS;
-	memcpy(&sGPCCBCmd.uCmdData.sPDVFSSetParamsData.sParams, psPDVFSParams, sizeof(*psPDVFSParams));
+	sGPCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_PDVFS_SET_FREQ_HEADROOM;
+	sGPCCBCmd.uCmdData.sPDVFSSetFreqHeadroomData.i32Headroom = i32Headroom;
 
-	/* Submit command to the firmware.  */
+	/* Submit command to the firmware. */
 	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
 	{
 		eError = RGXSendCommandAndGetKCCBSlot(psDevInfo,
@@ -150,6 +163,135 @@ PVRSRV_ERROR PDVFSSetParams(PVRSRV_RGXDEV_INFO *psDevInfo, RGXFW_PDVFS_PARAMS *p
 		}
 		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 	} END_LOOP_UNTIL_TIMEOUT_US();
+
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "%s: Unable to send command (%u). Is RGX powered?", __func__, eError));
+		return eError;
+	}
+
+	return eError;
+}
+#endif
+
+#if defined(SUPPORT_PDVFS_POLLINT_EXT)
+PVRSRV_ERROR PDVFSSetReactivePollingInterval(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32PollingMs)
+{
+	RGXFWIF_KCCB_CMD		sGPCCBCmd;
+	PVRSRV_ERROR			eError;
+	IMG_UINT32				ui32CmdKCCBSlot;
+
+	PVRSRV_VZ_RET_IF_MODE(GUEST, DEVINFO, psDevInfo, PVRSRV_ERROR_NOT_SUPPORTED);
+
+	if (!_PDVFSEnabled())
+	{
+		/* No log message to avoid excessive messages */
+		return PVRSRV_OK;
+	}
+
+	sGPCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_PDVFS_SET_REACTIVE_INTERVAL;
+	sGPCCBCmd.uCmdData.sPDVFSReactIvlData.ui32ReactiveInterval = ui32PollingMs;
+
+	/* Submit command to the firmware. */
+	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
+	{
+		eError = RGXSendCommandAndGetKCCBSlot(psDevInfo,
+		                                      &sGPCCBCmd,
+		                                      PDUMP_FLAGS_CONTINUOUS,
+		                                      &ui32CmdKCCBSlot);
+		if (eError != PVRSRV_ERROR_RETRY)
+		{
+			break;
+		}
+		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
+	} END_LOOP_UNTIL_TIMEOUT_US();
+
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "%s: Unable to send command (%u). Is RGX powered?", __func__, eError));
+		return eError;
+	}
+
+	return eError;
+}
+#endif
+
+PVRSRV_ERROR PDVFSSetUpThreshold(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32UpThresholdInPct)
+{
+	RGXFWIF_KCCB_CMD		sGPCCBCmd;
+	PVRSRV_ERROR			eError;
+	IMG_UINT32				ui32CmdKCCBSlot;
+
+	PVRSRV_VZ_RET_IF_MODE(GUEST, DEVINFO, psDevInfo, PVRSRV_ERROR_NOT_SUPPORTED);
+
+	if (!_PDVFSEnabled())
+	{
+		/* No log message to avoid excessive messages */
+		return PVRSRV_OK;
+	}
+
+	sGPCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_PDVFS_SET_UP_THRESHOLD;
+	sGPCCBCmd.uCmdData.sPDVFSSetUpThresholdData.ui32UpThresholdInPct = ui32UpThresholdInPct;
+
+	/* Submit command to the firmware. */
+	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
+	{
+		eError = RGXSendCommandAndGetKCCBSlot(psDevInfo,
+		                                      &sGPCCBCmd,
+		                                      PDUMP_FLAGS_CONTINUOUS,
+		                                      &ui32CmdKCCBSlot);
+		if (eError != PVRSRV_ERROR_RETRY)
+		{
+			break;
+		}
+		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
+	} END_LOOP_UNTIL_TIMEOUT_US();
+
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "%s: Unable to send command (%u). Is RGX powered?", __func__, eError));
+		return eError;
+	}
+
+	return eError;
+}
+
+PVRSRV_ERROR PDVFSSetDownDifferential(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32DownDifferentialInPct)
+{
+	RGXFWIF_KCCB_CMD		sGPCCBCmd;
+	PVRSRV_ERROR			eError;
+	IMG_UINT32				ui32CmdKCCBSlot;
+
+	PVRSRV_VZ_RET_IF_MODE(GUEST, DEVINFO, psDevInfo, PVRSRV_ERROR_NOT_SUPPORTED);
+
+	if (!_PDVFSEnabled())
+	{
+		/* No log message to avoid excessive messages */
+		return PVRSRV_OK;
+	}
+
+	sGPCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_PDVFS_SET_DOWN_DIFFERENTIAL;
+	sGPCCBCmd.uCmdData.sPDVFSSetDownDifferentialData.ui32DownDifferentialInPct = ui32DownDifferentialInPct;
+
+	/* Submit command to the firmware. */
+	LOOP_UNTIL_TIMEOUT_US(MAX_HW_TIME_US)
+	{
+		eError = RGXSendCommandAndGetKCCBSlot(psDevInfo,
+		                                      &sGPCCBCmd,
+		                                      PDUMP_FLAGS_CONTINUOUS,
+		                                      &ui32CmdKCCBSlot);
+		if (eError != PVRSRV_ERROR_RETRY)
+		{
+			break;
+		}
+		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
+	} END_LOOP_UNTIL_TIMEOUT_US();
+
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "%s: Unable to send command (%u). Is RGX powered?", __func__, eError));
+		return eError;
+	}
 
 	return eError;
 }
@@ -162,11 +304,16 @@ PVRSRV_ERROR PDVFSSetParams(PVRSRV_RGXDEV_INFO *psDevInfo, RGXFW_PDVFS_PARAMS *p
 */ /**************************************************************************/
 void RGXPDVFSCheckCoreClkRateChange(PVRSRV_RGXDEV_INFO *psDevInfo)
 {
+	if (!psDevInfo->pui32RGXFWIFCoreClkRate)
+	{
+		return;
+	}
+
 	IMG_UINT32 ui32CoreClkRate = *psDevInfo->pui32RGXFWIFCoreClkRate;
 
 	if (!_PDVFSEnabled())
 	{
-		/* No error message to avoid excessive messages */
+		/* No log message to avoid excessive messages */
 		return;
 	}
 
@@ -174,5 +321,28 @@ void RGXPDVFSCheckCoreClkRateChange(PVRSRV_RGXDEV_INFO *psDevInfo)
 	{
 		psDevInfo->ui32CoreClkRateSnapshot = ui32CoreClkRate;
 		RGX_PROCESS_CORE_CLK_RATE_CHANGE(psDevInfo, ui32CoreClkRate);
+	}
+}
+
+/*************************************************************************/ /*!
+@Function       RGXPDVFSCheckUtilisationChange
+@Description    Checks if utilisation has changed since the last snap-shot.
+@Input          psDevInfo    A pointer to PVRSRV_RGXDEV_INFO.
+@Return         None.
+*/ /**************************************************************************/
+void RGXPDVFSCheckUtilisationChange(PVRSRV_RGXDEV_INFO *psDevInfo)
+{
+	IMG_UINT32 ui32Utilisation = *psDevInfo->pui32RGXFWIFUtilisation;
+
+	if (!_PDVFSEnabled())
+	{
+		/* No error message to avoid excessive messages */
+		return;
+	}
+
+	if (ui32Utilisation != 0 && psDevInfo->ui32UtilisationSnapshot != ui32Utilisation)
+	{
+		psDevInfo->ui32UtilisationSnapshot = ui32Utilisation;
+		RGXProcessUtilisationChange(psDevInfo, ui32Utilisation);
 	}
 }

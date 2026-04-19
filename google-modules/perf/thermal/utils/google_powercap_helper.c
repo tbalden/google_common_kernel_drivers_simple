@@ -155,6 +155,8 @@ void __gpowercap_sub_power(struct gpowercap *gpowercap)
 		parent->power_min -= gpowercap->power_min;
 		parent->power_max -= gpowercap->power_max;
 		parent->power_limit -= gpowercap->power_limit;
+		if (parent->ops && parent->ops->evaluate)
+			parent->ops->evaluate(parent);
 		parent = parent->parent;
 	}
 }
@@ -167,6 +169,8 @@ void __gpowercap_add_power(struct gpowercap *gpowercap)
 		parent->power_min += gpowercap->power_min;
 		parent->power_max += gpowercap->power_max;
 		parent->power_limit += gpowercap->power_limit;
+		if (parent->ops && parent->ops->evaluate)
+			parent->ops->evaluate(parent);
 		parent = parent->parent;
 	}
 }
@@ -237,13 +241,13 @@ int __set_power_limit_uw(struct gpowercap *gpowercap, u64 power_limit)
 	else
 		set_bit(GPOWERCAP_POWER_LIMIT_FLAG, &gpowercap->flags);
 
-	pr_debug("%s: power limit: %llu uW, power max: %llu uW\n",
-		 gpowercap->zone.name, gpowercap->power_limit, gpowercap->power_max);
-
 	if (test_bit(GPOWERCAP_POWER_LIMIT_BYPASS_FLAG, &gpowercap->flags))
 		gpowercap->power_limit = power_limit;
 	else
 		gpowercap->power_limit = gpowercap->ops->set_power_uw(gpowercap, power_limit);
+
+	pr_debug("%s: power limit: %llu uW, power max: %llu uW\n",
+		 gpowercap->zone.name, gpowercap->power_limit, gpowercap->power_max);
 
 	mutex_unlock(&gpowercap->lock);
 
@@ -359,9 +363,6 @@ int __gpowercap_register(const char *name, struct gpowercap *gpowercap, struct g
 	if (!root && parent)
 		return -EINVAL;
 
-	if (parent && parent->ops)
-		return -EINVAL;
-
 	if (!gpowercap)
 		return -EINVAL;
 
@@ -412,6 +413,20 @@ struct gpowercap *__gpowercap_setup_virtual(const struct gpowercap_node *hierarc
 	struct gpowercap *gpowercap;
 	int ret = 0;
 
+	if (hierarchy->type != GPOWERCAP_NODE_VIRTUAL &&
+		hierarchy->type != GPOWERCAP_NODE_TEST_VIRTUAL) {
+		if (hierarchy->type >= ARRAY_SIZE(gpc_device_ops)) {
+			pr_err("Missing ops for type:%d\n", hierarchy->type);
+			return ERR_PTR(-ENODEV);
+		}
+		if (!gpc_device_ops[hierarchy->type] ||
+		    !gpc_device_ops[hierarchy->type]->algo_setup) {
+			pr_err("Missing setup for type:%d\n", hierarchy->type);
+			return ERR_PTR(-ENODEV);
+		}
+		return gpc_device_ops[hierarchy->type]->algo_setup(hierarchy->name, parent);
+	}
+
 	gpowercap = kzalloc(sizeof(*gpowercap), GFP_KERNEL);
 	if (!gpowercap)
 		return ERR_PTR(-ENOMEM);
@@ -438,7 +453,8 @@ struct gpowercap *__gpowercap_setup_leaf(const struct gpowercap_node *hierarchy,
 		pr_err("Missing ops for type:%d\n", hierarchy->type);
 		return ERR_PTR(-ENODEV);
 	}
-	if (!gpc_device_ops[hierarchy->type]->setup) {
+	if (!gpc_device_ops[hierarchy->type] ||
+	    !gpc_device_ops[hierarchy->type]->setup) {
 		pr_err("Missing setup for type:%d\n", hierarchy->type);
 		return ERR_PTR(-ENODEV);
 	}
@@ -494,17 +510,12 @@ int __for_each_powercap_child(const struct gpowercap_node *hierarchy,
 		if (hierarchy[i].parent != it)
 			continue;
 
-		switch (hierarchy[i].type) {
-		case GPOWERCAP_NODE_VIRTUAL:
-			gpowercap = __gpowercap_setup_virtual(&hierarchy[i], parent);
-			break;
-		case GPOWERCAP_NODE_TEST_VIRTUAL:
+		if (hierarchy[i].type == GPOWERCAP_NODE_TEST_VIRTUAL)
 			gpowercap = gpc_test_setup(&hierarchy[i], parent);
-			break;
-		default:
+		else if (hierarchy[i].type >= GPOWERCAP_NODE_VIRTUAL)
+			gpowercap = __gpowercap_setup_virtual(&hierarchy[i], parent);
+		else
 			gpowercap = __gpowercap_setup_leaf(&hierarchy[i], parent);
-			break;
-		}
 
 		/*
 		 * A NULL pointer means there is no children, hence we
@@ -610,7 +621,7 @@ void __gpowercap_destroy_hierarchy(void)
 
 	for (i = 0; i < ARRAY_SIZE(gpc_device_ops); i++) {
 
-		if (!gpc_device_ops[i]->exit)
+		if (!gpc_device_ops[i] || !gpc_device_ops[i]->exit)
 			continue;
 
 		gpc_device_ops[i]->exit();
@@ -658,7 +669,7 @@ int gpowercap_register(const char *name, struct gpowercap *gpowercap, struct gpo
  */
 void gpowercap_unregister(struct gpowercap *gpowercap)
 {
-	pr_debug("Unregistered gpowercap node '%s'\n", gpowercap->zone.name);
+	pr_info("Unregistered gpowercap node '%s'\n", gpowercap->zone.name);
 	cancel_delayed_work_sync(&gpowercap->bypass_work);
 	unregister_zone(pct, &gpowercap->zone);
 }

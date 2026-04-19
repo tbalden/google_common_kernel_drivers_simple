@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 KCFLAGS += \
-	-I$(KERNEL_SRC)/../private/google-modules/soc/gs/include \
-	-I$(KERNEL_SRC)/../private/google-modules/soc/rdo/include \
-	-I$(KERNEL_SRC)/../private/google-modules/iif/include \
-	-I$(KERNEL_SRC)/../private/google-modules/perf/include
+	-I$(ROOT_DIR)/private/google-modules/soc/gs/include \
+	-I$(ROOT_DIR)/private/google-modules/soc/rdo/include \
+	-I$(ROOT_DIR)/private/google-modules/iif/include \
+	-I$(ROOT_DIR)/private/google-modules/perf/include
 
-module_syms = $(wildcard $(OUT_DIR)/../private/google-modules/$(1)Module.symvers)
+module_syms = $(wildcard $(COMMON_OUT_DIR)/private/google-modules/$(1)Module.symvers)
 
 # We depend on trusty to access the gpu_secure trusted firmware app
 EXTRA_SYMBOLS += $(call module_syms,trusty/)

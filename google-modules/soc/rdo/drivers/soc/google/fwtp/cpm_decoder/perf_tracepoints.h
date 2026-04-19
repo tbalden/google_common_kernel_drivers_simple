@@ -7,5 +7,6 @@
 #include "cpm_tracepoint_decoder.h"
 
 extern struct client_tracepoint domain_freq_tp;
+extern struct client_tracepoint freq_agg_update_tp;
 
 #endif /* _PERF_TRACEPOINTS_H */

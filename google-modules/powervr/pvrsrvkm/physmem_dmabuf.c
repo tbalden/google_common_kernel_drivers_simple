@@ -2567,6 +2567,7 @@ errUnlockAndDMAPut:
 		HASH_Delete(g_psDmaBufHash);
 		g_psDmaBufHash = NULL;
 	}
+
 	dma_buf_put(psDmaBuf);
 
 errUnlockReturn:

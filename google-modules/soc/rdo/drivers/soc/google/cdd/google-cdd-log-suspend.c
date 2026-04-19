@@ -233,15 +233,31 @@ static void google_cdd_suspend_resume(void *ignore, const char *action, int even
 static void google_cdd_dev_pm_cb_start(void *ignore, struct device *dev, const char *info,
 		int event)
 {
+	uint64_t predict_full_log_idx =
+		(atomic_read(&cdd_log_misc.suspend_log_idx) + 1) % ARRAY_SIZE(cdd_log->suspend);
+	if (google_cdd_suspend_diag_inst.enable &&
+	    predict_full_log_idx == google_cdd_suspend_diag_inst.last_index) {
+		dev_err(dev, "Ring buffer for %s diag is full\n",
+			cdd_log->suspend[google_cdd_suspend_diag_inst.last_index].log);
+	}
+
 	google_cdd_suspend(info, dev, event, CDD_FLAG_IN);
 }
 
 static void google_cdd_dev_pm_cb_end(void *ignore, struct device *dev, int error)
 {
+	uint64_t predict_full_log_idx =
+		(atomic_read(&cdd_log_misc.suspend_log_idx) + 1) % ARRAY_SIZE(cdd_log->suspend);
 	uint64_t first_log_idx =
 		atomic_read(&cdd_log_misc.suspend_log_idx) % ARRAY_SIZE(cdd_log->suspend);
 	uint64_t last_log_idx =
 		(atomic_read(&cdd_log_misc.suspend_log_idx) - 1) % ARRAY_SIZE(cdd_log->suspend);
+
+	if (google_cdd_suspend_diag_inst.enable &&
+	    predict_full_log_idx == google_cdd_suspend_diag_inst.last_index) {
+		dev_err(dev, "Ring buffer for %s diag is full\n",
+			cdd_log->suspend[google_cdd_suspend_diag_inst.last_index].log);
+	}
 
 	if (!google_cdd_suspend_diag_dev_pm_cb_end(cdd_log, first_log_idx, last_log_idx, dev))
 		google_cdd_suspend(NULL, dev, error, CDD_FLAG_OUT);

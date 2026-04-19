@@ -17,35 +17,38 @@ static struct gpowercap_node lga_tree[] __initdata = {
 	[1] { .name = "soc",
 		.type = GPOWERCAP_NODE_VIRTUAL,
 		.parent = &lga_tree[0] },
-	[2] { .name = "/cpus/cpu@0", // Little CPU cluster
+	[2] { .name = "big_and_big_mid",
+		.type = GPOWERCAP_NODE_VIRTUAL_VOLTAGE,
+		.parent = &lga_tree[1] },
+	[3] { .name = "/cpus/cpu@0", // Little CPU cluster
 		.type = GPOWERCAP_NODE_CPU,
 		.cdev_id = HW_CDEV_LIT,
 		.parent = &lga_tree[1] }, // parent = 'soc'
-	[3] { .name = "/cpus/cpu@200", // Mid CPU cluster
+	[4] { .name = "/cpus/cpu@200", // Mid CPU cluster
 		.type = GPOWERCAP_NODE_CPU,
 		.cdev_id = HW_CDEV_MID,
 		.parent = &lga_tree[1] }, // parent = 'soc'
-	[4] { .name = "/cpus/cpu@500", // BIG-MID CPU cluster
+	[5] { .name = "/cpus/cpu@500", // BIG-MID CPU cluster
 		.type = GPOWERCAP_NODE_CPU,
 		.cdev_id = HW_CDEV_BIG_MID,
-		.parent = &lga_tree[1] }, // parent = 'soc'
-	[5] { .name = "/cpus/cpu@700", // BIG CPU cluster
+		.parent = &lga_tree[2] }, // parent = 'big_and_big_mid'
+	[6] { .name = "/cpus/cpu@700", // BIG CPU cluster
 		.type = GPOWERCAP_NODE_CPU,
 		.cdev_id = HW_CDEV_BIG,
-		.parent = &lga_tree[1] }, // parent = 'soc'
-	[6] { .name = "/gpu0@34800000", // GPU
+		.parent = &lga_tree[2] }, // parent = 'big_and_big_mid'
+	[7] { .name = "/gpu0@34800000", // GPU
 		.type = GPOWERCAP_NODE_DEVFREQ,
 		.cdev_id = HW_CDEV_GPU,
 		.parent = &lga_tree[1] }, // parent = 'soc'
-	[7] { .name = "/sswrp_tpu@36000000/buenos@500000", // TPU
+	[8] { .name = "/sswrp_tpu@36000000/buenos@500000", // TPU
 		.type = GPOWERCAP_NODE_DEVFREQ,
 		.cdev_id = HW_CDEV_TPU,
 		.parent = &lga_tree[1] }, // parent = 'soc'
-	[8] { .name = "/sswrp_aur@38000000/gxp@880000", // Aurora
+	[9] { .name = "/sswrp_aur@38000000/gxp@880000", // Aurora
 		.type = GPOWERCAP_NODE_DEVFREQ,
 		.cdev_id = HW_CDEV_AUR,
 		.parent = &lga_tree[1] }, // parent = 'soc'
-	[9] { },
+	[10] { },
 };
 
 static struct of_device_id gpowercap_platform_tree_data[] __initdata = {

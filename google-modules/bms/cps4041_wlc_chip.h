@@ -12,7 +12,7 @@
 #include  <linux/bits.h>
 
 #define CPS4041_CHIP_ID				0x4041
-#define CPS8200_PTMC_ID				0x0018
+#define CPS8200_PTMC_ID				0x0159
 
 #define CPS4041_CHIP_ID_REG			0x0000
 #define CPS4041_PROJECT_ID_REG			0x0003
@@ -125,6 +125,8 @@
 #define CPS4041_NUM_RF_CURRENT			7
 
 #define CPS4041_MAX_CMD_TIMEOUT			1000
+
+#define CPS4041_QI_ID_REG			0x00FA
 
 /* EDS for application-layer data */
 #define CPS4041_EDS0_SIZE_REG			0x0400
@@ -296,6 +298,11 @@
 
 #define CPS4041_CAL_CAPTURE_PACKET_ID	0x14
 #define CPS4041_CHIP_CURRENT_MA		14
+
+#define BACKPOWER_CHECK_RETRY_COUNT	10
+#define BACKPOWER_CHECK_DELAY_MS	10
+#define CRC_CHECK_RETRY_COUNT		20
+#define CRC_CHECK_DELAY_MS		100
 
 enum cps_validation_results {
 	CPS_VALIDATION_ILLEGAL		= 0x40,

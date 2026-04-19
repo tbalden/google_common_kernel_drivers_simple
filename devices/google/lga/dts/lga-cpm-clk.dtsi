@@ -71,7 +71,6 @@
 			#clock-cells = <0>;
 			lpcm-id = <LPCM_LSIO_S>;
 			clock-id = <LSIOS_GPIO_CLK>;
-			use-smc;
 		};
 
 		lsios_pwm_clk: lsios_pwm_clk {
@@ -1044,9 +1043,10 @@
 			#clock-cells = <0>;
 			lpcm-id = <LPCM_GPCM>;
 			clock-id = <GPCM_HSION_PLL_DP_CLK>;
-			rates = /bits/ 64 <12587500 20000000 32500000 37125000
-					   38400000 54000000 74250000 96625000
-					   120750000 174250000 266625000 297000000>;
+			rates = /bits/ 64 < 12587500  20000000  32500000  37125000
+					    38400000  54000000  74250000  96625000
+					    99000000 120750000 159875000 174250000
+					   197500000 266625000 297000000>;
 		};
 
 		gpcm_dpu_pll_dp_clk: gpcm_dpu_pll_dp_clk {

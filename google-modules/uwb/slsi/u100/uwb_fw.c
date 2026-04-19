@@ -317,6 +317,7 @@ static int uwb_load_firmware(struct u100_ctx *ctx, struct uwb_firmware *uwb_fw)
 	}
 
 	do {
+		fw = NULL;
 		ret = request_firmware(&fw, uwb_fw->fw_name, &ctx->spi->dev);
 		if (ret) {
 			UWB_DEBUG("Request fw failed and retry it.");
@@ -325,12 +326,13 @@ static int uwb_load_firmware(struct u100_ctx *ctx, struct uwb_firmware *uwb_fw)
 			break;
 		retry_count--;
 	} while (ret && retry_count);
+
 	if (ret) {
-		release_firmware(fw);
 		UWB_ERR("FW_FLASH Request firmware [%s] failed (ret=%d)\n", uwb_fw->fw_name,
 				ret);
 		return ret;
 	}
+
 	uwb_fw->fw = kzalloc(struct_size(uwb_fw->fw, data, fw->size), GFP_KERNEL);
 	if (!uwb_fw->fw) {
 		release_firmware(fw);

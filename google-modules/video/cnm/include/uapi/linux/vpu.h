@@ -21,7 +21,7 @@
 #define _VPU_IOWR(nr, size) _IOWR(VPU_IOC_MAGIC, nr, size)
 
 #define MAX_HEAP_NAME 32
-#define VPU_CRASH_INFO_LEN 100
+#define VPU_CRASH_INFO_LEN 128
 
 enum cpu_cmd_id {
 	VPU_CMD_REG_SZ,

@@ -251,6 +251,9 @@ static const struct vs_dc_urgent_vid_config urgent_vid_config = {
 	.enable = true,
 };
 
+#define DMA_SRAM_MAX_SIZE_KB (256)
+#define SCL_SRAM_MAX_SIZE_KB (144)
+
 static const struct vs_plane_info plane_fe0_info[] = {
 	/* DC_REV_0 */
 	{
@@ -297,6 +300,8 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
+		.scl_sram_max_size_kb = SCL_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer1",
@@ -342,6 +347,8 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
+		.scl_sram_max_size_kb = SCL_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer2",
@@ -381,6 +388,7 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer3",
@@ -421,6 +429,7 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer4",
@@ -461,6 +470,7 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer5",
@@ -501,6 +511,7 @@ static const struct vs_plane_info plane_fe0_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 };
 
@@ -549,6 +560,8 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
+		.scl_sram_max_size_kb = SCL_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer9",
@@ -594,6 +607,8 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
+		.scl_sram_max_size_kb = SCL_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer10",
@@ -633,6 +648,7 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer11",
@@ -673,6 +689,7 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer12",
@@ -713,6 +730,7 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 	{
 		.name = "Layer13",
@@ -752,6 +770,7 @@ static const struct vs_plane_info plane_fe1_info[] = {
 		.test_pattern = 1,
 		.compressed = 1,
 		.data_extend = 1,
+		.dma_sram_max_size_kb = DMA_SRAM_MAX_SIZE_KB,
 	},
 #if IS_ENABLED(CONFIG_VERISILICON_PLANE_RCD)
 	{
@@ -827,7 +846,8 @@ static const struct vs_display_info crtc_be_info[] = {
 		.ccm_non_linear = 1,
 		.ccm_linear = 1,
 		.cgm_lut = 1,
-		.lut_roi = 1,
+		.lut_roi0 = 1,
+		.lut_roi1 = 0,
 		.blur = 1,
 		.sec_roi = 1,
 		.data_mode = 1,
@@ -866,7 +886,8 @@ static const struct vs_display_info crtc_be_info[] = {
 		.ccm_non_linear = 1,
 		.ccm_linear = 1,
 		.cgm_lut = 1,
-		.lut_roi = 0,
+		.lut_roi0 = 0,
+		.lut_roi1 = 0,
 		.blur = 0,
 		.sec_roi = 1,
 		.data_mode = 1,

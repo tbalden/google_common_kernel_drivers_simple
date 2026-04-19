@@ -147,6 +147,7 @@ pixel_stat_sysfs.ko
 pixel_trim.ko
 pl330.ko
 power_controller.ko
+power_keydebug.ko
 regmap-goog-spmi.ko
 rst-cpm.ko
 rt6160-regulator.ko
