@@ -12,6 +12,7 @@
 #include <linux/dma-direction.h>
 #include <linux/dma-mapping.h>
 #include <linux/eventfd.h>
+#include "edgetpu-firmware.h"
 #include <linux/kconfig.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
@@ -50,24 +51,6 @@
 #include "edgetpu-wakelock.h"
 #include "edgetpu-vii-packet.h"
 #include "edgetpu.h"
-
-/*
- * A helper structure for the return value of find_sg_to_sync().
- */
-struct sglist_to_sync {
-	struct scatterlist *sg;
-	int nelems;
-	/*
-	 * The SG that has its length modified by find_sg_to_sync().
-	 * Can be NULL, which means no SG's length was modified.
-	 */
-	struct scatterlist *last_sg;
-	/*
-	 * find_sg_to_sync() will temporarily change the length of @last_sg.
-	 * This is used to restore the length.
-	 */
-	unsigned int orig_length;
-};
 
 /* Param id_type passed to get_group_by_id/get_group_by_id_locked */
 enum id_type {
@@ -186,9 +169,11 @@ static void edgetpu_group_deactivate(struct edgetpu_device_group *group)
 	edgetpu_sw_wdt_dec_active_ref(group->etdev);
 	etdomain = edgetpu_group_domain_locked(group);
 	mutex_lock(&group->vii_lock);
-	if (!list_empty(&group->pending_ikv_resps))
+	if (!list_empty(&group->pending_ikv_resps)) {
 		etdev_warn(group->etdev, "group %u deactivating with pending VII commands",
 			   group->group_id);
+		edgetpu_firmware_log_state(group->etdev);
+	}
 	mutex_unlock(&group->vii_lock);
 	edgetpu_ikv_deactivate_client(group->etdev->etikv, etdomain->pasid);
 	/*
@@ -365,7 +350,7 @@ static void edgetpu_group_clear_responses(struct edgetpu_device_group *group)
 		gcip_fence_array_put_async(cur->out_fence_array);
 		gcip_fence_array_put_async(cur->in_fence_array);
 		gcip_mailbox_cancel_awaiter(cur->awaiter);
-		gcip_mailbox_release_awaiter(cur->awaiter);
+		gcip_mailbox_awaiter_put(cur->awaiter);
 	}
 
 	spin_lock_irqsave(&group->ikv_resp_lock, flags);
@@ -383,7 +368,7 @@ static void edgetpu_group_clear_responses(struct edgetpu_device_group *group)
 		 * Clean-up the mailbox protocol's async response structure.
 		 * This will also free the edgetpu_ikv_response.
 		 */
-		gcip_mailbox_release_awaiter(cur->awaiter);
+		gcip_mailbox_awaiter_put(cur->awaiter);
 	}
 
 	spin_unlock_irqrestore(&group->ikv_resp_lock, flags);
@@ -677,6 +662,7 @@ edgetpu_device_group_create(struct edgetpu_client *client, const struct edgetpu_
 	mutex_init(&group->vii_lock);
 	rwlock_init(&group->events.lock);
 	INIT_LIST_HEAD(&group->dma_fence_list);
+	mutex_init(&group->dma_fence_lock);
 	edgetpu_mapping_init(&group->host_mappings);
 	edgetpu_mapping_init(&group->dmabuf_mappings);
 	group->mbox_attr = *attr;
@@ -698,8 +684,7 @@ edgetpu_device_group_create(struct edgetpu_client *client, const struct edgetpu_
 	/* adds @client as the only member */
 	ret = edgetpu_device_group_add(group, client);
 	if (ret) {
-		etdev_dbg(group->etdev, "%s: group %u add failed ret=%d",
-			  __func__, group->group_id, ret);
+		etdev_err(group->etdev, "group %u add failed: %d", group->group_id, ret);
 		goto error_free_mmu_domain;
 	}
 
@@ -770,8 +755,7 @@ static void edgetpu_host_map_show(struct edgetpu_mapping *map, struct seq_file *
 	if (map->trimmed || !map->gcip_mapping->sgt) {
 		seq_printf(s, "  %pad %lu %s %#llx - %c%c%c%c%c%c\n",
 			   &map->gcip_mapping->device_address, map->gcip_mapping->size,
-			   edgetpu_dma_dir_rw_s(map->gcip_mapping->dir),
-			   map->gcip_mapping->host_address,
+			   edgetpu_dma_dir_rw_s(map->gcip_mapping->dir), map->host_addr,
 			   map_debug_flags & GCIP_MAP_DEBUG_COW ? 'c' : '.',
 			   map_debug_flags & GCIP_MAP_DEBUG_OVRRD_RDDIR ? 'o' : '.',
 			   map_debug_flags & GCIP_MAP_DEBUG_VMA_NF ? 'n' : '.',
@@ -788,7 +772,7 @@ static void edgetpu_host_map_show(struct edgetpu_mapping *map, struct seq_file *
 		seq_printf(s, "  %pad %lu %s %#llx %pap %c%c%c%c%c%c\n", &dma_addr,
 			   DIV_ROUND_UP(sg_dma_len(sg), PAGE_SIZE),
 			   edgetpu_dma_dir_rw_s(map->gcip_mapping->dir),
-			   map->gcip_mapping->host_address + cur_offset, &phys_addr,
+			   map->host_addr + cur_offset, &phys_addr,
 			   map_debug_flags & GCIP_MAP_DEBUG_COW ? 'c' : '.',
 			   map_debug_flags & GCIP_MAP_DEBUG_OVRRD_RDDIR ? 'o' : '.',
 			   map_debug_flags & GCIP_MAP_DEBUG_VMA_NF ? 'n' : '.',
@@ -811,84 +795,24 @@ size_t edgetpu_group_mappings_total_size(struct edgetpu_device_group *group, boo
 }
 
 /*
- * Finds the scatterlist covering range [start, end).
- *
- * The found SG and number of elements will be stored in @sglist.
- *
- * To ensure the returned SG list strictly locates in range [start, end), the
- * last SG's length is shrunk. Therefore caller must call
- * restore_sg_after_sync(@sglist) after the DMA sync is performed.
- *
- * @sglist->nelems == 0 means the target range exceeds the whole SG table.
- */
-static void find_sg_to_sync(const struct sg_table *sgt, u64 start, u64 end,
-			    struct sglist_to_sync *sglist)
-{
-	struct scatterlist *sg;
-	size_t cur_offset = 0;
-	int i;
-
-	sglist->sg = NULL;
-	sglist->nelems = 0;
-	sglist->last_sg = NULL;
-	if (unlikely(end == 0))
-		return;
-	for_each_sg(sgt->sgl, sg, sgt->orig_nents, i) {
-		if (cur_offset <= start && start < cur_offset + sg->length)
-			sglist->sg = sg;
-		if (sglist->sg)
-			++sglist->nelems;
-		cur_offset += sg->length;
-		if (end <= cur_offset) {
-			sglist->last_sg = sg;
-			sglist->orig_length = sg->length;
-			/*
-			 * To let the returned SG list have exact length as
-			 * [start, end).
-			 */
-			sg->length -= cur_offset - end;
-			break;
-		}
-	}
-}
-
-static void restore_sg_after_sync(struct sglist_to_sync *sglist)
-{
-	if (!sglist->last_sg)
-		return;
-	sglist->last_sg->length = sglist->orig_length;
-}
-
-/*
  * Performs DMA sync of the mapping with region [offset, offset + size).
  *
  * Caller holds mapping's lock, to prevent @map being modified / removed by
  * other processes.
  */
 static int group_sync_host_map(struct edgetpu_device_group *group, struct edgetpu_mapping *map,
-			       u64 offset, u64 size, enum dma_data_direction dir, bool for_cpu)
+			       u64 offset, u64 size, bool for_cpu)
 {
-	const u64 end = offset + size;
-	typeof(dma_sync_sg_for_cpu) *sync =
-		for_cpu ? dma_sync_sg_for_cpu : dma_sync_sg_for_device;
-	struct sg_table *sgt;
-	struct sglist_to_sync sglist;
-
 	if (map->trimmed) {
 		etdev_err(group->etdev, "sync requested for trimmed buffer");
 		return -EINVAL;
 	}
-	sgt = map->gcip_mapping->sgt;
-	/* In the future buffers can have no sgt even when not "trimmed"; check this now. */
-	if (!sgt)
-		return 0;
-	find_sg_to_sync(sgt, offset, end, &sglist);
-	if (!sglist.nelems)
-		return -EINVAL;
 
-	sync(group->etdev->dev, sglist.sg, sglist.nelems, dir);
-	restore_sg_after_sync(&sglist);
-	return 0;
+	/* In the future buffers can have no sgt even when not "trimmed"; check this now. */
+	if (!map->gcip_mapping->sgt)
+		return 0;
+
+	return gcip_iommu_mapping_sync(map->gcip_mapping, group->etdev->dev, offset, size, for_cpu);
 }
 
 int edgetpu_group_remap_buffers(struct edgetpu_client *client)
@@ -985,6 +909,7 @@ static struct edgetpu_mapping *buffer_mapping_create(struct edgetpu_device_group
 		goto err_ret;
 	}
 
+	map->host_addr = host_addr;
 	map->priv = edgetpu_device_group_get(group);
 	map->release = buffer_mapping_destroy;
 	map->show = edgetpu_host_map_show;
@@ -1063,8 +988,8 @@ int edgetpu_device_group_unmap(struct edgetpu_device_group *group, tpu_addr_t tp
 	map = edgetpu_mapping_find_locked(&group->host_mappings, tpu_addr, limited);
 	if (!map) {
 		edgetpu_mapping_unlock(&group->host_mappings);
-		etdev_dbg(group->etdev, "%s: mapping not found for workload %u: %pad", __func__,
-			  group->group_id, &tpu_addr);
+		etdev_err(group->etdev, "mapping not found for group %u: %pad", group->group_id,
+			  &tpu_addr);
 		return -EINVAL;
 	}
 
@@ -1111,7 +1036,7 @@ int edgetpu_device_group_sync_buffer(struct edgetpu_device_group *group,
 		goto unlock_mapping;
 	}
 
-	ret = group_sync_host_map(group, map, arg->offset, arg->size, dir,
+	ret = group_sync_host_map(group, map, arg->offset, arg->size,
 				  arg->flags & EDGETPU_SYNC_FOR_CPU);
 unlock_mapping:
 	edgetpu_mapping_unlock(&group->host_mappings);
@@ -1244,7 +1169,7 @@ int edgetpu_device_group_get_vii_response(struct edgetpu_device_group *group, vo
 
 	memcpy(resp, ikv_resp->resp, edgetpu_vii_response_packet_size());
 	/* This will also free `ikv_resp` */
-	gcip_mailbox_release_awaiter(ikv_resp->awaiter);
+	gcip_mailbox_awaiter_put(ikv_resp->awaiter);
 
 unlock_group:
 	mutex_unlock(&group->vii_lock);
@@ -1559,11 +1484,8 @@ int edgetpu_device_group_handle_fault(struct edgetpu_dev *etdev, u64 iova, uint 
 	struct edgetpu_mapping *map;
 
 	group = get_group_by_pasid(etdev, pasid);
-	if (!group) {
-		etdev_dbg(etdev, "fault iova=%#llx pasid=%u write=%u group not found\n",
-			  iova, pasid, write);
+	if (!group)
 		return -EIO;
-	}
 
 	edgetpu_mapping_lock(&group->host_mappings);
 	map = edgetpu_mapping_find_iova_range(&group->host_mappings, iova);
@@ -1572,9 +1494,6 @@ int edgetpu_device_group_handle_fault(struct edgetpu_dev *etdev, u64 iova, uint 
 			etdev_warn(etdev,
 				   "fault group=%u iova=%#llx pasid=%u write=%u not mapped\n",
 				   group->group_id, iova, pasid, write);
-		else
-			etdev_dbg(etdev, "fault group=%u iova=%#llx pasid=%u write=%u not mapped\n",
-				  group->group_id, iova, pasid, write);
 		edgetpu_mapping_unlock(&group->host_mappings);
 		edgetpu_device_group_put(group);
 		return -EIO;

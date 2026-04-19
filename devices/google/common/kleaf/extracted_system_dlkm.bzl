@@ -5,7 +5,7 @@ Extract GKI modules from GKI system_dlkm archive.
 """
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_toolchain")
+load("@kleaf//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_toolchain")
 
 def _extracted_system_dlkm(ctx):
     hermetic_tools = hermetic_toolchain.get(ctx)

@@ -4,7 +4,7 @@
 Create a file by concatenating source files and appending contents.
 """
 
-load("//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_toolchain")
+load("@kleaf//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_toolchain")
 
 def _create_file_impl(ctx):
     hermetic_tools = hermetic_toolchain.get(ctx)

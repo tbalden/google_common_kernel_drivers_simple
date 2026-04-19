@@ -10,7 +10,6 @@
 
 #include "vpu_priv.h"
 
-struct vpu_intr_queue *vpu_get_intr_queue(struct vpu_core *core, uint32_t inst_idx);
 void vpu_update_system_state(struct vpu_core *core);
 
 #endif

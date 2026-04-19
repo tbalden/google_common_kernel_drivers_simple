@@ -323,6 +323,11 @@ struct dw_mipi_dsi2h {
 	bool enabled;
 	enum dsi2h_host_state state;
 
+	/* should dsi be fully powered off during panel self refresh, otherwise only enter ulps */
+	bool disable_psr_ulps;
+	/* indicates runtime pm was left on while entering psr, need to deal with extra vote */
+	bool psr_rpm_on;
+
 	struct phy *phy;
 	/* this device has driver data vs_mipi_dsi2h */
 	struct device *dev;

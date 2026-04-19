@@ -61,7 +61,9 @@
 #define HS_TX_12_THSEXIT_DCO_REG	23
 
 #define PS_IN_US	1000000
+#ifndef MAX
 #define MAX(a, b)	((a) > (b) ? (a) : (b))
+#endif
 #define DIV_ROUND DIV_ROUND_CLOSEST
 
 static int debug_log_calc;

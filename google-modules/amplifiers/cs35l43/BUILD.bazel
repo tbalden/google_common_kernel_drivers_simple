@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 load(
-    "//build/kernel/kleaf:kernel.bzl",
+    "@kleaf//build/kernel/kleaf:kernel.bzl",
     "ddk_headers",
     "ddk_module",
     "kernel_module_group",

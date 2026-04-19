@@ -403,6 +403,10 @@ struct _PVRSRV_DEVICE_CONFIG_
 	PVRSRV_DVFS sDVFS;
 #endif
 
+#if defined(SUPPORT_PDVFS)
+	IMG_BOOL bPDVFSComHost;
+#endif
+
 #if defined(SUPPORT_ALT_REGBASE)
 	IMG_DEV_PHYADDR sAltRegsGpuPBase;
 #endif

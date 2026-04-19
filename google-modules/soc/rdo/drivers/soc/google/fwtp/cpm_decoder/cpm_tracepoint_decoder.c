@@ -6,6 +6,7 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#define CREATE_TRACE_POINTS
 #include "cpm_decoder/cpm_trace.h"
 #include "cpm_tracepoint_decoder.h"
 #include "soc/google/google_timestamp_sync.h"
@@ -15,11 +16,18 @@
 static DEFINE_MUTEX(client_list_mutex);
 bool clients_initialized;
 bool clients_id_list_initialized;
+static const char *cpm_tracepoint_string_table;
+static int cpm_tracepoint_string_table_size;
+static int cpm_tracepoint_string_table_offset;
+static cpm_tracepoint_decoder_enable_cb_t cpm_tracepoint_decoder_enable_cb;
+static void *cpm_tracepoint_decoder_enable_cb_ctx;
 
 #define MAX_CLIENTS 25
 struct client_tracepoint *all_clients[] = {
 	&thermal_tj_pid_curr_state,
 	&domain_freq_tp,
+	&thermal_tj_sensors,
+	&freq_agg_update_tp,
 };
 static_assert(ARRAY_SIZE(all_clients) <= MAX_CLIENTS);
 
@@ -108,7 +116,7 @@ enum tracepoint_handle cpm_tracepoint_decode(u32 tp_id, u32 payload,
  *
  * Return: 0 on success, or a negative error code (e.g., -ENOMEM) on failure.
  */
-static int initialize_clients_id_list(char *buf, int buf_size,
+static int initialize_clients_id_list(const char *buf, int buf_size,
 				      int cpm_table_offset)
 {
 	int32_t clients_tp_string_size[MAX_CLIENTS];
@@ -161,7 +169,7 @@ static int initialize_clients_id_list(char *buf, int buf_size,
  * iterates through the list and calls the init() function for each enabled
  * client. This function is typically called when CPM tracing is activated.
  */
-void client_init_callbacks(char *buf, int buf_size, int cpm_table_offset)
+void client_init_callbacks(const char *buf, int buf_size, int cpm_table_offset)
 {
 	int ret = 0;
 
@@ -230,10 +238,81 @@ void initialize_cpm_tracepoint_decoder(void)
 {
 	clients_id_list_initialized = false;
 	clients_initialized = false;
+	cpm_tracepoint_string_table = NULL;
+	cpm_tracepoint_string_table_size = 0;
+	cpm_tracepoint_string_table_offset = 0;
+	cpm_tracepoint_decoder_enable_cb = NULL;
+	cpm_tracepoint_decoder_enable_cb_ctx = NULL;
+}
+
+/**
+ * cpm_tracepoint_decoder_set_string_table - Sets the string table.
+ * @string_table: CPM tracepoint string table.
+ * @string_table_size: Size of string table.
+ * @string_table_offset: Offset of start of string table.
+ *
+ * Sets the string table to use for decoding CPM tracepoints.
+ */
+void cpm_tracepoint_decoder_set_string_table(const char *string_table,
+					     int string_table_size,
+					     int string_table_offset)
+{
+	cpm_tracepoint_string_table = string_table;
+	cpm_tracepoint_string_table_size = string_table_size;
+	cpm_tracepoint_string_table_offset = string_table_offset;
+}
+
+/**
+ * cpm_tracepoint_decoder_set_enable_cb - Set the tracepoint enable callback.
+ * @enable_cb: Callback function to enable or disable CPM tracepoints.
+ * @cb_ctx: Context for callback function.
+ *
+ * Sets the callback to invoke to enable or disable CPM tracepoints.
+ */
+void cpm_tracepoint_decoder_set_enable_cb(cpm_tracepoint_decoder_enable_cb_t
+						  enable_cb,
+					  void *cb_ctx)
+{
+	cpm_tracepoint_decoder_enable_cb = enable_cb;
+	cpm_tracepoint_decoder_enable_cb_ctx = cb_ctx;
 }
 
 void add_cpm_param_trace(char *param_name, unsigned int value,
 			 unsigned long timestamp)
 {
 	trace_param_set_value_cpm(param_name, value, timestamp);
+}
+
+/**
+ * param_set_value_cpm_enable - Handles ftrace "param_set_value_cpm" enabled.
+ */
+int param_set_value_cpm_enable(void)
+{
+	int ret = 0;
+
+	/* Initialize tracepoint decoder clients. */
+	client_init_callbacks(cpm_tracepoint_string_table,
+			      cpm_tracepoint_string_table_size,
+			      cpm_tracepoint_string_table_offset);
+
+	/* Enable CPM tracepoints. */
+	if (cpm_tracepoint_decoder_enable_cb)
+		ret = (*cpm_tracepoint_decoder_enable_cb)(
+			cpm_tracepoint_decoder_enable_cb_ctx, true);
+
+	return ret;
+}
+
+/**
+ * param_set_value_cpm_disable - Handles ftrace "param_set_value_cpm" disabled.
+ */
+void param_set_value_cpm_disable(void)
+{
+	/* Disable CPM tracepoints. */
+	if (cpm_tracepoint_decoder_enable_cb)
+		(*cpm_tracepoint_decoder_enable_cb)(
+			cpm_tracepoint_decoder_enable_cb_ctx, false);
+
+	/* Deinitialize tracepoint decoder clients. */
+	client_exit_callbacks();
 }

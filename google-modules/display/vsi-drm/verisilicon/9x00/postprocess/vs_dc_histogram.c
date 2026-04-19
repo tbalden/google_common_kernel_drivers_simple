@@ -197,6 +197,23 @@ bool vs_dc_hist_chans_update(struct dc_hw *hw, u8 display_id,
 }
 
 /*
+ * @brief Update histogram rgb configuration
+ */
+bool vs_dc_hist_rgb_update(struct dc_hw *hw, u8 display_id, const struct vs_crtc_state *crtc_state)
+{
+	struct dc_hw_display *display = &hw->display[display_id];
+	struct dc_hw_hist_rgb *hw_hist_rgb = &display->hw_hist_rgb;
+
+	if (!display->info || !display->info->rgb_hist)
+		return false;
+
+	hw_hist_rgb->dirty = crtc_state->hist_rgb_enable != hw_hist_rgb->enable;
+	hw_hist_rgb->enable = crtc_state->hist_rgb_enable;
+
+	return true;
+}
+
+/*
  * @brief Free gem pool node, set stage_gem_node to gem_node
  */
 static void stage_gem_node_reset(struct vs_gem_pool *gem_pool,
@@ -380,14 +397,18 @@ bool vs_dc_hist_chans_commit(struct dc_hw *hw, u8 display_id)
 		if (!hw_hist_chan->dirty)
 			continue;
 
+		// TODO(b/458277944): More fine-grained DPU secure control.
+		mutex_lock(&hw->secure_lock);
 		if (!bitmap_empty(hw->secured_layers_mask, HW_PLANE_NUM)) {
 			dev_err_ratelimited(
 				hw->dev,
 				"Active secure layers. Skipping histogram commit on idx: %d", i);
+			mutex_unlock(&hw->secure_lock);
 			return false;
 		}
 
 		vs_dc_hist_chan_commit(hw, display_id, display, i);
+		mutex_unlock(&hw->secure_lock);
 	}
 
 	return true;
@@ -427,6 +448,21 @@ static bool vs_dc_hist_chans_flip_done(struct dc_hw *hw, u8 display_id)
 	return true;
 }
 
+static bool vs_dc_hist_rgb_flip_done(struct dc_hw *hw, u8 display_id)
+{
+	struct dc_hw_display *display = &hw->display[display_id];
+	struct dc_hw_hist_rgb *hw_hist_rgb = &display->hw_hist_rgb;
+
+	if (!display->info || !display->info->rgb_hist)
+		return false;
+
+	/* clear changes flag */
+	if (hw_hist_rgb->dirty)
+		hw_hist_rgb->dirty = false;
+
+	return true;
+}
+
 /*
  * @brief Capture histogram channel data
  *
@@ -455,11 +491,14 @@ static void vs_dc_hist_chan_collect(struct dc_hw *hw, u8 display_id,
 	gem_pool = &vs_crtc->hist_chan_gem_pool[idx];
 	offset = hist_get_channel_offset(hw_id, idx);
 
+	// TODO(b/458277944): More fine-grained DPU secure control.
+	mutex_lock(&hw->secure_lock);
 	spin_lock_irqsave(&hw->histogram_slock, flags);
 
 	/* check if enabled */
 	if (!hw_hist_chan->enable) {
 		spin_unlock_irqrestore(&hw->histogram_slock, flags);
+		mutex_unlock(&hw->secure_lock);
 		return;
 	}
 
@@ -468,6 +507,7 @@ static void vs_dc_hist_chan_collect(struct dc_hw *hw, u8 display_id,
 			hw->dev, "Active secure layers. Skipping histogram collection on idx: %d",
 			idx);
 		spin_unlock_irqrestore(&hw->histogram_slock, flags);
+		mutex_unlock(&hw->secure_lock);
 		return;
 	}
 
@@ -544,6 +584,7 @@ static void vs_dc_hist_chan_collect(struct dc_hw *hw, u8 display_id,
 		dc_write(hw, read_confirm_addr, config);
 	}
 
+	mutex_unlock(&hw->secure_lock);
 	DPU_ATRACE_END(__func__);
 }
 
@@ -631,7 +672,7 @@ static bool hist_rgb_config_hw(struct dc_hw *hw, u8 hw_id, bool enable, const vo
 		if (hist_rgb_flags & DC_HW_HISTOGRAM_WDMA) {
 			dc_write(hw, DCREG_PANEL0_HIST_RGB_WB_ADDRESS_Address,
 				 lower_32_bits(gem_node->paddr));
-			dc_write(hw, DCREG_PANEL0_HIST_RGB_WB_ADDRESS_Address,
+			dc_write(hw, DCREG_PANEL0_HIST_RGB_WB_HIGH_ADDRESS_Address,
 				 upper_32_bits(gem_node->paddr));
 
 			/* enable wdma. just update variable here: it gets updated later */
@@ -647,21 +688,36 @@ static bool hist_rgb_config_hw(struct dc_hw *hw, u8 hw_id, bool enable, const vo
 	return true;
 }
 
-VS_DC_BOOL_PROPERTY_PROTO(hist_rgb_proto, "HISTOGRAM_RGB",
-			  NULL, NULL, hist_rgb_config_hw);
-
-bool vs_dc_register_hist_rgb_states(struct vs_dc_property_state_group *states,
-				    const struct vs_display_info *display_info)
+/*
+ * @brief Configure histogram rgb
+ *
+ * Function configures hardcoded histogram rgb.
+ * Note, executed only on change (dirty state)
+ */
+bool vs_dc_hist_rgb_commit(struct dc_hw *hw, u8 display_id)
 {
-	if (display_info->rgb_hist)
-		__ERR_CHECK(vs_dc_property_register_state(states, &hist_rgb_proto), on_error);
+	struct dc_hw_display *display = &hw->display[display_id];
+	struct dc_hw_hist_rgb *hw_hist_rgb = &display->hw_hist_rgb;
+
+	/* don't process if unsupported */
+	if (!display->info || !display->info->histogram)
+		return false;
+
+	if (hw_hist_rgb->dirty) {
+		// TODO(b/458277944): More fine-grained DPU secure control.
+		mutex_lock(&hw->secure_lock);
+		if (!bitmap_empty(hw->secured_layers_mask, HW_PLANE_NUM)) {
+			dev_err_ratelimited(hw->dev,
+					    "Active secure layers. Skipping histogram rgb commit");
+			mutex_unlock(&hw->secure_lock);
+			return false;
+		}
+		hist_rgb_config_hw(hw, display->info->id, hw_hist_rgb->enable, NULL);
+		mutex_unlock(&hw->secure_lock);
+	}
 
 	return true;
-
-on_error:
-	return false;
 }
-
 /*
  * @brief Capture histogram rgb data (if required)
  */
@@ -680,11 +736,22 @@ static void vs_dc_hist_rgb_collect(struct dc_hw *hw, u8 display_id,
 	if (!display->info || !display->info->rgb_hist)
 		return;
 
+	// TODO(b/458277944): More fine-grained DPU secure control.
+	mutex_lock(&hw->secure_lock);
 	spin_lock_irqsave(&hw->histogram_slock, flags);
 
 	/* check if enabled */
 	if (!hw_hist_rgb->enable) {
 		spin_unlock_irqrestore(&hw->histogram_slock, flags);
+		mutex_unlock(&hw->secure_lock);
+		return;
+	}
+
+	if (!bitmap_empty(hw->secured_layers_mask, HW_PLANE_NUM)) {
+		dev_err_ratelimited(hw->dev,
+				    "Active secure layers. Skipping histogram rgb collection");
+		spin_unlock_irqrestore(&hw->histogram_slock, flags);
+		mutex_unlock(&hw->secure_lock);
 		return;
 	}
 
@@ -739,7 +806,7 @@ static void vs_dc_hist_rgb_collect(struct dc_hw *hw, u8 display_id,
 		if (hist_rgb_flags & DC_HW_HISTOGRAM_WDMA) {
 			dc_write(hw, DCREG_PANEL0_HIST_RGB_WB_ADDRESS_Address,
 				 lower_32_bits(gem_node->paddr));
-			dc_write(hw, DCREG_PANEL0_HIST_RGB_WB_ADDRESS_Address,
+			dc_write(hw, DCREG_PANEL0_HIST_RGB_WB_HIGH_ADDRESS_Address,
 				 upper_32_bits(gem_node->paddr));
 		}
 
@@ -762,16 +829,8 @@ static void vs_dc_hist_rgb_collect(struct dc_hw *hw, u8 display_id,
 		dc_write(hw, DCREG_PANEL0_HIST_RED_READ_CONFIRM_Address, confirm);
 	}
 
+	mutex_unlock(&hw->secure_lock);
 	DPU_ATRACE_END(__func__);
-}
-
-/*
- * @brief Capture histogram channels data (if required)
- */
-bool vs_dc_hist_frame_done(struct dc_hw *hw, u8 display_id,
-			   const struct dc_hw_interrupt_status *irq_status)
-{
-	return true;
 }
 
 /*
@@ -793,6 +852,7 @@ bool vs_dc_hist_flip_done(struct dc_hw *hw, u8 display_id)
 	vs_dc_hist_rgb_collect(hw, display_id, NULL);
 
 	vs_dc_hist_chans_flip_done(hw, display_id);
+	vs_dc_hist_rgb_flip_done(hw, display_id);
 
 	return true;
 }

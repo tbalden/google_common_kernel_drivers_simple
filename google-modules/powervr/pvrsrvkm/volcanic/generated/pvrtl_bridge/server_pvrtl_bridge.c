@@ -53,9 +53,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_debug.h"
 #include "connection_server.h"
 #include "pvr_bridge.h"
-#if defined(SUPPORT_RGX)
-#include "rgx_bridge.h"
-#endif
 #include "srvcore.h"
 #include "handle.h"
 
@@ -75,7 +72,7 @@ static PVRSRV_ERROR _TLOpenStreampsSDIntRelease(void *pvData)
 static_assert(PVRSRVTL_MAX_STREAM_NAME_SIZE <= IMG_UINT32_MAX,
 	      "PVRSRVTL_MAX_STREAM_NAME_SIZE must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeTLOpenStream(IMG_UINT32 ui32DispatchTableEntry,
 			 IMG_UINT8 * psTLOpenStreamIN_UI8,
 			 IMG_UINT8 * psTLOpenStreamOUT_UI8, CONNECTION_DATA * psConnection)
@@ -125,7 +122,7 @@ PVRSRVBridgeTLOpenStream(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -235,13 +232,25 @@ TLOpenStream_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_TLOPENSTREAM, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeTLCloseStream(IMG_UINT32 ui32DispatchTableEntry,
 			  IMG_UINT8 * psTLCloseStreamIN_UI8,
 			  IMG_UINT8 * psTLCloseStreamOUT_UI8, CONNECTION_DATA * psConnection)
@@ -273,10 +282,10 @@ PVRSRVBridgeTLCloseStream(IMG_UINT32 ui32DispatchTableEntry,
 
 TLCloseStream_exit:
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_TLCLOSESTREAM, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeTLAcquireData(IMG_UINT32 ui32DispatchTableEntry,
 			  IMG_UINT8 * psTLAcquireDataIN_UI8,
 			  IMG_UINT8 * psTLAcquireDataOUT_UI8, CONNECTION_DATA * psConnection)
@@ -324,10 +333,10 @@ TLAcquireData_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_TLACQUIREDATA, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeTLReleaseData(IMG_UINT32 ui32DispatchTableEntry,
 			  IMG_UINT8 * psTLReleaseDataIN_UI8,
 			  IMG_UINT8 * psTLReleaseDataOUT_UI8, CONNECTION_DATA * psConnection)
@@ -375,7 +384,7 @@ TLReleaseData_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_TLRELEASEDATA, eError);
 }
 
 static_assert(PVRSRVTL_MAX_STREAM_NAME_SIZE <= IMG_UINT32_MAX,
@@ -383,7 +392,7 @@ static_assert(PVRSRVTL_MAX_STREAM_NAME_SIZE <= IMG_UINT32_MAX,
 static_assert(PVRSRVTL_MAX_DISCOVERABLE_STREAMS_BUFFER <= IMG_UINT32_MAX,
 	      "PVRSRVTL_MAX_DISCOVERABLE_STREAMS_BUFFER must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeTLDiscoverStreams(IMG_UINT32 ui32DispatchTableEntry,
 			      IMG_UINT8 * psTLDiscoverStreamsIN_UI8,
 			      IMG_UINT8 * psTLDiscoverStreamsOUT_UI8,
@@ -442,7 +451,7 @@ PVRSRVBridgeTLDiscoverStreams(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -510,13 +519,25 @@ TLDiscoverStreams_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_TLDISCOVERSTREAMS, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeTLReserveStream(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psTLReserveStreamIN_UI8,
 			    IMG_UINT8 * psTLReserveStreamOUT_UI8, CONNECTION_DATA * psConnection)
@@ -566,10 +587,10 @@ TLReserveStream_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_TLRESERVESTREAM, eError);
 }
 
-static IMG_INT
+static size_t
 PVRSRVBridgeTLCommitStream(IMG_UINT32 ui32DispatchTableEntry,
 			   IMG_UINT8 * psTLCommitStreamIN_UI8,
 			   IMG_UINT8 * psTLCommitStreamOUT_UI8, CONNECTION_DATA * psConnection)
@@ -615,13 +636,13 @@ TLCommitStream_exit:
 	/* Release now we have cleaned up look up handles. */
 	UnlockHandle(psConnection->psHandleBase);
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_TLCOMMITSTREAM, eError);
 }
 
 static_assert(PVRSRVTL_MAX_PACKET_SIZE <= IMG_UINT32_MAX,
 	      "PVRSRVTL_MAX_PACKET_SIZE must not be larger than IMG_UINT32_MAX");
 
-static IMG_INT
+static size_t
 PVRSRVBridgeTLWriteData(IMG_UINT32 ui32DispatchTableEntry,
 			IMG_UINT8 * psTLWriteDataIN_UI8,
 			IMG_UINT8 * psTLWriteDataOUT_UI8, CONNECTION_DATA * psConnection)
@@ -674,7 +695,7 @@ PVRSRVBridgeTLWriteData(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		else
 		{
-			pArrayArgsBuffer = OSAllocMemNoStats(ui32BufferSize);
+			pArrayArgsBuffer = OSAllocZMemNoStats(ui32BufferSize);
 
 			if (!pArrayArgsBuffer)
 			{
@@ -742,10 +763,22 @@ TLWriteData_exit:
 		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
 #endif /* PVRSRV_NEED_PVR_ASSERT */
 
-	if (!bHaveEnoughSpace && pArrayArgsBuffer)
-		OSFreeMemNoStats(pArrayArgsBuffer);
+	if (pArrayArgsBuffer != NULL)
+	{
+		if (bHaveEnoughSpace)
+		{
+			/* Clear buffer to prevent next bridge call from using stale data.
+			 * This could for example happen if the call errors before initialising
+			 * all of the data. */
+			OSCachedMemSet(pArrayArgsBuffer, 0, ui32BufferSize);
+		}
+		else
+		{
+			OSFreeMemNoStats(pArrayArgsBuffer);
+		}
+	}
 
-	return 0;
+	return offsetof(PVRSRV_BRIDGE_OUT_TLWRITEDATA, eError);
 }
 
 /* ***************************************************************************

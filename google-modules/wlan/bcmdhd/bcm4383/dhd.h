@@ -2047,7 +2047,6 @@ typedef struct dhd_pub {
 	bool ring_attached;
 	atomic_t edl_attached;
 #ifdef DHD_PCIE_RUNTIMEPM
-	bool rx_pending_due_to_rpm;
 #ifdef RPM_FAST_TRIGGER
 	bool rpm_fast_trigger;
 	bool rpm_fast_candidate;

@@ -179,6 +179,7 @@ struct modem_data {
 	u32 offset_clk_table_offset;
 	u32 offset_buff_desc_offset;
 	u32 offset_capability_offset;
+	u32 offset_boot_indicator;
 
 	/* ctrl messages between cp and ap */
 	u32 ap2cp_msg[2];

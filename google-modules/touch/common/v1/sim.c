@@ -6,6 +6,7 @@
  */
 
 #include <linux/delay.h>
+#include <linux/poll.h>
 
 #include "uapi/input/touch_offload.h"
 #include "sim.h"
@@ -17,24 +18,25 @@ static ssize_t touch_sim_write(struct file *file, const char __user *buf, size_t
 			       loff_t *offset);
 static int touch_sim_open(struct inode *inode, struct file *file);
 static int touch_sim_release(struct inode *inode, struct file *file);
+static unsigned int touch_sim_poll(struct file *file, poll_table *wait);
+static ssize_t touch_sim_read(struct file *file, char __user *user_buf,
+			      size_t count, loff_t *offset);
+static ssize_t touch_sim_pop_data(struct touch_sim *sim, ktime_t timestamp);
 
 const struct file_operations touch_sim_fops = {
+	.read = touch_sim_read,
 	.write = touch_sim_write,
 	.open = touch_sim_open,
 	.release = touch_sim_release,
+	.poll = touch_sim_poll,
 };
 
 static void touch_sim_irq_thread_fn(struct touch_sim *sim)
 {
-	struct TouchOffloadFrameHeader *header = (struct TouchOffloadFrameHeader *)sim->temp_frame;
+	struct TouchOffloadFrameHeader *header = sim->temp_frame_header;
 
 	pr_debug("frame_size: %u, index: %llu, timestamp: %llu", header->frame_size, header->index,
 		 header->timestamp);
-
-	if (sim->pop_data_cb == NULL) {
-		pr_err("Invalid pop data callback function");
-		return;
-	}
 
 	ktime_t frame_time = ns_to_ktime(header->timestamp);
 
@@ -63,15 +65,18 @@ static void touch_sim_irq_thread_fn(struct touch_sim *sim)
 			usleep_range(ktime_to_us(sleep_time), ktime_to_us(sleep_time) + 1);
 		}
 
-		ret = sim->pop_data_cb(sim->private_data, sim->temp_frame, sim->frame_size,
-				       target_time);
-		if (ret == -EBUSY)
-			continue;
+		ret = touch_sim_pop_data(sim, target_time);
+		if (ret == -EBUSY) {
+			// TODO: twoshay busy, need change to error status
+			pr_warn("touch_sim_pop_data busy, frame drop");
+			break;
+		}
 
 		if (ret == 0) {
 			now = ktime_get();
 			sleep_time = ktime_sub(target_time, now);
 			pr_debug("frame is late %lld ns", -ktime_to_ns(sleep_time));
+			atomic_inc(&sim->reported_frame_count);
 			break;
 		}
 	}
@@ -81,7 +86,7 @@ static int touch_sim_thread_func(void *sim_self)
 {
 	struct touch_sim *sim = sim_self;
 	u32 frame_size;
-	int ret;
+	unsigned int ret;
 
 	while (!kthread_should_stop()) {
 		if (kfifo_is_empty(&sim->fifo)) {
@@ -103,19 +108,42 @@ static int touch_sim_thread_func(void *sim_self)
 			continue;
 		}
 
-		ret = kfifo_out(&sim->fifo, sim->temp_frame, frame_size);
-		if (ret != (int)frame_size) {
+		ret = kfifo_out_peek(&sim->fifo, sim->temp_frame_header,
+				     sizeof(struct TouchOffloadFrameHeader));
+		if (ret != sizeof(struct TouchOffloadFrameHeader)) {
 			pr_warn("fifo out faile");
 			usleep_range(100, 110);
 			continue;
 		}
 		touch_sim_irq_thread_fn(sim);
+
+		wake_up_interruptible(&sim->event_wait_queue);
 	}
 
 	return 0;
 }
 
-static ssize_t touch_sim_push_data(struct touch_sim *sim, u8 *buf, size_t count)
+static ssize_t touch_sim_pop_data(struct touch_sim *sim, ktime_t timestamp)
+{
+	u32 ret = kfifo_out(&sim->fifo, sim->temp_frame, sim->frame_size);
+
+	if (ret != sim->frame_size) {
+		// TODO: change to simluator status error
+		pr_err("fifo out faile %u, %u", ret, sim->frame_size);
+		return 0;
+	}
+
+	if (sim->pop_data_cb == NULL) {
+		pr_err("Invalid pop data callback function");
+		return 0;
+	}
+
+	return sim->pop_data_cb(sim->private_data, sim->temp_frame,
+				sim->frame_size, timestamp);
+}
+
+static ssize_t touch_sim_push_data(struct touch_sim *sim, struct file *file,
+				   u8 *buf, size_t count)
 {
 	ssize_t handle_count = 0;
 
@@ -123,8 +151,16 @@ static ssize_t touch_sim_push_data(struct touch_sim *sim, u8 *buf, size_t count)
 		return -EINVAL;
 
 	while (handle_count < count) {
-		while (kfifo_is_full(&sim->fifo))
-			usleep_range(100, 110);
+		if (file->f_flags & O_NONBLOCK) {
+			if (kfifo_is_full(&sim->fifo))
+				return -EAGAIN;
+		} else {
+			if (wait_event_interruptible(
+				    sim->event_wait_queue,
+				    !kfifo_is_full(&sim->fifo))) {
+				return -ERESTARTSYS;
+			}
+		}
 
 		handle_count += kfifo_in(&sim->fifo, buf + handle_count, count - handle_count);
 	}
@@ -133,22 +169,13 @@ static ssize_t touch_sim_push_data(struct touch_sim *sim, u8 *buf, size_t count)
 
 static bool touch_sim_is_ready(struct touch_sim *sim)
 {
-	if (sim == NULL || !kfifo_initialized(&sim->fifo) || sim->temp_frame == NULL ||
+	if (sim == NULL || !kfifo_initialized(&sim->fifo) ||
+	    sim->temp_frame == NULL || sim->temp_frame_header == NULL ||
 	    sim->sw_thread == NULL) {
 		return false;
 	}
 
 	return true;
-}
-
-static int touch_sim_get_frame_size(u8 *buf, size_t count, u32 *frame_size)
-{
-	if (buf == NULL || count < 4 || frame_size == NULL)
-		return -EINVAL;
-
-	memcpy(frame_size, buf, sizeof(u32));
-	pr_info("%s: %u", __func__, *frame_size);
-	return 0;
 }
 
 static int touch_sim_start(struct touch_sim *sim, u32 frame_size)
@@ -169,9 +196,15 @@ static int touch_sim_start(struct touch_sim *sim, u32 frame_size)
 	if (ret != 0)
 		return -ENOMEM;
 
+	sim->temp_frame_header =
+		kzalloc(sizeof(struct TouchOffloadFrameHeader), GFP_KERNEL);
+	if (sim->temp_frame_header == NULL)
+		return -ENOMEM;
+
 	sim->temp_frame = kzalloc(frame_size, GFP_KERNEL);
 	if (sim->temp_frame == NULL)
 		return -ENOMEM;
+
 	sim->frame_size = frame_size;
 
 	sim->sw_thread = kthread_run(touch_sim_thread_func, sim, "touch_sim_thread");
@@ -198,12 +231,53 @@ void touch_sim_stop(struct touch_sim *sim)
 		sim->sw_thread = NULL;
 	}
 
+	if (sim->temp_frame_header != NULL) {
+		kfree(sim->temp_frame_header);
+		sim->temp_frame_header = NULL;
+	}
+
 	if (sim->temp_frame != NULL) {
 		kfree(sim->temp_frame);
 		sim->temp_frame = NULL;
 	}
 
 	kfifo_free(&sim->fifo);
+}
+
+static ssize_t touch_sim_read(struct file *file, char __user *user_buf,
+			      size_t count, loff_t *offset)
+{
+	u32 reported_frame_count = 0;
+
+	if (count < sizeof(reported_frame_count)) {
+		pr_err("Read of touch sim device require dest buffer of size >= %zd",
+		       sizeof(reported_frame_count));
+		return -EINVAL;
+	}
+
+	struct touch_sim *sim = file->private_data;
+
+	reported_frame_count = (u32)atomic_read(&sim->reported_frame_count);
+
+	long ret = copy_to_user(user_buf, &reported_frame_count,
+				sizeof(reported_frame_count));
+	if (ret != 0) {
+		pr_err("copy_to_user(,%zd) failed, ret %ld",
+		       sizeof(reported_frame_count), ret);
+		return -EFAULT;
+	}
+
+	return sizeof(reported_frame_count);
+}
+
+static int touch_sim_get_frame_size(u8 *buf, size_t count, u32 *frame_size)
+{
+	if (buf == NULL || count < 4 || frame_size == NULL)
+		return -EINVAL;
+
+	memcpy(frame_size, buf, sizeof(u32));
+	pr_info("%s: %u", __func__, *frame_size);
+	return 0;
 }
 
 static ssize_t touch_sim_write(struct file *file, const char __user *user_buf, size_t count,
@@ -215,7 +289,8 @@ static ssize_t touch_sim_write(struct file *file, const char __user *user_buf, s
 
 	if (!sim || !sim->temp_page || (count > (PAGE_SIZE << DEFAULT_TEMP_PAGE_ORDER))) {
 		pr_err("No available sim resources or buffer too large(%zd)!", count);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_write;
 	}
 
 	buf = (u8 *)sim->temp_page;
@@ -243,11 +318,11 @@ static ssize_t touch_sim_write(struct file *file, const char __user *user_buf, s
 
 	if (!touch_sim_is_ready(sim)) {
 		pr_warn("is not ready!");
-		ret = -EAGAIN;
+		ret = -EIO;
 		goto err_write;
 	}
 
-	ret = touch_sim_push_data(sim, (u8 *)buf, count);
+	ret = touch_sim_push_data(sim, file, (u8 *)buf, count);
 	pr_debug("%s: write %d bytes(count %zd) at offset %lld ... DONE", __func__, ret, count,
 		 *offset);
 
@@ -262,9 +337,9 @@ static int touch_sim_open(struct inode *inode, struct file *file)
 	struct touch_sim *sim;
 
 	sim = container_of(inode->i_cdev, struct touch_sim, cdev);
-	file->private_data = sim;
 
-	if (sim->pop_data_cb == NULL || sim->private_data == NULL) {
+	if (sim == NULL || sim->pop_data_cb == NULL ||
+	    sim->private_data == NULL) {
 		pr_warn("%s: pop_data_cb function is null.", __func__);
 		return -EINVAL;
 	}
@@ -280,6 +355,9 @@ static int touch_sim_open(struct inode *inode, struct file *file)
 		sim->temp_page = 0;
 	}
 	sim->temp_page = __get_free_pages(GFP_KERNEL, DEFAULT_TEMP_PAGE_ORDER);
+	atomic_set(&sim->reported_frame_count, 0);
+
+	file->private_data = sim;
 	return 0;
 }
 
@@ -298,4 +376,21 @@ static int touch_sim_release(struct inode *inode, struct file *file)
 	pr_info("Device released");
 
 	return 0;
+}
+
+static unsigned int touch_sim_poll(struct file *file, poll_table *wait)
+{
+	struct touch_sim *sim = file->private_data;
+	__poll_t mask = 0;
+
+	poll_wait(file, &sim->event_wait_queue, wait);
+
+	if (!kfifo_is_full(&sim->fifo))
+		mask |= EPOLLOUT | EPOLLWRNORM;
+
+	if (kfifo_is_empty(&sim->fifo) &&
+	    atomic_read(&sim->reported_frame_count) > 0)
+		mask |= EPOLLIN | EPOLLRDNORM;
+
+	return mask;
 }

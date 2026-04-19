@@ -30,6 +30,7 @@
 #include <linux/notifier.h>
 #include <linux/fb.h>
 #include <linux/pm_qos.h>
+#include <linux/pm_runtime.h>
 #include <linux/pm_wakeup.h>
 #include <linux/cpufreq.h>
 #include "gf_spi.h"
@@ -385,6 +386,7 @@ static long gf_ioctl_handler(struct file *filp, unsigned int cmd, unsigned long 
 	gf_nav_event_t nav_event = GF_NAV_NONE;
 #endif
 	int retval = 0;
+	int rpm_res;
 	u8 netlink_route = NETLINK_TEST;
 	struct gf_ioc_chip_info info;
 
@@ -470,7 +472,15 @@ static long gf_ioctl_handler(struct file *filp, unsigned int cmd, unsigned long 
 			pr_debug("doesn't support control clock!\n");
 #endif
 			pm_wakeup_event(&gf_dev->spi->dev, WAKELOCK_HOLD_TIME);
+
+			if (IS_ENABLED(USE_PLATFORM_BUS)) {
+				rpm_res = pm_runtime_resume_and_get(&gf_dev->spi_pinctrl_pdev->dev);
+				if (rpm_res < 0)
+					pr_info("pm_runtime_resume_and_get failed: %d\n", rpm_res);
+			}
+
 			break;
+
 		case GF_IOC_DISABLE_SPI_CLK:
 			pr_debug("%s GF_IOC_DISABLE_SPI_CLK\n", __func__);
 #ifdef AP_CONTROL_CLK
@@ -478,6 +488,9 @@ static long gf_ioctl_handler(struct file *filp, unsigned int cmd, unsigned long 
 #else
 			pr_debug("doesn't support control clock!\n");
 #endif
+			if (IS_ENABLED(USE_PLATFORM_BUS))
+				pm_runtime_put(&gf_dev->spi_pinctrl_pdev->dev);
+
 			pm_relax(&gf_dev->spi->dev);
 			break;
 
@@ -850,6 +863,9 @@ static int gf_remove(struct platform_device *pdev)
 	device_destroy(gf_class, gf_dev->devt);
 	clear_bit(MINOR(gf_dev->devt), minors);
 	mutex_unlock(&gf_spi_lock);
+
+	if (IS_ENABLED(USE_PLATFORM_BUS))
+		put_device(&gf_dev->spi_pinctrl_pdev->dev);
 
 	return 0;
 }

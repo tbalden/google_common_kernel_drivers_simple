@@ -36,6 +36,7 @@ int gs_panel_disable(struct drm_panel *panel)
 	mutex_lock(&ctx->mode_lock); /*TODO(b/267170999): MODE*/
 	gs_panel_disable_normal_feat_locked(ctx);
 	gs_panel_send_cmdset(ctx, ctx->desc->off_cmdset);
+	bitmap_zero(ctx->panel_errors, GS_PANEL_ERR_MAX);
 	mutex_unlock(&ctx->mode_lock); /*TODO(b/267170999): MODE*/
 	PANEL_ATRACE_END(__func__);
 	dev_dbg(ctx->dev, "%s\n", __func__);

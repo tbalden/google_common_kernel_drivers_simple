@@ -2,7 +2,7 @@
 
 # for misc devices that really don't fit anywhere else.
 
-load("//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module", "kernel_module_group")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module", "kernel_module_group")
 
 ddk_headers(
     name = "headers",

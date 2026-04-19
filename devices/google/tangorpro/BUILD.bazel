@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch")
 load("//private/devices/google/common/kleaf:device_build.bzl", "device_build")
 load("//private/devices/google/gs201:constants.bzl", "GS201_DTBS", "GS201_MODULE_OUTS")
 load(":constants.bzl", "TANGORPRO_DTBOS", "TANGORPRO_MODULE_OUTS")

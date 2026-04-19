@@ -99,7 +99,6 @@ static uint32_t index;
 /* factory test */
 #define DISCARD_FRAME_NUMS 6
 #define ABS(x) (((x) >= 0) ? (x) : -(x))
-#define MAX(a, b) ((a > b) ? a : b)
 
 #define GTP_CAP_TEST 1
 #define GTP_DELTA_TEST 2
@@ -1881,25 +1880,25 @@ static int goodix_delta_test(struct goodix_ts_core *cd)
 			if (j - tx >= 0) {
 				temp = ts_test->rawdata[i].data[j - tx];
 				temp = ABS(temp - raw);
-				max_val = MAX(max_val, temp);
+				max_val = max(max_val, temp);
 			}
 			/* calcu delta with bellow node */
 			if (j + tx < data_size) {
 				temp = ts_test->rawdata[i].data[j + tx];
 				temp = ABS(temp - raw);
-				max_val = MAX(max_val, temp);
+				max_val = max(max_val, temp);
 			}
 			/* calcu delta with left node */
 			if (j % tx) {
 				temp = ts_test->rawdata[i].data[j - 1];
 				temp = ABS(temp - raw);
-				max_val = MAX(max_val, temp);
+				max_val = max(max_val, temp);
 			}
 			/* calcu delta with right node */
 			if ((j + 1) % tx) {
 				temp = ts_test->rawdata[i].data[j + 1];
 				temp = ABS(temp - raw);
-				max_val = MAX(max_val, temp);
+				max_val = max(max_val, temp);
 			}
 			temp = max_val * 1000 / raw;
 			ts_test->deltadata[i].data[j] = temp;
@@ -1920,7 +1919,7 @@ static void print_open_test_ng_data(
 	int tx = cd->ic_info.parm.drv_num;
 	int rx = cd->ic_info.parm.sen_num;
 	char *output_buf;
-	int buf_size = (MAX(tx, rx) + 1) * 6;
+	int buf_size = (max(tx, rx) + 1) * 6;
 	u32 self_raw_addr;
 	s16 self_raw_data[MAX_DRV_NUM + MAX_SEN_NUM];
 	int i, j;
@@ -1979,7 +1978,7 @@ static void print_self_compensation(struct goodix_ts_core *cd)
 	int tx = cd->ic_info.parm.drv_num;
 	int rx = cd->ic_info.parm.sen_num;
 	char *output_buf;
-	int buf_size = (MAX(tx, rx) + 1) * 6;
+	int buf_size = (max(tx, rx) + 1) * 6;
 	int cnt;
 	s16 val;
 	int i, j;

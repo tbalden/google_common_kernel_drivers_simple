@@ -29,8 +29,6 @@ raw_spinlock_t vendor_sched_pixel_em_lock;
 EXPORT_SYMBOL_GPL(vendor_sched_pixel_em_lock);
 #endif
 
-extern inline void update_misfit_status(struct task_struct *p, struct rq *rq);
-
 #if IS_ENABLED(CONFIG_USE_VENDOR_GROUP_UTIL)
 extern int ___update_load_sum(u64 now, struct sched_avg *sa,
 			  unsigned long load, unsigned long runnable, int running);
@@ -225,6 +223,23 @@ void set_next_buddy(struct sched_entity *se)
 			return;
 		cfs_rq_of(se)->next = se;
 	}
+}
+
+static void __clear_buddies_next(struct sched_entity *se)
+{
+	for_each_sched_entity(se) {
+		struct cfs_rq *cfs_rq = cfs_rq_of(se);
+		if (cfs_rq->next != se)
+			break;
+
+		cfs_rq->next = NULL;
+	}
+}
+
+static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
+{
+	if (cfs_rq->next == se)
+		__clear_buddies_next(se);
 }
 
 static inline struct task_group *css_tg(struct cgroup_subsys_state *css)
@@ -2136,7 +2151,8 @@ unsigned long map_util_freq_pixel_mod(unsigned long util, unsigned long freq,
 						 * too high and inaccurate. Reduce it by 1 which should be more
 						 * representative value.
 						 */
-						if (TICK_USEC > USEC_PER_MSEC && capacity == SCHED_CAPACITY_SCALE)
+						if (!static_branch_likely(&enable_ptick) &&
+						    TICK_USEC > USEC_PER_MSEC && capacity == SCHED_CAPACITY_SCALE)
 							capacity -= 1;
 
 						if (capacity >= util && efficient)
@@ -2368,14 +2384,17 @@ void rvh_check_preempt_wakeup_pixel_mod(void *data, struct rq *rq, struct task_s
 	if (!entity_is_task(se) || !entity_is_task(pse))
 		return;
 
-	if(!get_preempt_wakeup(task_of(se)) && get_preempt_wakeup(task_of(pse))) {
-		if (!next_buddy_marked)
-			set_next_buddy(pse);
+	/*
+	 * With NEXT_BUDDY enabled, pse could have been set next buddy already,
+	 * so clear it first to keep behavior sync.
+	 */
+	clear_buddies(cfs_rq_of(pse), pse);
 
+	if (!get_preempt_wakeup(task_of(se)) && get_preempt_wakeup(task_of(pse))) {
+		set_next_buddy(pse);
 		*preempt = true;
 		return;
 	}
-
 }
 
 void rvh_util_est_update_pixel_mod(void *data, struct cfs_rq *cfs_rq, struct task_struct *p,
@@ -2597,8 +2616,6 @@ void vh_sched_setscheduler_uclamp_pixel_mod(void *data, struct task_struct *tsk,
 			      sched_auto_uclamp_max[SCHED_AUTO_UCLAMP_MAX_TASK][task_cpu(tsk)],
 			      true);
 	}
-
-	update_misfit_status(tsk, task_rq(tsk));
 }
 
 static inline void uclamp_fork_pixel_mod(struct task_struct *p, struct task_struct *orig)
@@ -2820,7 +2837,7 @@ static struct task_struct *detach_important_task(struct rq *src_rq, int dst_cpu)
 void sched_newidle_balance_pixel_mod(void *data, struct rq *this_rq, struct rq_flags *rf,
 		int *pulled_task, int *done)
 {
-	int cpu;
+	int cpu, num_adpf_tasks;
 	struct rq *src_rq;
 	struct task_struct *p = NULL;
 	struct rq_flags src_rf;
@@ -2861,22 +2878,25 @@ void sched_newidle_balance_pixel_mod(void *data, struct rq *this_rq, struct rq_f
 
 	this_cpu = this_rq->cpu;
 	for_each_cpu(cpu, cpu_active_mask) {
-		int cpu_importnace = READ_ONCE(cpu_rq(cpu)->uclamp[UCLAMP_MIN].value) +
-			READ_ONCE(cpu_rq(cpu)->uclamp[UCLAMP_MAX].value);
-
 		if (cpu == this_cpu)
 			continue;
 
 		src_rq = cpu_rq(cpu);
 		src_vrq = get_vendor_rq_struct(src_rq);
 
+		rq_lock_irqsave(src_rq, &src_rf);
+		update_rq_clock(src_rq);
+
+		num_adpf_tasks = atomic_read(&src_vrq->num_adpf_tasks);
+
 		if (trace_clock_set_rate_enabled()) {
 			char trace_name[32] = {0};
 
 			scnprintf(trace_name, sizeof(trace_name), "lb_adpf_cpu%d", src_rq->cpu);
-			trace_clock_set_rate(trace_name, atomic_read(&src_vrq->num_adpf_tasks),
+			trace_clock_set_rate(trace_name, num_adpf_tasks,
 				raw_smp_processor_id());
 		}
+
 		/*
 		 * Don't bother if no latency sensitive tasks on src_rq or if
 		 * there's only one.
@@ -2894,11 +2914,10 @@ void sched_newidle_balance_pixel_mod(void *data, struct rq *this_rq, struct rq_f
 		 * up path placed the two in the same CPU. We have an avoidance
 		 * strategy for this.
 		 */
-		if (atomic_read(&src_vrq->num_adpf_tasks) <= 1)
+		if (!num_adpf_tasks || num_adpf_tasks + src_rq->rt.rt_nr_running < 2) {
+			rq_unlock_irqrestore(src_rq, &src_rf);
 			continue;
-
-		rq_lock_irqsave(src_rq, &src_rf);
-		update_rq_clock(src_rq);
+		}
 
 		if (src_rq->active_balance) {
 			rq_unlock_irqrestore(src_rq, &src_rf);
@@ -2912,17 +2931,6 @@ void sched_newidle_balance_pixel_mod(void *data, struct rq *this_rq, struct rq_f
 
 		/* src_cpu is just waken up by tasks */
 		if (src_rq->curr == src_rq->idle) {
-			rq_unlock_irqrestore(src_rq, &src_rf);
-			continue;
-		}
-
-		/* we assume rt task will release cpu soon */
-		if (src_rq->curr->prio < MAX_RT_PRIO) {
-			rq_unlock_irqrestore(src_rq, &src_rf);
-			continue;
-		}
-
-		if (cpu_importnace <= DEFAULT_IMPRATANCE_THRESHOLD || !src_rq->cfs.nr_running) {
 			rq_unlock_irqrestore(src_rq, &src_rf);
 			continue;
 		}

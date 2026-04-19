@@ -16640,12 +16640,14 @@ wl_cfg80211_verify_bss(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	*bss = CFG80211_GET_BSS(wiphy, NULL, curbssid,
 		ssid->SSID, ssid->SSID_len);
 	if (*bss) {
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0))
-		/* Update the reference count after use. In case of kernel version >= 4.7
-		* the cfg802_put_bss is called in cfg80211_connect_bss context
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0)) || \
+		(LINUX_VERSION_CODE > KERNEL_VERSION(4, 11, 0))
+		/* For cases where bss is passed onto the connect_result API, the cfg8011
+		 * does PUT operation. For other cases, where cfg80211_connect_done is used,
+		 * do the PUT operation here itself.
 		*/
 		CFG80211_PUT_BSS(wiphy, *bss);
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0) */
+#endif /* KERNEL_VER < (4, 7, 0) || KERNEL_VER > (4,11,0) */
 		ret = true;
 	} else {
 		WL_ERR(("No bss entry for bssid:"MACDBG" ssid_len:%d\n",

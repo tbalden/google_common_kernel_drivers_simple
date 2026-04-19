@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_module")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_module")
 
 checkpatch(
     name = "checkpatch",

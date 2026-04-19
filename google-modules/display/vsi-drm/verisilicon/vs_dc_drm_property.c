@@ -438,8 +438,10 @@ bool vs_dc_check_drm_property(struct vs_dc *dc, u8 hw_id,
 			break;
 		}
 		ret = state->proto->check(&dc->hw, hw_id, data, size, obj_state);
-		if (!ret)
+		if (!ret) {
+			dev_err(dev, "%s checking prop %s fail\n", __func__, state->proto->name);
 			break;
+		}
 	}
 	return ret;
 }

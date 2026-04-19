@@ -6,7 +6,7 @@
 # Generally, it is at
 #   private/device/google/**/BUILD.bazel
 
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_uapi_headers")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_uapi_headers")
 
 package(
     default_visibility = [
@@ -108,6 +108,19 @@ ddk_headers(
         "drivers/usb/typec/tcpm/google",
         "include",
         "include/uapi",
+    ],
+)
+
+ddk_headers(
+    name = "gs_meminfo_headers",
+    hdrs = [
+        "include/soc/google/meminfo.h",
+    ],
+    includes = [
+        "include",
+    ],
+    visibility = [
+        "//private/google-modules/soc/rdo:__subpackages__",
     ],
 )
 

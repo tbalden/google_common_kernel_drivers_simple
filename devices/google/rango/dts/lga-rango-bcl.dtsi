@@ -317,7 +317,7 @@
 					};
 					ch16 {
 						module_id = <AUDIO_MITIGATION_ID>;
-						threshold = <500000>;
+						threshold = <1000000>;
 					};
 				};
 				sub_mitigation {

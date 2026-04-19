@@ -37,6 +37,7 @@
 #include "lga-mba.dtsi"
 #include "lga-otp.dtsi"
 #include "lga-smmu.dtsi"
+#include "lga-smmu-perf.dtsi"
 #include "lga-ap-pmic.dtsi"
 #include "lga-qos-box.dtsi"
 #include "lga-pinctrl.dtsi"
@@ -48,6 +49,7 @@
 #include "lga-dma-heap.dtsi"
 #include "lga-faceauth-dma-heap.dtsi"
 #include "lga-dpm.dtsi"
+#include "lga-wonder.dtsi"
 
 / {
 	compatible = "google,lga";
@@ -250,6 +252,7 @@
 		serial0 = &lsion_cli16_uart;
 		serial1 = &lsioe_cli12_uart;
 		serial2 = &lsioe_cli9_uart;
+		ufs0 = &ufs;
 	};
 
 	// The clock entry is dummmied out for now
@@ -269,11 +272,6 @@
 
 	lsion_cli16_uart: uart@db61000 {
 		status = "okay";
-	};
-
-	psci {
-		compatible = "arm,psci-1.0";
-		method = "smc";
 	};
 
 	osc: oscillator {
@@ -384,169 +382,169 @@
 			};
 
 			channels {
-				ch0 {
+				ch0: channel@0 {
 					rail-name = "buck_1m";
 					channel_enabled;
 				};
 
-				ch1 {
+				ch1: channel@1 {
 					rail-name = "buck_2m";
 					channel_enabled;
 				};
 
-				ch2 {
+				ch2: channel@2 {
 					rail-name = "buck_3m";
 					channel_enabled;
 				};
 
-				ch3 {
+				ch3: channel@3 {
 					rail-name = "buck_4m";
 					channel_enabled;
 				};
 
-				ch4 {
+				ch4: channel@4 {
 					rail-name = "buck_5m";
 					channel_enabled;
 				};
 
-				ch5 {
+				ch5: channel@5 {
 					rail-name = "buck_6m";
 					channel_enabled;
 				};
 
-				ch6 {
+				ch6: channel@6 {
 					rail-name = "buck_7m";
 					channel_enabled;
 				};
 
-				ch7 {
+				ch7: channel@7 {
 					rail-name = "buck_8m";
 					channel_enabled;
 				};
 
-				ch8 {
+				ch8: channel@8 {
 					rail-name = "buck_9m";
 					channel_enabled;
 				};
 
-				ch9 {
+				ch9: channel@9 {
 					rail-name = "buck_10m";
 					channel_enabled;
 				};
 
-				ch10 {
+				ch10: channel@10 {
 					rail-name = "buck_11m";
 					channel_enabled;
 				};
 
-				ch11 {
+				ch11: channel@11 {
 					rail-name = "buck_12m";
 					channel_enabled;
 				};
 
-				ch12 {
+				ch12: channel@12 {
 					rail-name = "VSEN_C1";
 					channel_enabled;
 					external;
 				};
 
-				ch13 {
+				ch13: channel@13 {
 					rail-name = "VSEN_C2";
 					channel_enabled;
 					external;
 				};
 
-				ch14 {
+				ch14: channel@14 {
 					rail-name = "VSEN_C3";
 					channel_enabled;
 					external;
 				};
 
-				ch15 {
+				ch15: channel@15 {
 					rail-name = "VSEN_C4";
 					channel_enabled;
 					external;
 				};
 
-				ch41 {
+				ch41: channel@41 {
 					rail-name = "buck_1s";
 					channel_enabled;
 				};
 
-				ch42 {
+				ch42: channel@42 {
 					rail-name = "buck_2s";
 					channel_enabled;
 				};
 
-				ch43 {
+				ch43: channel@43 {
 					rail-name = "buck_3s";
 					channel_enabled;
 				};
 
-				ch44 {
+				ch44: channel@44 {
 					rail-name = "buck_4s";
 					channel_enabled;
 				};
 
-				ch45 {
+				ch45: channel@45 {
 					rail-name = "buck_5s";
 					channel_enabled;
 				};
 
-				ch46 {
+				ch46: channel@46 {
 					rail-name = "buck_6s";
 					channel_enabled;
 				};
 
-				ch47 {
+				ch47: channel@47 {
 					rail-name = "buck_7s";
 					channel_enabled;
 				};
 
-				ch48 {
+				ch48: channel@48 {
 					rail-name = "buck_8s";
 					channel_enabled;
 				};
 
-				ch49 {
+				ch49: channel@49 {
 					rail-name = "buck_9s";
 					channel_enabled;
 				};
 
-				ch50 {
+				ch50: channel@50 {
 					rail-name = "buck_10s";
 					channel_enabled;
 				};
 
-				ch51 {
+				ch51: channel@51 {
 					rail-name = "buck_11s";
 					channel_enabled;
 				};
 
-				ch52 {
+				ch52: channel@52 {
 					rail-name = "buck_12s";
 					channel_enabled;
 				};
 
-				ch53 {
+				ch53: channel@53 {
 					rail-name = "VSEN_C5";
 					channel_enabled;
 					external;
 				};
 
-				ch54 {
+				ch54: channel@54 {
 					rail-name = "VSEN_C6";
 					channel_enabled;
 					external;
 				};
 
-				ch55 {
+				ch55: channel@55 {
 					rail-name = "VSEN_C7";
 					channel_enabled;
 					external;
 				};
 
-				ch56 {
+				ch56: channel@56 {
 					rail-name = "VSEN_C8";
 					channel_enabled;
 					external;
@@ -667,6 +665,7 @@
 		reg-names = "apc_wdt_sub_reason";
 		panic-action = <GO_DEFAULT_ID>;
 		wdt-handle = <&wdt1>;
+		ufs-handle = <&ufs>;
 	};
 
 	gvdu: gvdu {
@@ -1324,6 +1323,8 @@
 		linux,pci-domain = <0>;
 
 		google,allow-suspend-in-linkup;
+
+		additional-parent-domain = <&CPU_TOP_CL>;
 	};
 
 	pcie1: pcie@3c500000 {
@@ -1373,6 +1374,8 @@
 		interconnect-names = "sswrp-pcie";
 
 		linux,pci-domain = <1>;
+
+		additional-parent-domain = <&CPU_TOP_CL>;
 	};
 
 	pwm0: pwm@3bd90000 {
@@ -2233,7 +2236,6 @@
 			#power-domain-cells = <0>;
 			sswrp-id = <GENPD_LGA_SSWRP_LSIO_S_ID>;
 			on-at-init;
-			rpm-always-on;
 		};
 
 		lsio_s_cli_gpio_pd: lsio_s_cli_gpio_pd {
@@ -2242,16 +2244,6 @@
 			power-domains = <&sswrp_lsio_s_pd>;
 			subdomain-id = <GENPD_LGA_LSIO_CLI_GPIO_ID>;
 			on-at-init;
-			rpm-always-on;
-			use-smc;
-		};
-
-		lsio_s_cli_gpio_irq_safe_pd: lsio_s_cli_gpio_irq_safe_pd {
-			#power-domain-cells = <0>;
-			sswrp-id = <GENPD_LGA_LSIO_S_CLI_GPIO_IRQ_SAFE_ID>;
-			on-at-init;
-			irq-safe;
-			use-smc;
 		};
 
 		// lsio_n
@@ -2563,6 +2555,10 @@
 		key_down_delay = <6000>;
 		keys_down = <116 115>;
 		dbg_fn_delay = <2000>;
+	};
+
+	power_keydebug {
+		compatible = "power-keydebug";
 	};
 
 	cap_sysfs {

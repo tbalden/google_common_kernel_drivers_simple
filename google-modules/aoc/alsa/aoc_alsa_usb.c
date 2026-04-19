@@ -119,8 +119,10 @@ void usb_audio_offload_connect(struct snd_usb_audio *chip)
 
 	if (!uadev[card_num].chip) {
 		sb = xhci_sideband_register(udev);
-		if (!sb)
+		if (!sb) {
 			pr_err("xhci_sideband_register fail");
+			return;
+		}
 	} else {
 		sb = uadev[chip->card->number].sb;
 	}
@@ -272,6 +274,11 @@ int aoc_usb_setup_config(struct aoc_chip *achip, unsigned int reference_count,
 	}
 
 	mutex_lock(&chip->mutex);
+	if (uadev[card_num].chip != chip || !uadev[card_num].sb) {
+		mutex_unlock(&chip->mutex);
+		return -ENODEV;
+	}
+
 	info = &uadev[card_num].ep_info[direction];
 	info->reference_count = reference_count;
 	if (info->reference_count != 1) {
@@ -380,6 +387,12 @@ int aoc_usb_cleanup_config(struct aoc_chip *achip, unsigned int reference_count,
 	info->reference_count = reference_count;
 	if (info->reference_count != 0) {
 		pr_debug("%s skip", __func__);
+		mutex_unlock(&chip->mutex);
+		return 0;
+	}
+
+	if (!uadev[card_num].udev || !uadev[card_num].sb) {
+		pr_info("%s usb device or sideband already removed", __func__);
 		mutex_unlock(&chip->mutex);
 		return 0;
 	}

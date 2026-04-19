@@ -125,7 +125,7 @@ enum bms_usecase_charger_index {
 	S(GSU_MODE_USB_OTG_WLC_TX, 12, "OTG_RTX", .is_wireless = false, .is_wired = false,	\
 	 .is_otg = true, .is_charging = false, .is_cp = false,					\
 	 .chg_index = BMS_USECASE_CHARGER_INDEX_INVALID),					\
-	S(GSU_MODE_USB_WLC_RX, 13, "USB_WLC_RX_CHG", .is_wireless = false, .is_wired = false,	\
+	S(GSU_MODE_USB_WLC_RX, 13, "USB_WLC_RX_CHG", .is_wireless = true, .is_wired = false,	\
 	 .is_otg = false, .is_charging = true, .is_cp = false,					\
 	 .chg_index = BMS_USECASE_CHARGER_INDEX_MAIN),						\
 												\

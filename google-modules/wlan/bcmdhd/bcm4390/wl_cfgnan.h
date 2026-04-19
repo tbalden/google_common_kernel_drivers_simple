@@ -56,8 +56,8 @@
 #define NAN_MAX_SOCIAL_CHANNELS	3
 #define NAN_MAX_COOKIE_LEN		255u
 #define NAN_IDENTITY_KEY_LEN            16u
-#define NAN_PAIRING_TIMEOUT		7u	  /* Bootstrapping + Pairing timeout of 7 sec */
-#define NAN_PAIRING_TIMEOUT_VERIFICATION  4u	  /* Pairing timeout of 4 sec */
+#define NAN_PAIRING_TIMEOUT		34u	  /* Bootstrapping + Pairing timeout of 34 sec */
+#define NAN_PAIRING_TIMEOUT_VERIFICATION  31u	  /* Pairing timeout of 31 sec */
 
 /* Keeping RSSI threshold value to be -70dBm */
 #define NAN_DEF_RSSI_NOTIF_THRESH -70
@@ -524,10 +524,11 @@ typedef struct nan_discover_cmd_data {
 	nan_str_data_t cookie;		/* Bootstrapping cookie info */
 	nan_str_data_t npba_info;	/* Bootstrapping npba info */
 	nan_str_data_t local_nik;	/* Local NIK of device */
-	uint32	  comeback_delay;	/* Bootstrapping comaback delay */
+	uint32	  comeback_delay;	/* Bootstrapping resp comeback delay */
 	uint32	  bootstrapping_id;
 	uint8	  gtk_csid;
 	uint8	  csia_cap;
+	uint8	  comeback;		/* Bootstrapping req comeback */
 } nan_discover_cmd_data_t;
 
 typedef struct nan_datapath_cmd_data {
@@ -1218,7 +1219,8 @@ typedef enum {
 	NAN_ATTRIBUTE_KEY_DATA_PASSPHRASE		= 248,
 	NAN_ATTRIBUTE_GTK_CSID				= 249,
 	NAN_ATTRIBUTE_CSIA_CAPABILITIES			= 250,
-	NAN_ATTRIBUTE_MAX				= 251
+	NAN_ATTRIBUTE_COME_BACK                         = 251,
+	NAN_ATTRIBUTE_MAX				= 252
 } NAN_ATTRIBUTE;
 
 enum geofence_suspend_reason {

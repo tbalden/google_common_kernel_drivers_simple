@@ -409,42 +409,12 @@ static void rgeb_mode_set(struct gs_panel *ctx, const struct gs_panel_mode *pmod
 
 static void rgeb_refresh_ctrl(struct gs_panel *ctx)
 {
-	struct device *dev = ctx->dev;
 	const struct gs_panel_mode *pmode = ctx->current_mode;
-	const u32 ctrl = ctx->refresh_ctrl;
-
-	if (!pmode)
-		return;
-
-	dev_dbg(ctx->dev, "refresh_ctrl=%#X\n", ctrl);
-
-	if (!gs_is_vrr_mode(pmode)) {
-		dev_warn(dev, "refresh_ctrl: mode control not supported for %s\n",
-			       pmode->mode.name);
-		return;
-	}
 
 	PANEL_ATRACE_BEGIN(__func__);
 
-	if (ctrl & GS_PANEL_REFRESH_CTRL_FI_FRAME_COUNT_MASK ||
-	    ctrl & GS_PANEL_REFRESH_CTRL_FI_AUTO)
-		dev_warn(dev, "refresh_ctrl: FI functionality not supported\n");
-
-	if (ctrl & GS_PANEL_REFRESH_CTRL_MIN_REFRESH_RATE_MASK) {
-		u32 vrefresh = drm_mode_vrefresh(&pmode->mode);
-		u32 min_vrefresh = GS_PANEL_REFRESH_CTRL_MIN_REFRESH_RATE(ctrl);
-
-		if (min_vrefresh == vrefresh || min_vrefresh == VRR_MIN_IDLE_RR_HZ) {
-			ctx->sw_status.idle_vrefresh = min_vrefresh;
-			PANEL_ATRACE_INT_PID_FMT(ctx->sw_status.idle_vrefresh, ctx->trace_pid,
-						 "idle_vrefresh[%s]", ctx->panel_model);
-			rgeb_change_frequency(ctx, pmode);
-		} else {
-			dev_warn(ctx->dev,
-				 "refresh_ctrl: %uHz min RR requested, only %u/%u Hz supported\n",
-				 min_vrefresh, VRR_MIN_IDLE_RR_HZ, vrefresh);
-		}
-	}
+	if (gs_panel_refresh_ctrl_lite_helper(ctx, pmode, VRR_MIN_IDLE_RR_HZ))
+		rgeb_change_frequency(ctx, pmode);
 
 	PANEL_ATRACE_END(__func__);
 }
@@ -990,13 +960,10 @@ static int rgeb_detect_fault(struct gs_panel *ctx)
 		u8 br_buf[BR_LEN] = { 0 };
 		u8 pps_buf[RGEB_PPS_LEN] = { 0 };
 
-		dev_err(dev, "DDIC error found, trigger register dump\n");
-		dev_err(dev, "ERR_DSI: %02x %02x\n", buf[0], buf[1]);
-
 		bitmap_zero(ctx->panel_errors, GS_PANEL_ERR_MAX);
-		set_bit(GS_PANEL_ERR_DSI_GENERAL, ctx->panel_errors);
 		bitmap_set_value8(ctx->panel_errors, buf[0], 8);
 		bitmap_set_value8(ctx->panel_errors, buf[1], 0);
+		dev_err(dev, "DDIC error: %*pbl\n", GS_PANEL_ERR_MAX, ctx->panel_errors);
 
 		/* Brightness */
 		ret = mipi_dsi_dcs_read(dsi, MIPI_DCS_GET_DISPLAY_BRIGHTNESS, br_buf, BR_LEN);

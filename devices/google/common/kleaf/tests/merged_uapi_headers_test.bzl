@@ -2,7 +2,7 @@
 
 """Tests for merged_uapi_headers rule"""
 
-load("//build/kernel/kleaf:kernel.bzl", "ddk_uapi_headers")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_uapi_headers")
 load("//private/devices/google/common/kleaf:merged_uapi_headers.bzl", "merged_uapi_headers")
 load(":utils/failure_test.bzl", "failure_test")
 load(":utils/file_content_test.bzl", "file_content_test")
@@ -52,6 +52,30 @@ def merged_uapi_headers_test(name):
         size = "small",
     )
     tests.append("{}/merge_test".format(name))
+
+    ddk_uapi_headers(
+        name = "{}/cleaned_uapi_headers_expected".format(name),
+        srcs = native.glob(["data/cleaned_uapi_headers_expected/**/*.h"]),
+        out = "cleaned_uapi_headers_expected.tar.gz",
+        kernel_build = "//common:kernel_aarch64",
+    )
+
+    merged_uapi_headers(
+        name = "{}/cleaned_uapi_headers".format(name),
+        clean = True,
+        uapi_headers = [
+            "{}/uapi_headers_1".format(name),
+            "{}/uapi_headers_2".format(name),
+        ],
+    )
+
+    file_content_test(
+        name = "{}/clean_test".format(name),
+        actual = "{}/cleaned_uapi_headers".format(name),
+        expected = "{}/cleaned_uapi_headers_expected".format(name),
+        size = "small",
+    )
+    tests.append("{}/clean_test".format(name))
 
     files_test(
         name = "{}/default_out_test".format(name),

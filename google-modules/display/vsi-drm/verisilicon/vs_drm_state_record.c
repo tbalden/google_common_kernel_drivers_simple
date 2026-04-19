@@ -2,6 +2,7 @@
 
 #include "vs_drm_state_record.h"
 #include "vs_drm_atomic.h"
+#include "vs_drv.h"
 
 #include <drm/drm_crtc.h>
 #include <drm/drm_connector.h>
@@ -31,32 +32,64 @@ struct drm_state_history_record {
 	struct mutex state_ringbuf_mutex;
 };
 
-int vs_drm_prepare_state_history_record(struct drm_state_history_record **sh_record)
+static struct drm_state_history_record *get_drm_dev_sh_record(struct drm_device *drm_dev)
 {
-	*sh_record = vzalloc(sizeof(struct drm_state_history_record));
-	if (!(*sh_record))
+	struct vs_drm_private *priv;
+
+	if (!drm_dev)
+		return NULL;
+
+	priv = drm_dev->dev_private;
+	if (!priv)
+		return NULL;
+
+	return priv->sh_record;
+}
+
+int vs_drm_prepare_state_history_record(struct drm_device *drm_dev)
+{
+	struct drm_state_history_record *sh_record;
+	struct vs_drm_private *priv;
+
+	if (!drm_dev || !drm_dev->dev_private)
+		return -EINVAL;
+	priv = drm_dev->dev_private;
+
+	sh_record = vzalloc(sizeof(struct drm_state_history_record));
+	if (!sh_record)
 		return -ENOMEM;
 
-	mutex_init(&((*sh_record)->state_ringbuf_mutex));
+	mutex_init(&(sh_record->state_ringbuf_mutex));
+
+	priv->sh_record = sh_record;
 
 	return 0;
 }
 
-void vs_drm_destroy_state_history_record(struct drm_state_history_record *sh_record)
+void vs_drm_destroy_state_history_record(struct drm_device *drm_dev)
 {
+	struct drm_state_history_record *sh_record = get_drm_dev_sh_record(drm_dev);
+
 	if (sh_record) {
 		mutex_destroy(&sh_record->state_ringbuf_mutex);
 
 		vfree(sh_record);
 	}
 }
-
 /* State Tracking and Dumping */
 
 #if IS_ENABLED(CONFIG_VERISILICON_RECORD_DRM_STATE)
-void vs_drm_record_state(struct drm_atomic_state *state, struct drm_state_history_record *sh_record)
+void vs_drm_record_state(struct drm_atomic_state *state)
 {
 	struct drm_atomic_state *state_to_drop;
+	struct drm_state_history_record *sh_record;
+
+	if (!state)
+		return;
+
+	sh_record = get_drm_dev_sh_record(state->dev);
+	if (!sh_record)
+		return;
 
 	mutex_lock(&sh_record->state_ringbuf_mutex);
 
@@ -73,7 +106,7 @@ void vs_drm_record_state(struct drm_atomic_state *state, struct drm_state_histor
 	mutex_unlock(&sh_record->state_ringbuf_mutex);
 }
 #else
-void vs_drm_record_state(struct drm_atomic_state *state, struct drm_state_history_record *sh_record)
+void vs_drm_record_state(struct drm_atomic_state *state)
 {
 }
 #endif
@@ -118,6 +151,46 @@ static int dump_old_state(char **out_buffer, size_t *out_buffer_size,
 	return 0;
 }
 
+static size_t __dump_current_state(char *buffer, size_t count, struct drm_device *drm_dev)
+{
+	struct drm_print_iterator iter;
+	struct drm_printer p;
+
+	iter.data = buffer;
+	iter.start = 0;
+	iter.remain = count;
+
+	p = drm_coredump_printer(&iter);
+
+	drm_state_dump(drm_dev, &p);
+
+	return count - iter.remain;
+}
+
+static int dump_current_state(char **out_buffer, size_t *out_buffer_size,
+			      struct drm_device *drm_dev)
+{
+	size_t count;
+
+	if (!out_buffer || !out_buffer_size)
+		return -EINVAL;
+
+	DPU_ATRACE_BEGIN("vs_drm_dump_current_state");
+
+	/* first call is to find buffer size */
+	count = __dump_current_state(NULL, INT_MAX, drm_dev);
+	*out_buffer = vzalloc(count + 1);
+	if (!out_buffer)
+		return -ENOMEM;
+	/* second call writes to buffer */
+	__dump_current_state(*out_buffer, count, drm_dev);
+	*out_buffer_size = count;
+
+	DPU_ATRACE_END("vs_drm_dump_current_state");
+
+	return 0;
+}
+
 /*
  * Note that addition of VS_RECORD_STATE_MAX gets offset by modulo,
  * but still helpful for negative math when idx = [0..VS_RECORD_STATE_MAX]
@@ -137,20 +210,30 @@ static inline int ringbuf_prev(unsigned int index)
 	     i++, state_to_dump = (state_ringbuf)[ringbuf_offset((state_ringbuf_idx), -1 - i)])
 
 static int vs_drm_dump_recorded_states(char **out_buffers, size_t *out_buffer_sizes,
-				       int max_out_buffers,
-				       struct drm_state_history_record *sh_record)
+				       int max_out_buffers, struct drm_device *drm_dev)
 {
 	int out_buffer_count = 0;
+	struct vs_drm_private *priv = drm_dev->dev_private;
+	struct drm_state_history_record *sh_record = priv->sh_record;
 	struct drm_atomic_state *state_to_dump;
 	int i;
+	int ret;
+
+	if (!priv->sh_record)
+		return -EINVAL;
+
+	ret = dump_current_state(out_buffers, out_buffer_sizes, drm_dev);
+
+	if (!ret)
+		out_buffer_count++;
+	else
+		dev_warn(drm_dev->dev, "dump_current_state returned %d\n", ret);
 
 	mutex_lock(&sh_record->state_ringbuf_mutex);
 
 	for_state_in_ringbuf_reverse(sh_record->state_ringbuf, state_to_dump,
 				     sh_record->state_ringbuf_idx, i)
 	{
-		int ret;
-
 		if (out_buffer_count >= max_out_buffers)
 			break;
 		if (!state_to_dump)
@@ -174,15 +257,15 @@ static int vs_drm_dump_recorded_states(char **out_buffers, size_t *out_buffer_si
 }
 
 int vs_drm_recorded_states_prepare(struct drm_state_history_data *sh_data,
-				   struct drm_state_history_record *sh_record)
+				   struct drm_device *drm_dev)
 {
 	int num_logged_states;
 
-	if (!sh_data || !sh_record)
+	if (!sh_data || !drm_dev || !drm_dev->dev_private)
 		return -EINVAL;
 
 	num_logged_states = vs_drm_dump_recorded_states(sh_data->buffers, sh_data->buffer_sizes,
-							VS_RECORD_STATE_MAX, sh_record);
+							VS_RECORD_STATE_MAX, drm_dev);
 
 	sh_data->num_logged_states = num_logged_states;
 

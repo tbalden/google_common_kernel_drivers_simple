@@ -8,6 +8,7 @@
 #include <asm/current.h>
 #include <asm/page.h>
 #include <linux/atomic.h>
+#include <linux/bits.h>
 #include <linux/compiler.h>
 #include <linux/cred.h>
 #include <linux/delay.h>
@@ -53,6 +54,7 @@ enum edgetpu_vma_type {
 	/* For VMA_LOG and VMA_TRACE, core id is stored in bits higher than VMA_TYPE_WIDTH. */
 	VMA_LOG,
 	VMA_TRACE,
+	VMA_HWTRACE,
 };
 
 /* type that combines enum edgetpu_vma_type and data in higher bits. */
@@ -98,35 +100,41 @@ static edgetpu_vma_flags_t mmap_vma_flag(unsigned long pgoff)
 	case EDGETPU_MMAP_TRACE3_BUFFER_OFFSET:
 		return VMA_DATA_SET(VMA_TRACE, 3);
 #endif /* EDGETPU_MAX_TELEMETRY_BUFFERS > 3 */
+	case EDGETPU_MMAP_HWTRACE_BUFFER_OFFSET:
+		return VMA_DATA_SET(VMA_HWTRACE, 0);
 	default:
 		return VMA_INVALID;
 	}
 }
 
-/* Map exported carveout buffers into user space. */
+/* Map exported LOG/TRACE/HWTRACE buffers into user space. */
 int edgetpu_mmap(struct edgetpu_client *client, struct vm_area_struct *vma)
 {
 	struct edgetpu_dev *etdev = client->etdev;
 	edgetpu_vma_flags_t flag;
 	enum edgetpu_vma_type type;
-
-	if (vma->vm_start & ~PAGE_MASK) {
-		etdev_dbg(etdev, "Base address not page-aligned: %#lx\n", vma->vm_start);
-		return -EINVAL;
-	}
+	uint instance_id;
 
 	etdev_dbg(etdev, "%s: mmap pgoff = %#lX\n", __func__, vma->vm_pgoff);
 
 	flag = mmap_vma_flag(vma->vm_pgoff);
-
 	type = VMA_TYPE(flag);
+	instance_id = VMA_DATA_GET(flag);
 	switch (type) {
 	case VMA_LOG:
-		return edgetpu_mmap_telemetry_buffer(etdev, etdev->telemetry_log, vma,
-						     VMA_DATA_GET(flag));
+		if (instance_id >= etdev->num_telemetry_buffers)
+			return -EINVAL;
+		return edgetpu_mmap_telemetry_buffer(etdev, &etdev->telemetry_log[instance_id],
+						     vma);
 	case VMA_TRACE:
-		return edgetpu_mmap_telemetry_buffer(etdev, etdev->telemetry_trace, vma,
-						     VMA_DATA_GET(flag));
+		if (instance_id >= etdev->num_telemetry_buffers)
+			return -EINVAL;
+		return edgetpu_mmap_telemetry_buffer(etdev, &etdev->telemetry_trace[instance_id],
+						     vma);
+	case VMA_HWTRACE:
+		if (!edgetpu_telemetry_mapped(&etdev->telemetry_hwtrace))
+			return -ENOENT;
+		return edgetpu_mmap_telemetry_buffer(etdev, &etdev->telemetry_hwtrace, vma);
 	case VMA_INVALID:
 	default:
 		return -EINVAL;
@@ -169,14 +177,11 @@ static void edgetpu_firmware_tracing_destroy(struct gcip_fw_tracing *fw_tracing)
 
 int edgetpu_device_add(struct edgetpu_dev *etdev,
 		       const struct edgetpu_mapped_resource *regs,
-		       const struct edgetpu_iface_params *iface_params,
 		       uint num_ifaces)
 {
 	struct edgetpu_mailbox_manager_desc mailbox_manager_desc = {
-		.num_mailbox = EDGETPU_NUM_MAILBOXES,
 		.num_ext_mailbox = EDGETPU_NUM_EXT_MAILBOXES,
 		.ext_mailbox_start = EDGETPU_EXT_MAILBOX_START,
-		.get_context_csr_base = edgetpu_mailbox_get_context_csr_base,
 	};
 	uint ordinal_id;
 	int ret;
@@ -219,13 +224,8 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 	if (ret)
 		return ret;
 
-	ret = edgetpu_fs_add(etdev, iface_params, num_ifaces);
-	if (ret) {
-		dev_err(etdev->dev, "%s: edgetpu_fs_add returns %d\n", etdev->dev_name, ret);
-		goto remove_dev;
-	}
-
-	mailbox_manager_desc.use_iif = EDGETPU_USE_IIF_MAILBOX;
+	edgetpu_fs_setup_debugfs(etdev);
+	atomic_set(&etdev->eventlog.next_slot, 0);
 
 	etdev->mailbox_manager =
 		edgetpu_mailbox_create_mgr(etdev, &mailbox_manager_desc);
@@ -234,7 +234,7 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 		dev_err(etdev->dev,
 			"%s: edgetpu_mailbox_create_mgr returns %d\n",
 			etdev->dev_name, ret);
-		goto remove_dev;
+		goto err_remove_debugfs;
 	}
 
 	/* Init PM in case the platform needs power up actions before MMU setup and such. */
@@ -274,19 +274,19 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 	if (ret)
 		goto remove_usage_stats;
 
-	ret = edgetpu_kci_init(etdev->mailbox_manager, etdev->etkci);
+	ret = edgetpu_kci_init(etdev, etdev->etkci);
 	if (ret) {
 		etdev_err(etdev, "edgetpu_kci_init returns %d\n", ret);
 		goto out_telemetry_exit;
 	}
 
-	ret = edgetpu_ikv_init(etdev->mailbox_manager, etdev->etikv);
+	ret = edgetpu_ikv_init(etdev, etdev->etikv);
 	if (ret) {
 		etdev_err(etdev, "edgetpu_ikv_init returns %d\n", ret);
 		goto err_kci_release;
 	}
 
-	ret = edgetpu_iif_init(etdev->mailbox_manager, etdev->etiif);
+	ret = edgetpu_iif_init(etdev, etdev->etiif);
 	if (ret) {
 		etdev_err(etdev, "edgetpu_iif_init returns %d\n", ret);
 		goto err_ikv_release;
@@ -294,10 +294,8 @@ int edgetpu_device_add(struct edgetpu_dev *etdev,
 
 	edgetpu_debug_init(etdev);
 	etdev->fw_tracing = edgetpu_firmware_tracing_create(etdev);
-	if (IS_ERR(etdev->fw_tracing)) {
-		etdev_warn(etdev, "firmware tracing create fail: %ld", PTR_ERR(etdev->fw_tracing));
+	if (IS_ERR(etdev->fw_tracing))
 		etdev->fw_tracing = NULL;
-	}
 
 	/* No limit on DMA segment size */
 	dma_set_max_seg_size(etdev->dev, UINT_MAX);
@@ -319,9 +317,9 @@ remove_usage_stats:
 remove_pm:
 	edgetpu_pm_destroy(etdev);
 remove_mboxes:
-	edgetpu_mailbox_remove_all(etdev->mailbox_manager, false);
-remove_dev:
-	edgetpu_fs_remove(etdev);
+	edgetpu_mailbox_remove_ext_mailboxes(etdev->mailbox_manager, false);
+err_remove_debugfs:
+	debugfs_remove_recursive(etdev->d_entry);
 	edgetpu_soc_exit(etdev);
 	return ret;
 }
@@ -336,15 +334,14 @@ void edgetpu_device_remove(struct edgetpu_dev *etdev)
 	edgetpu_iif_release(etdev->etiif);
 	edgetpu_ikv_release(etdev, etdev->etikv);
 	edgetpu_kci_release(etdev, etdev->etkci);
-	/* If not known powered up don't try to set mailbox CSRs to disabled state. */
-	edgetpu_mailbox_remove_all(etdev->mailbox_manager, !ret);
 	edgetpu_telemetry_exit(etdev);
 	edgetpu_usage_stats_exit(etdev);
 	edgetpu_mmu_detach(etdev);
 	if (!ret)
 		edgetpu_pm_put(etdev);
 	edgetpu_pm_destroy(etdev);
-	edgetpu_fs_remove(etdev);
+	edgetpu_mailbox_remove_ext_mailboxes(etdev->mailbox_manager, false);
+	debugfs_remove_recursive(etdev->d_entry);
 	edgetpu_soc_exit(etdev);
 }
 
@@ -444,11 +441,14 @@ void edgetpu_client_remove(struct edgetpu_client *client)
 
 	/* Clean up all the per die event fds registered by the client */
 	if (client->perdie_events &
-	    1 << perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_LOGS_AVAILABLE))
+	    BIT(perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_LOGS_AVAILABLE)))
 		edgetpu_telemetry_unset_event(etdev, etdev->telemetry_log);
 	if (client->perdie_events &
-	    1 << perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_TRACES_AVAILABLE))
+	    BIT(perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_TRACES_AVAILABLE)))
 		edgetpu_telemetry_unset_event(etdev, etdev->telemetry_trace);
+	if (client->perdie_events &
+	    BIT(perdie_event_id_to_num(EDGETPU_PERDIE_EVENT_HWTRACES_AVAILABLE)))
+		edgetpu_telemetry_unset_event(etdev, &etdev->telemetry_hwtrace);
 
 	edgetpu_client_put(client);
 

@@ -1071,7 +1071,7 @@ static int dwc3_google_probe(struct platform_device *pdev)
 		gdwc3->dwc3_drd_sw = NULL;
 		ret = -EPROBE_DEFER;
 		dev_err(dev, "probe deferred due to dwc3_drd_sw is not ready\n");
-		goto dev_depopulate;
+		goto platform_device_put;
 	}
 
 	if (gdwc3->u3_phy) {
@@ -1082,7 +1082,7 @@ static int dwc3_google_probe(struct platform_device *pdev)
 			gdwc3->phy_role_sw = NULL;
 			dev_err(dev, "phy didn't register a usb_role_switch object\n");
 			ret = PTR_ERR(gdwc3->phy_role_sw);
-			goto dev_depopulate;
+			goto platform_device_put;
 		}
 	}
 
@@ -1092,11 +1092,11 @@ static int dwc3_google_probe(struct platform_device *pdev)
 
 	ret = dwc3_google_setup_role_switch(gdwc3);
 	if (ret)
-		goto dev_depopulate;
+		goto platform_device_put;
 
 	ret = device_init_wakeup(gdwc3->dev, true);
 	if (ret)
-		goto dev_depopulate;
+		goto platform_device_put;
 
 	/* Without wakeup core driver calls dwc3_core_exit() leading to phy_exit()*/
 	ret = device_init_wakeup(&gdwc3->dwc3->dev, true);
@@ -1128,6 +1128,8 @@ static int dwc3_google_probe(struct platform_device *pdev)
 
 deinit_wakeup:
 	device_init_wakeup(gdwc3->dev, false);
+platform_device_put:
+	platform_device_put(gdwc3->dwc3);
 dev_depopulate:
 	of_platform_depopulate(dev);
 	of_node_put(dwc3_np);

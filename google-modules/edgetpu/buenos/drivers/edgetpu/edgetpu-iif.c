@@ -298,14 +298,13 @@ const struct gcip_mailbox_ops iif_mailbox_ops = {
 
 /* edgetpu-iif Interface */
 
-int edgetpu_iif_init(struct edgetpu_mailbox_manager *mgr, struct edgetpu_iif *etiif)
+int edgetpu_iif_init(struct edgetpu_dev *etdev, struct edgetpu_iif *etiif)
 {
-	struct edgetpu_dev *etdev = mgr->etdev;
 	int ret;
 
 	etiif->etdev = etdev;
 
-	ret = edgetpu_iif_init_mailbox(mgr, etiif);
+	ret = edgetpu_iif_init_mailbox(etdev, etiif);
 	if (ret)
 		return ret;
 
@@ -341,13 +340,12 @@ void edgetpu_iif_release(struct edgetpu_iif *etiif)
 	edgetpu_cancel_iif_unblocked_work(etiif);
 }
 
-int edgetpu_iif_init_mailbox(struct edgetpu_mailbox_manager *mgr, struct edgetpu_iif *etiif)
+int edgetpu_iif_init_mailbox(struct edgetpu_dev *etdev, struct edgetpu_iif *etiif)
 {
-	struct edgetpu_dev *etdev = mgr->etdev;
 	struct edgetpu_mailbox *mbx_hardware;
 	struct gcip_mailbox_args args = {
-		.dev = mgr->etdev->dev,
-		.mode = GCIP_MAILBOX_MODE_TX_CMD,
+		.dev = etdev->dev,
+		.mode = GCIP_MAILBOX_MODE_TX_CMD | GCIP_MAILBOX_MODE_SEQ_EXTERNAL,
 		.queue_wrap_bit = CIRC_QUEUE_WRAP_BIT,
 		.tx_elem_size = sizeof(struct edgetpu_vii_litebuf_command),
 		/* No responses are to be sent for IIF signal commands. */
@@ -359,17 +357,18 @@ int edgetpu_iif_init_mailbox(struct edgetpu_mailbox_manager *mgr, struct edgetpu
 	};
 	int ret;
 
-	if (!mgr->use_iif) {
-		etdev_info(etdev, "IIF mailbox is not supported");
-		return 0;
-	}
-
 	etiif->is_flushing = false;
 	spin_lock_init(&etiif->flush_lock);
 
-	mbx_hardware = edgetpu_mailbox_iif(mgr);
-	if (IS_ERR_OR_NULL(mbx_hardware))
-		return !mbx_hardware ? -ENODEV : PTR_ERR(mbx_hardware);
+	mbx_hardware = edgetpu_mailbox_iif(etdev);
+	if (IS_ERR(mbx_hardware)) {
+		ret = PTR_ERR(mbx_hardware);
+		if (ret == -ENXIO) {
+			etdev_info(etdev, "IIF mailbox is not present on this platform");
+			ret = 0;
+		}
+		return ret;
+	}
 	mbx_hardware->internal.etiif = etiif;
 	etiif->mbx_hardware = mbx_hardware;
 	edgetpu_mailbox_disable_doorbells(mbx_hardware);
@@ -407,7 +406,7 @@ err_free_cmd_queue:
 	edgetpu_iremap_free(etdev, &etiif->cmd_queue_mem);
 err_free_mailbox:
 	etiif->mbx_hardware = NULL;
-	edgetpu_mailbox_release_dedicated_mailbox(mgr, mbx_hardware);
+	edgetpu_mailbox_release(mbx_hardware);
 
 	return ret;
 }
@@ -441,7 +440,7 @@ void edgetpu_iif_release_mailbox(struct edgetpu_iif *etiif)
 	edgetpu_iremap_free(etiif->etdev, &etiif->cmd_queue_mem);
 	mbx_hardware = etiif->mbx_hardware;
 	etiif->mbx_hardware = NULL;
-	edgetpu_mailbox_release_dedicated_mailbox(etiif->etdev->mailbox_manager, mbx_hardware);
+	edgetpu_mailbox_release(mbx_hardware);
 }
 
 void edgetpu_iif_reinit_mailbox(struct edgetpu_iif *etiif)
@@ -513,8 +512,7 @@ void edgetpu_iif_send_unblock_notification(struct edgetpu_iif *etiif, int fence_
 	cmd.signal_fence_command.fence_id = fence_id;
 	cmd.type = EDGETPU_VII_LITEBUF_SIGNAL_FENCE_COMMAND;
 
-	ret = gcip_mailbox_send_cmd(etiif->mbx_protocol, &cmd, /*resp=*/NULL,
-				    GCIP_MAILBOX_CMD_FLAGS_SKIP_ASSIGN_SEQ);
+	ret = gcip_mailbox_send_cmd(etiif->mbx_protocol, &cmd, /*resp=*/NULL, 0);
 	if (ret)
 		etdev_warn(etiif->etdev, "Failed to send IIF signal command, id=%d, error=%d",
 			   fence_id, ret);

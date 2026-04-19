@@ -24,12 +24,6 @@
 		tp_dram_enable		= <1>;
 		aoc_sram_dump		= <0>;
 		gslc_dump		= <0>;
-		apc_cache_dump		= <1>;
-	};
-
-	feature {
-		dump-mode {
-			enabled = <1>;
-		};
+		apc_cache_dump		= <0>;
 	};
 }; /* end of dpm */

@@ -36,6 +36,7 @@
 #include <drm/drm_print.h>
 
 #include <gs_drm/gs_drm_connector.h>
+#include <gs_drm/gs_fault_event.h>
 #include <gs_drm/gs_reg_dump.h>
 #include <trace/dpu_trace.h>
 
@@ -651,7 +652,7 @@ static int dw_dsi2h_wait_cri_not_busy(struct dw_mipi_dsi2h *dsi2h)
 	u32 val = 0;
 
 	regmap_read_poll_timeout(dsi2h->regs, DW_DSI2H_CORE_STATUS, val,
-				 !(val & CRI_BUSY), 1000, 25000);
+				 !(val & CRI_BUSY), 400, 25000);
 
 	return val & CRI_BUSY;
 }
@@ -661,7 +662,7 @@ static int dw_dsi2h_cri_rd_data_avail(struct dw_mipi_dsi2h *dsi2h)
 	u32 val = 0;
 
 	regmap_read_poll_timeout(dsi2h->regs, DW_DSI2H_CORE_STATUS, val,
-				 (val & CRI_RD_DATA_AVAIL), 500, 10000);
+				 (val & CRI_RD_DATA_AVAIL), 400, 10000);
 
 	return val & CRI_RD_DATA_AVAIL;
 }
@@ -930,13 +931,60 @@ exit:
 		dev_WARN(dsi2h->dev, "%s: failed to runtime put autosuspend %d\n", __func__, ret);
 }
 
+static void dw_mipi_dsi2h_soft_reset(struct dw_mipi_dsi2h *dsi2h)
+{
+	dw_dsi2h_write_reg(dsi2h->regs, DW_DSI2H_SOFT_RESET, 0);
+	dev_err(dsi2h->dev, "DSI soft reset due to message transfer fail\n");
+}
+
+static int _dw_mipi_dsi2h_host_transfer(struct dw_mipi_dsi2h *dsi2h, const struct mipi_dsi_msg *msg)
+{
+	ssize_t num_bytes_transferred = 0;
+	int ret;
+
+	if (!dsi2h->packet_stack_mode && dw_dsi2h_wait_cri_not_busy(dsi2h)) {
+		dev_err(dsi2h->dev, "CRI Busy! %d\n", __LINE__);
+		return -EBUSY;
+	}
+
+	if (!dsi2h->packet_stack_mode && (msg->flags & GS_DSI_MSG_QUEUE))
+		dw_mipi_dsi2h_host_packet_stack_enable(dsi2h);
+
+	if (dsi2h->packet_stack_mode && msg->rx_len > 0) {
+		dev_warn(dsi2h->dev, "Received a read request in packet stack mode\n");
+		ret = dw_mipi_dsi2h_host_packet_stack_flush(dsi2h);
+		if (ret)
+			return ret;
+	}
+
+	num_bytes_transferred = dw_mipi_dsi2h_host_write_msg(dsi2h, msg);
+	if (num_bytes_transferred < 0) {
+		dw_mipi_dsi2h_host_packet_stack_flush(dsi2h);
+		return num_bytes_transferred;
+	}
+
+	if (dsi2h->packet_stack_mode) {
+		bool is_last = false;
+
+		is_last = !(msg->flags & GS_DSI_MSG_QUEUE);
+		is_last |= (dsi2h->mipi_fifo_hdr_used > MIPI_FIFO_HDR_SIZE_ALMOST_FULL);
+		is_last |= (dsi2h->mipi_fifo_pld_used > MIPI_FIFO_PLD_SIZE_ALMOST_FULL);
+
+		if (is_last) {
+			ret = dw_mipi_dsi2h_host_packet_stack_flush(dsi2h);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return num_bytes_transferred;
+}
+
 static ssize_t dw_mipi_dsi2h_host_transfer(struct mipi_dsi_host *host,
 					   const struct mipi_dsi_msg *msg)
 {
 	struct dw_mipi_dsi2h *dsi2h = host_to_dsi2h(host);
 	int ret;
-	ssize_t num_bytes_transferred = 0;
-	bool is_last = false;
 	unsigned int dsi2h_pre_state;
 
 	if (msg->rx_len != 0 && msg->flags != 0) {
@@ -955,43 +1003,17 @@ static ssize_t dw_mipi_dsi2h_host_transfer(struct mipi_dsi_host *host,
 	if (dsi2h_pre_state == DSI2H_STATE_ULPS)
 		dw_mipi_dsi2h_exit_ulps(dsi2h);
 
-	if (!dsi2h->packet_stack_mode && dw_dsi2h_wait_cri_not_busy(dsi2h)) {
-		dev_err(dsi2h->dev, "CRI Busy!\n");
-		ret = -EBUSY;
-		goto exit;
+	ret = _dw_mipi_dsi2h_host_transfer(dsi2h, msg);
+
+	if (ret < 0) {
+		/* If message transfer failed, reset DSI and retry */
+		dw_mipi_dsi2h_soft_reset(dsi2h);
+		ret = _dw_mipi_dsi2h_host_transfer(dsi2h, msg);
 	}
 
-	if (!dsi2h->packet_stack_mode && (msg->flags & GS_DSI_MSG_QUEUE))
-		dw_mipi_dsi2h_host_packet_stack_enable(dsi2h);
+	if (ret < 0)
+		dev_err(dsi2h->dev, "DSI message transfer failed even after dsi reset\n");
 
-	if (dsi2h->packet_stack_mode && msg->rx_len > 0) {
-		dev_warn(dsi2h->dev, "Received a read request in packet stack mode\n");
-		ret = dw_mipi_dsi2h_host_packet_stack_flush(dsi2h);
-		if (ret)
-			goto exit;
-	}
-
-	num_bytes_transferred = dw_mipi_dsi2h_host_write_msg(dsi2h, msg);
-	if (num_bytes_transferred < 0) {
-		dw_mipi_dsi2h_host_packet_stack_flush(dsi2h);
-		ret = num_bytes_transferred;
-		goto exit;
-	}
-
-	if (dsi2h->packet_stack_mode) {
-		is_last = !(msg->flags & GS_DSI_MSG_QUEUE);
-		is_last |= (dsi2h->mipi_fifo_hdr_used > MIPI_FIFO_HDR_SIZE_ALMOST_FULL);
-		is_last |= (dsi2h->mipi_fifo_pld_used > MIPI_FIFO_PLD_SIZE_ALMOST_FULL);
-
-		if (is_last) {
-			ret = dw_mipi_dsi2h_host_packet_stack_flush(dsi2h);
-			if (ret)
-				goto exit;
-		}
-	}
-
-	ret = num_bytes_transferred;
-exit:
 	if (dsi2h_pre_state == DSI2H_STATE_ULPS || dsi2h_pre_state == DSI2H_STATE_PENDING_ULPS) {
 		dsi2h->state = DSI2H_STATE_PENDING_ULPS;
 		kthread_mod_delayed_work(&dsi2h->dsi2h_worker, &dsi2h->ulps_dwork,
@@ -1056,7 +1078,7 @@ static void dw_dsi2h_main_config(struct dw_mipi_dsi2h *dsi2h)
 {
 	/* Step 1 - Timeouts Configuration */
 	/* Value zero turns the timeouts off */
-	dw_dsi2h_write_field(dsi2h->field_to_hstx_value, 0xFFFF);
+	dw_dsi2h_write_field(dsi2h->field_to_hstx_value, 0x0);	/* disable HSTX TO */
 	dw_dsi2h_write_field(dsi2h->field_to_hstxrdy_value, 0xFFFF);
 	dw_dsi2h_write_field(dsi2h->field_to_lprx_value, 0xFFFF);
 	dw_dsi2h_write_field(dsi2h->field_to_lptxrdy_value, 0xFFFF);
@@ -1250,7 +1272,7 @@ static void dw_dsi_config(struct dw_mipi_dsi2h *dsi2h)
 	if (dsi2h->ulps_wakeup_time) {
 		sys_clk = dsi2h->sys_clk;
 		div = 2 * dw_dsi2h_read_field(dsi2h->field_phy_lptx_clk_div);
-		cycles = (sys_clk * dsi2h->ulps_wakeup_time) / div;
+		cycles = (div == 0) ? 0 : (sys_clk * dsi2h->ulps_wakeup_time) / div;
 	} else {
 		cycles = 0;
 	}
@@ -1492,6 +1514,9 @@ static void update_int_cntrs(struct dw_mipi_dsi2h *dsi2h, struct drm_connector_s
 	dw_irq_status(dsi2h);
 	spin_unlock_irqrestore(&dsi2h->spinlock_dsi, flags);
 
+	if (dsi2h->rstn)
+		gs_fault_event_emit(dsi2h->dev, GS_FAULT_EVENT_TYPE_DSI_ERROR, dsi2h->rstn);
+
 	gs_conn_state = to_gs_connector_state(conn_state);
 	bitmap_write(gs_conn_state->dsi_errors, dsi2h->rstn, 0, GS_DSI_ERR_MAX);
 }
@@ -1606,7 +1631,7 @@ static void update_gs_hs_clk(struct dw_mipi_dsi2h *dsi2h, struct drm_connector_s
 {
 	struct gs_drm_connector_state *gs_conn_state;
 
-	if (!is_gs_drm_connector(conn_state->connector))
+	if (!conn_state || !is_gs_drm_connector(conn_state->connector))
 		return;
 
 	if (dsi2h->trace_pid)
@@ -2008,13 +2033,10 @@ static void dw_mipi_dsi2h_bridge_atomic_enable(struct drm_bridge *bridge,
 		dev_dbg(dsi2h->dev, "power ON\n");
 	}
 
-	if (needs_enable) {
-		/* DW DSI power can't disable during ULPS */
-		ret = pm_runtime_resume_and_get(dsi2h->dev);
-		if (unlikely(ret < 0)) {
-			dev_err(dsi2h->dev, "%s: failed to runtime enable\n", __func__);
-			return;
-		}
+	ret = pm_runtime_resume_and_get(dsi2h->dev);
+	if (unlikely(ret < 0)) {
+		dev_err(dsi2h->dev, "%s: failed to runtime enable\n", __func__);
+		return;
 	}
 
 	mutex_lock(&dsi2h->dsi2h_lock);
@@ -2047,29 +2069,25 @@ static void dw_mipi_dsi2h_bridge_atomic_enable(struct drm_bridge *bridge,
 		dsi2h->enabled = true;
 	/* following cases are for exit ULPS state transition */
 	} else if (dsi2h->state == DSI2H_STATE_PENDING_ULPS) {
-		if (unlikely(needs_enable)) {
-			dev_WARN(dsi2h->dev, "try enable DSI in pending ULPS state\n");
-			/* release previous pm_runtime_resume_and_get() ref count */
-			ret = pm_runtime_put(dsi2h->dev);
-			if (unlikely(ret < 0))
-				dev_err(dsi2h->dev, "failed to runtime disable\n");
-		}
 		/* DSI exit ULPS already in PENDING_ULPS state */
 		dsi2h->state = DSI2H_STATE_HS_EN;
 	} else if (dsi2h->state == DSI2H_STATE_ULPS) {
-		if (unlikely(needs_enable)) {
-			dev_WARN(dsi2h->dev, "try enable DSI in ULPS state\n");
-			/* release previous pm_runtime_resume_and_get() ref count */
-			ret = pm_runtime_put(dsi2h->dev);
-			if (unlikely(ret < 0))
-				dev_err(dsi2h->dev, "failed to runtime disable\n");
-		}
 		ret = dw_mipi_dsi2h_exit_ulps(dsi2h);
 		if (ret < 0)
 			dev_err(dsi2h->dev, "exit ulps fail\n");
-	} else if (unlikely(needs_enable && dsi2h->enabled)) {
-		dev_WARN(dsi2h->dev, "already enabled. state=%d\n", dsi2h->state);
 	}
+
+	if (dsi2h->psr_rpm_on) {
+		/* remove extra vote taken to keep runtime pm on during psr */
+		ret = pm_runtime_put(dsi2h->dev);
+		if (unlikely(ret < 0))
+			dev_err(dsi2h->dev, "failed to runtime disable out of psr\n");
+
+		dsi2h->psr_rpm_on = false;
+	}
+
+	if (unlikely(dsi2h->state != DSI2H_STATE_HS_EN))
+		dev_WARN(dsi2h->dev, "incorrect state=%d after enable\n", dsi2h->state);
 	mutex_unlock(&dsi2h->dsi2h_lock);
 }
 
@@ -2082,7 +2100,8 @@ static void dw_mipi_dsi2h_bridge_atomic_disable(struct drm_bridge *bridge,
 	struct dsi2h_bridge_state *dsi2h_state = to_dsi2h_bridge_state(bridge_state);
 	struct drm_atomic_state *state = old_bridge_state->base.state;
 	struct drm_crtc *crtc;
-	bool needs_disable = true;
+	bool is_psr = false;
+	bool should_rpm_put = true;
 
 	if (dsi2h_state->is_seamless_modeset)
 		return;
@@ -2101,7 +2120,7 @@ static void dw_mipi_dsi2h_bridge_atomic_disable(struct drm_bridge *bridge,
 
 		if (new_crtc_state && new_crtc_state->self_refresh_active) {
 			dev_dbg(dsi2h->dev, "transition to psr state\n");
-			needs_disable = false;
+			is_psr = true;
 
 			mutex_lock(&dsi2h->dsi2h_lock);
 			if (dsi2h->pending_datarate && dsi2h->dynamic_hs_clk_en) {
@@ -2119,8 +2138,8 @@ static void dw_mipi_dsi2h_bridge_atomic_disable(struct drm_bridge *bridge,
 	/* cancel and confirm all delay ulps works are done */
 	kthread_cancel_delayed_work_sync(&dsi2h->ulps_dwork);
 
-	if (needs_disable) {
-		mutex_lock(&dsi2h->dsi2h_lock);
+	mutex_lock(&dsi2h->dsi2h_lock);
+	if (!is_psr) {
 		if (unlikely(!dsi2h->enabled))
 			dev_WARN(dsi2h->dev, "already disabled. state=%d\n", dsi2h->state);
 
@@ -2134,17 +2153,21 @@ static void dw_mipi_dsi2h_bridge_atomic_disable(struct drm_bridge *bridge,
 		if (!pm_runtime_enabled(dsi2h->dev))
 			dw_mipi_dsi2h_disable(dsi2h);
 		dsi2h->enabled = false;
-		mutex_unlock(&dsi2h->dsi2h_lock);
-		/* DW DSI power can't disable during ULPS state */
-		ret = pm_runtime_put_sync(dsi2h->dev);
-		if (unlikely(ret < 0))
-			dev_err(dsi2h->dev, "failed to runtime disable\n");
-	} else {
-		mutex_lock(&dsi2h->dsi2h_lock);
+	} else if (!dsi2h->disable_psr_ulps) {
 		ret = dw_mipi_dsi2h_enter_ulps(dsi2h);
 		if (unlikely(ret < 0))
 			dev_err(dsi2h->dev, "enter ulps fail\n");
-		mutex_unlock(&dsi2h->dsi2h_lock);
+
+		/* DW DSI power can't disable during ULPS state */
+		should_rpm_put = false;
+	}
+	dsi2h->psr_rpm_on = !should_rpm_put;
+	mutex_unlock(&dsi2h->dsi2h_lock);
+
+	if (should_rpm_put) {
+		ret = pm_runtime_put_sync(dsi2h->dev);
+		if (unlikely(ret < 0))
+			dev_err(dsi2h->dev, "failed to runtime disable during dsi disable\n");
 	}
 }
 
@@ -2290,6 +2313,30 @@ static int reg_dump_show(struct seq_file *s, void *data)
 
 DEFINE_SHOW_ATTRIBUTE(reg_dump);
 
+static ssize_t dsi_errors_store(struct file *file, const char __user *user_buf, size_t count,
+				loff_t *ppos)
+{
+	struct dw_mipi_dsi2h *dw_dsi2h = file->private_data;
+	unsigned long flags = 0;
+	u64 errors;
+	int ret;
+
+	ret = kstrtou64_from_user(user_buf, count, 0, &errors);
+	if (ret)
+		return ret;
+
+	spin_lock_irqsave(&dw_dsi2h->spinlock_dsi, flags);
+	dw_dsi2h->rstn = errors;
+	spin_unlock_irqrestore(&dw_dsi2h->spinlock_dsi, flags);
+
+	return count;
+}
+
+static const struct file_operations dsi_errors_fops = {
+	.open = simple_open,
+	.write = dsi_errors_store,
+};
+
 static int dw_mipi_dsi2h_debugfs_init(struct dw_mipi_dsi2h *dsi2h)
 {
 	dsi2h->debugfs = debugfs_create_dir(dev_name(dsi2h->dev), NULL);
@@ -2303,6 +2350,8 @@ static int dw_mipi_dsi2h_debugfs_init(struct dw_mipi_dsi2h *dsi2h)
 
 	debugfs_create_file("reg_dump", 0444, dsi2h->debugfs, dsi2h, &reg_dump_fops);
 	debugfs_create_bool("force_set_hs_clk", 0644, dsi2h->debugfs, &dsi2h->force_set_datarate);
+	debugfs_create_bool("disable_psr_ulps", 0644, dsi2h->debugfs, &dsi2h->disable_psr_ulps);
+	debugfs_create_file("dsi_errors", 0644, dsi2h->debugfs, dsi2h, &dsi_errors_fops);
 
 	return 0;
 }

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_module", "kernel_module_group")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_module", "kernel_module_group")
 
 checkpatch(
     name = "checkpatch",
@@ -85,10 +85,14 @@ ddk_module(
         "//private/google-modules/soc/gs:gs_soc_module",
         "//private/google-modules/soc/gs:headers",
         "//private/google-modules/soc/gs/drivers/soc/google/gsa:gsa_ko",
-        "//private/google-modules/soc/rdo:rdo_soc_headers",
-        "//private/google-modules/soc/rdo:rdo_soc_module",
         "//private/google-modules/trusty:trusty_headers",
-    ],
+    ] + select({
+        "//private/devices/google/common:soc_is_laguna_or_later": [
+            "//private/google-modules/soc/rdo:rdo_soc_headers",
+            "//private/google-modules/soc/rdo:rdo_soc_module",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 ddk_module(

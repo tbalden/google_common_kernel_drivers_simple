@@ -11,6 +11,7 @@ struct cdev_opp_table {
 	unsigned int power;
 	unsigned int freq;
 	unsigned int voltage;
+	unsigned int *children_power;
 };
 
 #endif  // _CDEV_HELPER_H_

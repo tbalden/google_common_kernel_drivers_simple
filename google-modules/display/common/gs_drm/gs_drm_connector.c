@@ -30,6 +30,9 @@
 #define HOST_PORT 0
 #define HOST_ENDPOINT 0
 
+#define IRC_OFF BIT(1)
+#define IRC_PEAK_LUM BIT(2)
+
 static char panel0_name[PANEL_DRV_LEN] = { '\0' };
 module_param_string(panel0_name, panel0_name, sizeof(panel0_name), 0644);
 MODULE_PARM_DESC(panel0_name, "preferred panel name for primary panel");
@@ -227,6 +230,7 @@ static int gs_drm_connector_create_brightness_properties(struct gs_drm_connector
 		{ GS_HBM_OFF, "Off" },
 		{ GS_HBM_ON_IRC_ON, "On IRC On" },
 		{ GS_HBM_ON_IRC_OFF, "On IRC Off" },
+		{ GS_HBM_ON_PEAK_LUM, "On Peak Luminance" },
 	};
 	static const struct drm_prop_enum_list mipi_sync_list[] = {
 		{ __builtin_ffs(GS_MIPI_CMD_SYNC_NONE) - 1, "sync_none" },
@@ -371,7 +375,6 @@ static int gs_drm_connector_create_panel_errors_property(struct gs_drm_connector
 		{ GS_PANEL_ERR_DSI_XMIT_LEN, "DSI Invalid Transmission Len" },
 		{ GS_PANEL_ERR_DSI_RESERVED, "DSI Reserved" },
 		{ GS_PANEL_ERR_DSI_PROTOCOL_VIOLATION, "DSI Protocol Violation" },
-		{ GS_PANEL_ERR_DSI_GENERAL, "DSI General" },
 		{ GS_PANEL_ERR_VLIN1, "VLIN1" },
 		{ GS_PANEL_ERR_TE, "TE" },
 		{ GS_PANEL_ERR_PPS, "PPS Setting" },
@@ -379,6 +382,7 @@ static int gs_drm_connector_create_panel_errors_property(struct gs_drm_connector
 		{ GS_PANEL_ERR_ESD, "ESD Detection" },
 		{ GS_PANEL_ERR_DISP_INVALID, "Display Invalid" },
 		{ GS_PANEL_ERR_VGH, "VGH Power" },
+		{ GS_PANEL_ERR_GRAM_COLLISION, "GRAM collision" },
 	};
 	struct drm_device *dev = gs_connector->base.dev;
 	struct gs_drm_connector_properties *p = gs_drm_connector_get_properties(gs_connector);
@@ -469,6 +473,24 @@ static int gs_drm_connector_create_panel_power_state_property(struct gs_drm_conn
 	return 0;
 }
 
+static int gs_drm_connector_create_irc_support_mode_property(struct gs_drm_connector *gs_connector)
+{
+	static const struct drm_prop_enum_list props[] = {
+		{ __builtin_ffs(IRC_OFF) - 1, "IRC_Off" },
+		{ __builtin_ffs(IRC_PEAK_LUM) - 1, "IRC_Peak_Luminance" },
+	};
+	struct drm_device *dev = gs_connector->base.dev;
+	struct gs_drm_connector_properties *p = gs_drm_connector_get_properties(gs_connector);
+
+	p->irc_support_mode = drm_property_create_bitmask(dev, DRM_MODE_PROP_IMMUTABLE,
+						"irc_support_mode", props, ARRAY_SIZE(props),
+						IRC_OFF | IRC_PEAK_LUM);
+	if (!p->irc_support_mode)
+		return -ENOMEM;
+
+	return 0;
+}
+
 int gs_drm_connector_create_properties(struct drm_connector *connector)
 {
 	struct gs_drm_connector *gs_connector = to_gs_connector(connector);
@@ -541,6 +563,10 @@ int gs_drm_connector_create_properties(struct drm_connector *connector)
 		return ret;
 
 	ret = gs_drm_connector_create_panel_power_state_property(gs_connector);
+	if (ret)
+		return ret;
+
+	ret = gs_drm_connector_create_irc_support_mode_property(gs_connector);
 	if (ret)
 		return ret;
 

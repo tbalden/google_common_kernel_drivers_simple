@@ -31,6 +31,9 @@
 #define CORE_INST_INDEX		INST_IDX
 #endif
 
+#define PTICK_PERIOD_US		(USEC_PER_MSEC * 1.025)
+#define PTICK_PERIOD_NS		(NSEC_PER_MSEC * 1.025)
+
 /*
  * For cpu running normal tasks, its uclamp.min will be 0 and uclamp.max will be 1024,
  * and the sum will be 1024. We use this as index that cpu is not running important tasks.
@@ -108,8 +111,8 @@ extern unsigned int vendor_sched_suspend_resume_boost;
 
 DECLARE_STATIC_KEY_FALSE(auto_migration_margins_enable);
 DECLARE_STATIC_KEY_FALSE(auto_dvfs_headroom_enable);
-
 DECLARE_STATIC_KEY_FALSE(per_task_memory_aware_enable);
+DECLARE_STATIC_KEY_FALSE(enable_ptick);
 
 unsigned long approximate_util_avg(unsigned long util, u64 delta);
 u64 approximate_runtime(unsigned long util);
@@ -131,13 +134,19 @@ extern int __update_load_avg_mem_pressure(u64 now, struct cfs_rq *cfs_rq, struct
 static inline void update_auto_fits_capacity(void)
 {
 	int cpu;
+	unsigned int tick;
+
+	if (static_branch_likely(&enable_ptick))
+		tick = PTICK_PERIOD_US;
+	else
+		tick = TICK_USEC;
 
 	for (cpu = 0; cpu < pixel_cpu_num; cpu++) {
 		u64 limit = approximate_runtime(capacity_orig_of(cpu)) * USEC_PER_MSEC;
 		if (static_branch_likely(&auto_dvfs_headroom_enable))
-			limit -= TICK_USEC;
+			limit -= tick;
 		else
-			limit = cap_scale(limit - TICK_USEC, capacity_orig_of(cpu));
+			limit = cap_scale(limit - tick, capacity_orig_of(cpu));
 		sched_auto_fits_capacity[cpu] = approximate_util_avg(0, limit);
 	}
 }
@@ -633,6 +642,7 @@ struct vendor_rq_struct {
 	unsigned long util_removed;
 	unsigned long iowait_boost;
 	atomic_t num_adpf_tasks;
+	struct hrtimer *ptick_timer;
 };
 
 ANDROID_VENDOR_CHECK_SIZE_ALIGN(u64 android_oem_data1[16], struct vendor_rq_struct t);

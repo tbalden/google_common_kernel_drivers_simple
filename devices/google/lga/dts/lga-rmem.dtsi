@@ -177,17 +177,12 @@
 
 		/* 63172KB maps to 48MiB of GME + cipher metadata */
 		gsa-gme@a2400000 {
-			reg = <0x00000000 0xa2400000 0x00000000 0x03db1000>; /* 63172KB */
+			reg = <0x00000000 0xa2400000 0x00000000 0x03db0000>; /* 63168KB */
 			no-map;
 		};
 
-		gsa_reserved_log: gsa_reserved_log@a61b1000 {
-			reg = <0x00000000 0xa61b1000 0x00000000 0x00001000>; /* 4KB */
-			no-map;
-		};
-
-		gsa_reserved_log_extended: gsa_reserved_log_extended@a61b2000 {
-			reg = <0x00000000 0xa61b2000 0x00000000 0x00002000>; /* 8KB */
+		gsa_reserved_log: gsa_reserved_log@a61b0000 {
+			reg = <0x00000000 0xa61b0000 0x00000000 0x00004000>; /* 16KB */
 			no-map;
 		};
 
@@ -330,12 +325,13 @@
 			reusable;
 		};
 
+#if !IS_ENABLED(CONFIG_ARM64_16K_PAGES)
 		pkvm_iommu_cma: pkvm_iommu_cma {
 			compatible = "pkvm,cma", "shared-dma-pool";
 			size = <0x0 0x00800000>; /* 8MB */
 			reusable;
 		};
-
+#endif
 		vframe: vframe {
 			compatible = "shared-dma-pool";
 			size = <0x0 0x21400000>; /* 532MB */

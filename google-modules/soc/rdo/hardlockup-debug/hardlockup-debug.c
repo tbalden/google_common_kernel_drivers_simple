@@ -22,6 +22,7 @@
 #include <asm/stacktrace.h>
 #include <soc/google/google-cdd.h>
 #include <soc/google/google-smc.h>
+#include <soc/google/meminfo.h>
 
 #include "hardlockup-debug.h"
 
@@ -211,6 +212,7 @@ static int hardlockup_debug_bug_handler(struct pt_regs *regs, unsigned long esr)
 
 	if (atomic_cmpxchg(&dump_tasks_once, 1, 0)) {
 		show_mem();
+		dump_pixel_meminfo();
 		/*
 		 * Dump task info only when ramdump mode is enabled (userdebug/eng builds)
 		 * to avoid excessive logging to last_kmsg in user builds with limited

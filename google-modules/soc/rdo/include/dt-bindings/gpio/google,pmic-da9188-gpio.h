@@ -4,26 +4,26 @@
 #define __DT_BINDINGS_DA9188_GOOGLE_DA9188_H
 
 /* Anacapa-MAIN */
-#define DA9188_MAIN_GPIO_0 0
-#define DA9188_MAIN_GPIO_1 1
-#define DA9188_MAIN_GPIO_2 2
-#define DA9188_MAIN_GPIO_3 3
-#define DA9188_MAIN_GPIO_4 4
-#define DA9188_MAIN_GPIO_5 5
-#define DA9188_MAIN_GPIO_6 6
-#define DA9188_MAIN_GPIO_7 7
+#define GPIO_0 0
+#define GPIO_1 1
+#define GPIO_2 2
+#define GPIO_3 3
+#define GPIO_4 4
+#define GPIO_5 5
+#define GPIO_6 6
+#define GPIO_7 7
 
 /* Anacapa-SUB */
-#define DA9188_SUB_GPIO_8  8
-#define DA9188_SUB_GPIO_9  9
-#define DA9188_SUB_GPIO_10 10
-#define DA9188_SUB_GPIO_11 11
-#define DA9188_SUB_GPIO_12 12
-#define DA9188_SUB_GPIO_13 13
-#define DA9188_SUB_GPIO_14 14
-#define DA9188_SUB_GPIO_15 15
-#define DA9188_SUB_GPIO_16 16
-#define DA9188_SUB_GPIO_17 17
-#define DA9188_SUB_GPIO_18 18
+#define GPIO_8  8
+#define GPIO_9  9
+#define GPIO_10 10
+#define GPIO_11 11
+#define GPIO_12 12
+#define GPIO_13 13
+#define GPIO_14 14
+#define GPIO_15 15
+#define GPIO_16 16
+#define GPIO_17 17
+#define GPIO_18 18
 
 #endif //__DT_BINDINGS_DA9188_GOOGLE_DA9188_H

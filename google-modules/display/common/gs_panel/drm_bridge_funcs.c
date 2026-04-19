@@ -862,6 +862,10 @@ static void gs_panel_bridge_disable(struct drm_bridge *bridge,
 		if (!gs_is_panel_active(ctx))
 			drm_panel_disable(&ctx->base);
 	}
+
+	// clear fault connector states on disable
+	bitmap_clear(gs_conn_state->dsi_errors, 0, GS_DSI_ERR_MAX);
+	bitmap_clear(gs_conn_state->panel_errors, 0, GS_PANEL_ERR_MAX);
 	PANEL_ATRACE_END("gs_panel_bridge_disable");
 }
 

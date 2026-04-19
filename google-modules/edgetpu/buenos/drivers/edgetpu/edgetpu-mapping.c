@@ -220,7 +220,7 @@ u64 edgetpu_mappings_encode_gcip_map_flags(edgetpu_map_flag_t flags, unsigned lo
 	if (adjust_dir)
 		dir = edgetpu_host_dma_dir(dir);
 
-	return gcip_iommu_encode_gcip_map_flags(dir, coherent, dma_attrs, restrict_iova);
+	return gcip_iommu_encode_gcip_map_flags(dir, coherent, dma_attrs, restrict_iova, false);
 }
 
 /*

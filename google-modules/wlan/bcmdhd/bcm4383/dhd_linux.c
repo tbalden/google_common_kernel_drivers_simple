@@ -477,6 +477,9 @@ dhd_pub_t *g_dhd_pub;
 #endif /* CONFIG_EXYNOS_S2MPU */
 #endif /* CONFIG_ARCH_EXYNOS */
 
+#ifdef WL_CFG80211
+#include <wl_cfgscan.h>
+#endif /* WL_CFG80211 */
 
 #ifdef WL_STATIC_IF
 bool dhd_is_static_ndev(dhd_pub_t *dhdp, struct net_device *ndev);
@@ -5497,6 +5500,12 @@ dhd_monitor_open(struct net_device *net)
 	else {
 		u8 random_mac_addr[ETH_ALEN];
 		DHD_PRINT(("dhd_monitor_open: ART mode\n"));
+
+#ifdef WL_CFG80211
+		/* abort any scan in progress */
+		wl_cfgscan_scan_abort(cfg);
+#endif /* WL_CFG80211 */
+
 		RANDOM_BYTES(random_mac_addr, ETHER_ADDR_LEN);
 		ETHER_SET_UNICAST(random_mac_addr);
 		ETHER_SET_LOCALADDR(random_mac_addr);

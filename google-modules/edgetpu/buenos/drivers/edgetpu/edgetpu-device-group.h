@@ -123,10 +123,15 @@ struct edgetpu_device_group {
 	/* Mask of errors set for this group. */
 	uint fatal_errors;
 
+	/* end of fields protected by @lock */
+
 	/* List of DMA fences owned by this group */
 	struct list_head dma_fence_list;
-
-	/* end of fields protected by @lock */
+	/*
+	 * Protects dma_fence_list.
+	 * @lock must also be held for reading or writing whenever @dma_fence_lock is held.
+	 */
+	struct mutex dma_fence_lock;
 
 	/*
 	 * Used to synchronize any mapping operations for this device group.

@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("@kernel_toolchain_info//:dict.bzl", "VARS")
-load("//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_genrule")
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch")
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
+load("@kleaf//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_genrule")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch")
 load("//private/devices/google/common:constants.bzl", "PIXEL_GKI_MODULES_LIST")
 load("//private/devices/google/common/kleaf:extracted_system_dlkm.bzl", "extracted_system_dlkm")
 
@@ -28,6 +28,57 @@ label_flag(
     ],
 )
 
+string_flag(
+    name = "soc",
+    build_setting_default = "",
+    visibility = [
+        "//private/devices/google:__subpackages__",
+        "//private/google-modules:__subpackages__",
+    ],
+)
+
+config_setting(
+    name = "soc_is_laguna",
+    flag_values = {":soc": "laguna"},
+)
+
+config_setting(
+    name = "soc_is_zumapro",
+    flag_values = {":soc": "zumapro"},
+)
+
+config_setting(
+    name = "soc_is_zuma",
+    flag_values = {":soc": "zuma"},
+)
+
+config_setting(
+    name = "soc_is_gs201",
+    flag_values = {":soc": "gs201"},
+)
+
+config_setting(
+    name = "soc_is_gs101",
+    flag_values = {":soc": "gs101"},
+)
+
+selects.config_setting_group(
+    name = "soc_is_laguna_or_later",
+    match_any = [
+        ":soc_is_laguna",
+    ],
+)
+
+selects.config_setting_group(
+    name = "soc_is_zumapro_or_before",
+    match_any = [
+        ":soc_is_zumapro",
+        ":soc_is_zuma",
+        ":soc_is_gs201",
+        ":soc_is_gs101",
+    ],
+)
+
 bool_flag(
     name = "use_prebuilt_fips140",
     build_setting_default = False,
@@ -38,8 +89,6 @@ config_setting(
     flag_values = {":use_prebuilt_fips140": "1"},
 )
 
-_STRIP = "//prebuilts/clang/host/linux-x86/clang-{}:bin/llvm-strip".format(VARS["CLANG_VERSION"])
-
 _FIPS140_KO = "//prebuilts/gki/kernel_aarch64_fips140:fips140.ko"
 
 hermetic_genrule(
@@ -47,13 +96,9 @@ hermetic_genrule(
     srcs = [_FIPS140_KO],
     outs = ["fips140.ko"],
     cmd = """
-        $(location {strip}) --strip-debug -o $(location fips140.ko) \\
-                $(location {fips140_ko})
-    """.format(
-        fips140_ko = _FIPS140_KO,
-        strip = _STRIP,
-    ),
-    tools = [_STRIP],
+        llvm-strip --strip-debug -o $(location fips140.ko) $(location {fips140_ko})
+    """.format(fips140_ko = _FIPS140_KO),
+    use_cc_toolchain = True,
 )
 
 bool_flag(

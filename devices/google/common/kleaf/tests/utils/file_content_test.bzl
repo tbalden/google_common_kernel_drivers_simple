@@ -2,7 +2,7 @@
 
 """Check the content of a file."""
 
-load("//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_toolchain")
+load("@kleaf//build/kernel/kleaf:hermetic_tools.bzl", "hermetic_toolchain")
 
 def _file_content_test_impl(ctx):
     hermetic_tools = hermetic_toolchain.get(ctx)

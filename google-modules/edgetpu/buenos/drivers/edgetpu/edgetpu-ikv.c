@@ -95,13 +95,13 @@ static void edgetpu_ikv_free_queue(struct edgetpu_ikv *etikv, enum gcip_mailbox_
 	}
 }
 
-int edgetpu_ikv_init(struct edgetpu_mailbox_manager *mgr, struct edgetpu_ikv *etikv)
+int edgetpu_ikv_init(struct edgetpu_dev *etdev, struct edgetpu_ikv *etikv)
 {
 	struct edgetpu_mailbox *mbx_hardware;
 	const unsigned int timeout = user_ikv_timeout ? user_ikv_timeout : IKV_TIMEOUT;
 	struct gcip_mailbox_args args = {
-		.dev = mgr->etdev->dev,
-		.mode = GCIP_MAILBOX_MODE_FORWARD,
+		.dev = etdev->dev,
+		.mode = GCIP_MAILBOX_MODE_FORWARD | GCIP_MAILBOX_MODE_SEQ_EXTERNAL,
 		.queue_wrap_bit = CIRC_QUEUE_WRAP_BIT,
 		.tx_elem_size = edgetpu_vii_command_packet_size(),
 		.rx_elem_size = edgetpu_vii_response_packet_size(),
@@ -112,18 +112,17 @@ int edgetpu_ikv_init(struct edgetpu_mailbox_manager *mgr, struct edgetpu_ikv *et
 	int ret;
 
 	etikv->command_timeout_ms = timeout;
-	etikv->etdev = mgr->etdev;
+	etikv->etdev = etdev;
 	mutex_init(&etikv->enabled_pasids_lock);
 
-	mbx_hardware = edgetpu_mailbox_ikv(mgr);
+	mbx_hardware = edgetpu_mailbox_ikv(etdev);
 	if (IS_ERR_OR_NULL(mbx_hardware))
 		return !mbx_hardware ? -ENODEV : PTR_ERR(mbx_hardware);
-	mbx_hardware->handle_irq = edgetpu_ikv_handle_irq;
+	edgetpu_mailbox_set_irq_handler(mbx_hardware, edgetpu_ikv_handle_irq);
 	mbx_hardware->internal.etikv = etikv;
 	etikv->mbx_hardware = mbx_hardware;
 
-	etikv->mbx_protocol =
-		devm_kzalloc(mgr->etdev->dev, sizeof(*etikv->mbx_protocol), GFP_KERNEL);
+	etikv->mbx_protocol = devm_kzalloc(etdev->dev, sizeof(*etikv->mbx_protocol), GFP_KERNEL);
 	if (!etikv->mbx_protocol) {
 		ret = -ENOMEM;
 		goto err;
@@ -156,7 +155,7 @@ int edgetpu_ikv_init(struct edgetpu_mailbox_manager *mgr, struct edgetpu_ikv *et
 
 err:
 	/* The release handler only cleans up resources that were successfully initialized. */
-	edgetpu_ikv_release(mgr->etdev, etikv);
+	edgetpu_ikv_release(etdev, etikv);
 
 	return ret;
 }
@@ -164,10 +163,8 @@ err:
 int edgetpu_ikv_reinit(struct edgetpu_ikv *etikv)
 {
 	struct edgetpu_mailbox *mbx_hardware = etikv->mbx_hardware;
-	struct edgetpu_mailbox_manager *mgr;
 	struct gcip_memory *cmd_queue_mem = &etikv->cmd_queue_mem;
 	struct gcip_memory *resp_queue_mem = &etikv->resp_queue_mem;
-	unsigned long flags;
 	int ret;
 
 	edgetpu_mailbox_disable_doorbells(mbx_hardware);
@@ -183,11 +180,8 @@ int edgetpu_ikv_reinit(struct edgetpu_ikv *etikv)
 	if (ret)
 		return ret;
 
-	mgr = etikv->etdev->mailbox_manager;
 	/* Restore irq handler */
-	write_lock_irqsave(&mgr->mailboxes_lock, flags);
-	mbx_hardware->handle_irq = edgetpu_ikv_handle_irq;
-	write_unlock_irqrestore(&mgr->mailboxes_lock, flags);
+	edgetpu_mailbox_set_irq_handler(mbx_hardware, edgetpu_ikv_handle_irq);
 
 	edgetpu_mailbox_init_doorbells(mbx_hardware);
 	edgetpu_mailbox_enable(mbx_hardware);
@@ -197,23 +191,17 @@ int edgetpu_ikv_reinit(struct edgetpu_ikv *etikv)
 
 void edgetpu_ikv_release(struct edgetpu_dev *etdev, struct edgetpu_ikv *etikv)
 {
-	struct edgetpu_mailbox_manager *mgr;
 	struct edgetpu_mailbox *mbx_hardware;
-	unsigned long flags;
 
 	if (!etikv)
 		return;
 
-	mgr = etikv->etdev->mailbox_manager;
 	mbx_hardware = etikv->mbx_hardware;
 	etikv->mbx_hardware = NULL;
 
 	/* Before anything else, remove any IRQ handler to stop responding to interrupts. */
-	if (mbx_hardware) {
-		write_lock_irqsave(&mgr->mailboxes_lock, flags);
-		mbx_hardware->handle_irq = NULL;
-		write_unlock_irqrestore(&mgr->mailboxes_lock, flags);
-	}
+	if (mbx_hardware)
+		edgetpu_mailbox_set_irq_handler(mbx_hardware, NULL);
 
 	/*
 	 * edgetpu_iremap_free() should be a safe no-op if the memory passed in was never
@@ -224,7 +212,7 @@ void edgetpu_ikv_release(struct edgetpu_dev *etdev, struct edgetpu_ikv *etikv)
 	if (etikv->cmd_queue_mem.virt_addr)
 		edgetpu_ikv_free_queue(etikv, GCIP_MAILBOX_CMD_QUEUE);
 	if (mbx_hardware)
-		edgetpu_mailbox_release_dedicated_mailbox(mgr, mbx_hardware);
+		edgetpu_mailbox_release(mbx_hardware);
 	if (etikv->mbx_protocol)
 		gcip_mailbox_release(etikv->mbx_protocol);
 }
@@ -307,17 +295,16 @@ static int do_send_cmd(struct send_cmd_args *args) {
 	void *cmd = args->cmd;
 	struct edgetpu_ikv_response *ikv_resp = args->ikv_resp;
 	struct gcip_mailbox_resp_awaiter *awaiter;
+	u32 gcip_mailbox_cmd_flags = 0;
 	int ret = 0;
+
 #if EDGETPU_USE_LITEBUF_VII
 	/* Firmware that implements litebuf VII tracks timeouts in firmware */
-	gcip_mailbox_cmd_flags_t flags = GCIP_MAILBOX_CMD_FLAGS_SKIP_ASSIGN_SEQ |
-					 GCIP_MAILBOX_CMD_FLAGS_NO_TIMEOUT;
-#else
-	gcip_mailbox_cmd_flags_t flags = GCIP_MAILBOX_CMD_FLAGS_SKIP_ASSIGN_SEQ;
+	gcip_mailbox_cmd_flags |=  GCIP_MAILBOX_CMD_FLAGS_NO_TIMEOUT;
 #endif
 
 	awaiter = gcip_mailbox_put_cmd_flags(etikv->mbx_protocol, cmd, ikv_resp->resp, ikv_resp,
-					     flags);
+					     gcip_mailbox_cmd_flags);
 	if (IS_ERR(awaiter))
 		ret = PTR_ERR(awaiter);
 
@@ -332,7 +319,7 @@ static inline void build_awaiter_for_error_resp(struct edgetpu_ikv *etikv,
 	awaiter->mailbox = etikv->mbx_protocol;
 	awaiter->data = ikv_resp;
 	awaiter->release_data = etikv->mbx_protocol->ops->release_awaiter_data;
-	refcount_set(&awaiter->refs, 1);
+	kref_init(&awaiter->kref);
 	ikv_resp->awaiter = awaiter;
 }
 

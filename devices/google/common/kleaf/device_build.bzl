@@ -6,11 +6,8 @@ Define build targets for a device.
 
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("@bazel_skylib//rules:select_file.bzl", "select_file")
-load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
-load("@rules_pkg//pkg:pkg.bzl", "pkg_zip")
-load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 load(
-    "//build/kernel/kleaf:kernel.bzl",
+    "@kleaf//build/kernel/kleaf:kernel.bzl",
     "dtb_image",
     "kernel_abi",
     "kernel_build",
@@ -23,6 +20,9 @@ load(
     "kernel_unstripped_modules_archive",
     "merged_kernel_uapi_headers",
 )
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
+load("@rules_pkg//pkg:pkg.bzl", "pkg_zip")
+load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 load("//private/devices/google/common:constants.bzl", "PIXEL_GKI_MODULES_LIST")
 load("//private/devices/google/common/kleaf:create_file.bzl", "create_file")
 load("//private/devices/google/common/kleaf:image_props.bzl", "image_props")
@@ -162,6 +162,7 @@ def device_build(
     target_kunit_tests_zip = "{}/kunit_tests_zip".format(name)
     target_ddk_uapi_headers = "{}/ddk_uapi_headers".format(name)
     target_merged_ddk_uapi_headers = "{}/merged_ddk_uapi_headers".format(name)
+    target_cleaned_ddk_uapi_headers = "{}/cleaned_ddk_uapi_headers".format(name)
     target_merged_kernel_and_ddk_uapi_headers = "{}/merged_kernel_and_ddk_uapi_headers".format(name)
     target_vendor_ramdisk_modules_list = "{}/vendor_ramdisk_modules_list".format(name)
     target_system_dlkm_modules_list = "{}/system_dlkm_modules_list".format(name)
@@ -336,6 +337,14 @@ def device_build(
     )
 
     merged_uapi_headers(
+        name = target_cleaned_ddk_uapi_headers,
+        out = "{}/cleaned-ddk-uapi-headers.tar.gz".format(name),
+        clean = True,
+        uapi_headers = [target_ddk_uapi_headers],
+        visibility = ["//visibility:private"],
+    )
+
+    merged_uapi_headers(
         name = target_merged_kernel_and_ddk_uapi_headers,
         uapi_headers = [
             target_merged_kernel_uapi_headers,
@@ -491,8 +500,9 @@ def device_build(
         target_kunit_modules_install,
         target_kunit_tests_zip,
         target_merged_ddk_uapi_headers,
+        target_cleaned_ddk_uapi_headers,
         target_merged_kernel_and_ddk_uapi_headers,
-        "//build/kernel:gki_certification_tools",
+        "@kleaf//build/kernel:gki_certification_tools",
         "//common:kernel_aarch64",
         "//common:kernel_aarch64_headers",
         "//private/devices/google/common:kernel_gki_modules",

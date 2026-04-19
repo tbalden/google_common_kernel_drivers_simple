@@ -513,11 +513,17 @@ static void PhysHeapDebugRequest(PVRSRV_DBGREQ_HANDLE pfnDbgRequestHandle,
 	}
 
 #if defined(SUPPORT_PMR_DEFERRED_FREE)
-	OSLockAcquire(psDeviceNode->hPMRZombieListLock);
+#if defined(PVRSRV_USE_LOCKLESS_PMR_ZOMBIE_LIST)
+	PVR_DUMPDEBUG_LOG("PMR Zombie Count: %u, PMR Zombie Count In Cleanup: %u",
+	                  OSAtomicRead(&psDeviceNode->uiPMRZombieCount),
+	                  OSAtomicRead(&psDeviceNode->uiPMRZombieCountInCleanup));
+#else
+	_ZombieListLock(psDeviceNode);
 	PVR_DUMPDEBUG_LOG("PMR Zombie Count: %u, PMR Zombie Count In Cleanup: %u",
 	                  psDeviceNode->uiPMRZombieCount,
 	                  psDeviceNode->uiPMRZombieCountInCleanup);
-	OSLockRelease(psDeviceNode->hPMRZombieListLock);
+	_ZombieListUnlock(psDeviceNode);
+#endif
 #endif
 	PVR_DUMPDEBUG_LOG("PMR Live Count: %d", PMRGetLiveCount());
 }
@@ -2169,11 +2175,17 @@ PVRSRV_ERROR PhysHeapCreatePMR(PHYS_HEAP *psPhysHeap,
 #if defined(SUPPORT_PMR_DEFERRED_FREE)
 		{
 			PPVRSRV_DEVICE_NODE psDevNode = PhysHeapDeviceNode(psPhysHeap);
-			OSLockAcquire(psDevNode->hPMRZombieListLock);
+#if defined(PVRSRV_USE_LOCKLESS_PMR_ZOMBIE_LIST)
+			PVR_LOG_VA(PVR_DBG_ERROR, "PMR Zombie Count: %u, PMR Zombie Count In Cleanup: %u",
+			                          OSAtomicRead(&psDevNode->uiPMRZombieCount),
+			                          OSAtomicRead(&psDevNode->uiPMRZombieCountInCleanup));
+#else
+			_ZombieListLock(psDevNode);
 			PVR_LOG_VA(PVR_DBG_ERROR, "PMR Zombie Count: %u, PMR Zombie Count In Cleanup: %u",
 			                          psDevNode->uiPMRZombieCount,
 			                          psDevNode->uiPMRZombieCountInCleanup);
-			OSLockRelease(psDevNode->hPMRZombieListLock);
+			_ZombieListUnlock(psDevNode);
+#endif
 		}
 #endif
 	}

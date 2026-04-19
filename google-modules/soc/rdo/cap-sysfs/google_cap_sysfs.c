@@ -61,12 +61,9 @@ static ssize_t power_state_stats_show(struct device *dev,
 				      struct device_attribute *attr, char *buf)
 {
 	u64 curr_time;
-	u64 last_entry_ts = 0;
-	u64 curr_power_state_last_entry_ts = 0;
 	u64 last_entry_end_ts, last_exit_end_ts, total_ticks, state_entry_count;
 	struct stats_region *region;
 	struct cap_statsbuf_power_state_stats *stats;
-	int curr_power_state_index = 0;
 	ssize_t count = 0;
 	int ret, i;
 
@@ -82,18 +79,6 @@ static ssize_t power_state_stats_show(struct device *dev,
 				 POWER_STATE_STATS_SIZE * region->number);
 		if (ret)
 			goto power_state_stats_show_exit;
-	}
-
-	list_for_each_entry(region, &stats_region_list, list) {
-		stats = (struct cap_statsbuf_power_state_stats *)region->read_first;
-		for (i = 0; i < region->number; i++) {
-			last_entry_ts = stats[i].last_entry_end_ts;
-			if (last_entry_ts > curr_power_state_last_entry_ts) {
-				curr_power_state_index = region->ids[i];
-				curr_power_state_last_entry_ts = last_entry_ts;
-			}
-		}
-
 	}
 
 	list_for_each_entry(region, &stats_region_list, list) {
@@ -114,9 +99,9 @@ static ssize_t power_state_stats_show(struct device *dev,
 
 			/* Add elapsed time for current power state. */
 			if (curr_time > 0) {
-				if (region->ids[i] == curr_power_state_index &&
-						curr_power_state_last_entry_ts > 0)
-					total_ticks += (curr_time - curr_power_state_last_entry_ts);
+				if (last_exit_end_ts < last_entry_end_ts &&
+						last_entry_end_ts < curr_time)
+					total_ticks += (curr_time - last_entry_end_ts);
 			}
 
 			count += sysfs_emit_at(buf, count,

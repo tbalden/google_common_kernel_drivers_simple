@@ -1839,6 +1839,11 @@ wl_cfg80211_abort_action_frame(struct bcm_cfg80211 *cfg, struct net_device *dev,
 	return ret;
 }
 
+static bool af_completion_condition(struct bcm_cfg80211 *cfg, struct net_device *ndev)
+{
+	return !cfg->af_sent_channel;
+}
+
 /* Send an action frame immediately without doing channel synchronization.
  *
  * This function does not wait for a completion event before returning.
@@ -1853,13 +1858,13 @@ wl_cfgp2p_tx_action_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 {
 	s32 ret = BCME_OK;
 	s32 evt_ret = BCME_OK;
-	s32 timeout = 0;
 	s32 dwell_time = 0;
 	wl_eventmsg_buf_t buf;
 	wl_af_params_v2_t *af_params_v2_p = NULL;
 	u8 *af_params_iov_p = NULL;
 	s32 af_params_iov_len = 0;
 	uint16 wl_af_params_size = 0;
+	long timeout = 0;
 
 	CFGP2P_DBG(("\n"));
 	CFGP2P_ACTION(("channel : %u(0x%04x) , dwell time : %u wait_afrx:%d pktid %x \n",
@@ -1924,45 +1929,28 @@ wl_cfgp2p_tx_action_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	}
 
 	dwell_time = af_params->dwell_time + WL_AF_TX_EXTRA_TIME_MAX;
-
 	/* Wait for WLC_E_ACTION_FRAME_OFFCHAN_COMPLETE event */
-	while (TRUE) {
-		s32 start_wait_time = get_jiffies_64();
-		timeout = wait_event_interruptible_timeout(cfg->netif_change_event,
-			!cfg->af_sent_channel, msecs_to_jiffies(dwell_time));
-		if (timeout == -ERESTARTSYS) {
-			dwell_time -= jiffies_to_msecs(get_jiffies_64() - start_wait_time);
-			WL_DBG_MEM(("waitqueue was interrupted by a signal,"
-					"remaining dwell time %u\n", dwell_time));
-			if (dwell_time <= 0) {
-				WL_ERR(("Timed out. dwell_time:%u, timeout:%d\n",
-						dwell_time, timeout));
-				goto exit;
-			}
-		} else if (timeout < 0) {
-			WL_ERR(("ACTION_FRAME_OFFCHAN_COMPLETE Event, didn't come. timeout:%d\n",
-					dwell_time));
-			goto exit;
-		} else {
-			/* wait event interrupt, break and process */
-			CFGP2P_DBG(("event interrupt recevd, break and process\n"));
-			break;
-		}
-	}
-
-	if (timeout == 0) { /* timer elapsed but af_sent_channel is non-zero */
-		CFGP2P_DBG(("action frame dwell timeout completed tx_cpl: %d  \n",
-				wl_get_p2p_status(cfg, ACTION_TX_COMPLETED)));
-		/* Call actframe_abort to cleanup FW state, when
-		 * dwell timeout occurs.
-		 */
-		ret = wl_cfg80211_abort_action_frame(cfg, dev, bssidx);
-		/* Dwell time completed, but if TX_COMPLETE is not received then return TXFAIL error
-		 * ACK=false will be returned to supplicant, then supplicant can retry actframe
-		 */
-		if ((af_params->flags & WL_ACT_FRAME_FLAG_NAN_USD) &&
-				!wl_get_p2p_status(cfg, ACTION_TX_COMPLETED)) {
+	timeout = wl_cfg80211_wait_interruptible(cfg, dev, af_completion_condition,
+			dwell_time);
+	if (timeout == 0) {
+		/* dwell time elapsed, check TX_COMPLETE */
+		if (!wl_get_p2p_status(cfg, ACTION_TX_COMPLETED)) {
+			/* Call actframe_abort to cleanup FW state, when
+			 * dwell timeout occurs.
+			 */
+			ret = wl_cfg80211_abort_action_frame(cfg, dev, bssidx);
+			/* Dwell time completed, but if TX_COMPLETE is
+			 * not received then return TXFAIL error
+			 * ACK=false will be returned to supplicant,
+			 * then supplicant can retry actframe
+			 */
+			if ((af_params->flags & WL_ACT_FRAME_FLAG_NAN_USD)) {
+				CFGP2P_DBG(("TXFAIL: No TX_COMPLETE after dwell timeout\n"));
 				ret = BCME_TXFAIL;
+			}
+		} else {
+			CFGP2P_DBG(("tx action frame operation is completed\n"));
+			ret = BCME_OK;
 		}
 	} else if (timeout > 0 && wl_get_p2p_status(cfg, ACTION_TX_COMPLETED)) {
 		CFGP2P_DBG(("tx action frame operation is completed\n"));
@@ -1971,9 +1959,10 @@ wl_cfgp2p_tx_action_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 		CFGP2P_DBG(("bcast/multi cast tx action frame operation is completed\n"));
 		ret = BCME_OK;
 	} else {
-		ret = BCME_ERROR;
 		CFGP2P_DBG(("tx action frame operation is failed\n"));
+		ret = BCME_ERROR;
 	}
+
 	/* clear status bit for action tx */
 	wl_clr_p2p_status(cfg, ACTION_TX_COMPLETED);
 	wl_clr_p2p_status(cfg, ACTION_TX_NOACK);
@@ -3073,20 +3062,26 @@ wl_cfgp2p_is_p2p_specific_scan(struct cfg80211_scan_request *request)
 	return false;
 }
 
+/* Wait for WLC_E_IF event with IF_ADD opcode */
+static bool if_add_condition(struct bcm_cfg80211 *cfg, struct net_device *ndev)
+{
+	return ((wl_get_p2p_status(cfg, IF_ADDING) == false) &&
+			(cfg->if_event_info.valid));
+}
+
 struct wireless_dev *
 wl_cfgp2p_if_add(struct bcm_cfg80211 *cfg, wl_iftype_t wl_iftype,
 	char const *name, u8 *mac_addr, s32 *ret_err)
 {
 	u16 chspec;
 	s16 cfg_type;
-	long timeout;
 	u16 p2p_iftype;
 	int dhd_mode;
 	struct net_device *new_ndev = NULL;
-	long time_to_wait = MAX_WAIT_TIME;
-	unsigned long start_wait_time;
+	ktime_t time_to_wait = MAX_WAIT_TIME;
 	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
 	struct ether_addr *p2p_addr;
+	long timeout = 0;
 
 	*ret_err = BCME_OK;
 	if (!cfg->p2p) {
@@ -3153,31 +3148,12 @@ wl_cfgp2p_if_add(struct bcm_cfg80211 *cfg, wl_iftype_t wl_iftype,
 		return NULL;
 	}
 
-	/* Wait for WLC_E_IF event with IF_ADD opcode */
-	while (TRUE) {
-		start_wait_time = get_jiffies_64();
-		timeout = wait_event_interruptible_timeout(cfg->netif_change_event,
-			((wl_get_p2p_status(cfg, IF_ADDING) == false) &&
-			(cfg->if_event_info.valid)),
-			msecs_to_jiffies(time_to_wait));
-		if (timeout == -ERESTARTSYS) {
-			time_to_wait -= jiffies_to_msecs(get_jiffies_64() - start_wait_time);
-			WL_DBG_MEM(("waitqueue was interrupted by a signal, "
-				"remaining dwell time %ld\n", time_to_wait));
-			if (time_to_wait <= 0) {
-				WL_ERR(("Timed out. time_to_wait:%ld, timeout:%ld\n",
-					time_to_wait, timeout));
-				goto fail;
-			}
-		} else if (timeout <= 0) {
-			WL_ERR(("ADD_IF event, didn't come. timeout:%ld\n", time_to_wait));
-			goto fail;
-		} else {
-			/* wait event interrupt, break and process */
-			break;
-		}
+	timeout = wl_cfg80211_wait_interruptible(cfg, bcmcfg_to_prmry_ndev(cfg),
+			if_add_condition, time_to_wait);
+	if (timeout <= 0) {
+		WL_ERR(("ADD_IF event, didn't come. timeout:%lld\n", time_to_wait));
+		goto fail;
 	}
-
 	if (!wl_get_p2p_status(cfg, IF_ADDING) && cfg->if_event_info.valid) {
 		wl_if_event_info *event = &cfg->if_event_info;
 		new_ndev = wl_cfg80211_post_ifcreate(bcmcfg_to_prmry_ndev(cfg), event,

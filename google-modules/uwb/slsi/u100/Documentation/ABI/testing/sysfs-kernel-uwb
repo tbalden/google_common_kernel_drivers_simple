@@ -46,3 +46,69 @@ Description:    This node is used to retrieve the number of SPI transactions
 			The default leeway added is 1ms, and `spi_slow_tx_ms` may be provided
 			as a module parameter when loading the UWB kernel module.
 
+
+
+What:           /sys/kernel/uwb/power_stats/active_count
+Date:           November 2025
+KernelVersion:  Linux version 6.6.111
+Contact:        Rajendra Varma <raj.varma@samsung.com>
+Description:    This feature is used to display the power mode active_count.
+		It indicates the Number of times the subsystem has entered Active Mode
+		since the last reset or measurement interval.
+
+What:           /sys/kernel/uwb/power_stats/active_duration
+Date:           November 2025
+KernelVersion:  Linux version 6.6.111
+Contact:        Rajendra Varma <raj.varma@samsung.com>
+Description:    This feature is used to display the power mode active_duration.
+		It indicates the Cumulative time (in milliseconds) that the subsystem
+		has spent in Active Mode during the same period.
+
+What:           /sys/kernel/uwb/power_stats/active_last_entry
+Date:           November 2025
+KernelVersion:  Linux version 6.6.111
+Contact:        Rajendra Varma <raj.varma@samsung.com>
+Description:    This feature is used to display the power mode active_last_entry.
+		Timestamp (in milliseconds) when the subsystem most recently entered
+		Active Mode.
+
+What:           /sys/kernel/uwb/power_stats/active_last_exit
+Date:           November 2025
+KernelVersion:  Linux version 6.6.111
+Contact:        Rajendra Varma <raj.varma@samsung.com>
+Description:    This feature is used to display the power mode active_last_exit.
+		Timestamp (in milliseconds) when the subsystem most recently exited
+		Active Mode.
+
+
+What:           /sys/kernel/uwb/power_stats/idle_count
+Date:           November 2025
+KernelVersion:  Linux version 6.6.111
+Contact:        Rajendra Varma <raj.varma@samsung.com>
+Description:    This feature is used to display the power mode idle_count.
+		It indicates the Number of times the subsystem has entered Idle Mode
+		since the last reset or measurement interval.
+
+What:           /sys/kernel/uwb/power_stats/idle_duration
+Date:           November 2025
+KernelVersion:  Linux version 6.6.111
+Contact:        Rajendra Varma <raj.varma@samsung.com>
+Description:    This feature is used to display the power mode idle_duration.
+		It indicates the Cumulative time (in milliseconds) that the subsystem
+		has spent in Idle Mode during the same period.
+
+What:           /sys/kernel/uwb/power_stats/idle_last_entry
+Date:           November 2025
+KernelVersion:  Linux version 6.6.111
+Contact:        Rajendra Varma <raj.varma@samsung.com>
+Description:    This feature is used to display the power mode idle_last_entry.
+		Timestamp (in milliseconds) when the subsystem most recently entered
+		Idle Mode.
+
+What:           /sys/kernel/uwb/power_stats/idle_last_exit
+Date:           November 2025
+KernelVersion:  Linux version 6.6.111
+Contact:        Rajendra Varma <raj.varma@samsung.com>
+Description:    This feature is used to display the power mode idle_last_exit.
+		Timestamp (in milliseconds) when the subsystem most recently exited
+		Idle Mode.

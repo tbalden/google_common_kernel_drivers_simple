@@ -2829,6 +2829,38 @@ static ssize_t enable_hrtick_store(struct file *filp,
 }
 PROC_OPS_RW(enable_hrtick);
 
+static int enable_ptick_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", static_branch_likely(&enable_ptick) ? 1 : 0);
+	return 0;
+}
+static ssize_t enable_ptick_store(struct file *filp,
+				  const char __user *ubuf,
+				  size_t count, loff_t *pos)
+{
+	unsigned int val;
+	char buf[MAX_PROC_SIZE];
+
+	if (count >= sizeof(buf))
+		return -EINVAL;
+
+	if (copy_from_user(buf, ubuf, count))
+		return -EFAULT;
+
+	buf[count] = '\0';
+
+	if (kstrtouint(buf, 0, &val))
+		return -EINVAL;
+
+	if (!val)
+		static_branch_disable(&enable_ptick);
+	else
+		static_branch_enable(&enable_ptick);
+
+	return count;
+}
+PROC_OPS_RW(enable_ptick);
+
 static int skip_inefficient_opps_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%d\n", static_branch_likely(&skip_inefficient_opps_enable) ? 1 : 0);
@@ -3867,6 +3899,7 @@ static struct pentry entries[] = {
 	PROC_ENTRY(max_load_balance_interval),
 	PROC_ENTRY(min_granularity_ns),
 	PROC_ENTRY(enable_hrtick),
+	PROC_ENTRY(enable_ptick),
 	// auto migration margins
 	PROC_ENTRY(auto_migration_margins_enable),
 	// idle injection
@@ -3923,7 +3956,7 @@ int create_procfs_node(void)
 	/* create vendor sched root directory */
 	vendor_sched = proc_mkdir("vendor_sched", NULL);
 	if (!vendor_sched)
-		goto out;
+		return -ENOMEM;
 
 	/* create vendor group directories */
 	group_root_dir = proc_mkdir("groups", vendor_sched);
@@ -3970,7 +4003,6 @@ int create_procfs_node(void)
 					parent_directory, entries[i].fops)) {
 			pr_debug("%s(), create %s failed\n",
 					__func__, entries[i].name);
-			remove_proc_entry("vendor_sched", NULL);
 
 			goto out;
 		}
@@ -4016,6 +4048,7 @@ int create_procfs_node(void)
 	return 0;
 
 out:
+	remove_proc_subtree("vendor_sched", NULL);
 	return -ENOMEM;
 }
 

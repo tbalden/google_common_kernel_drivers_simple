@@ -43,6 +43,8 @@
  */
 
 &lsion_cli20_int3_spi {
+	polling-busy-wait-mode;
+
 	spitouch: touchscreen@0 {
 		#address-cells = <1>;
 		#size-cells = <1>;

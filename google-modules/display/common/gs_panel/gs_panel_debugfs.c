@@ -282,6 +282,33 @@ void gs_panel_debugfs_create_cmdset(struct dentry *parent, const struct gs_dsi_c
 }
 EXPORT_SYMBOL_GPL(gs_panel_debugfs_create_cmdset);
 
+static ssize_t gs_debugfs_panel_errors(struct file *file, const char __user *user_buf, size_t count,
+				      loff_t *ppos)
+{
+	u64 errors;
+	int ret;
+	struct mipi_dsi_device *dsi = file->private_data;
+	struct gs_panel *ctx = mipi_dsi_get_drvdata(dsi);
+
+	if (!gs_is_panel_active(ctx))
+		return -EPERM;
+
+	ret = kstrtou64_from_user(user_buf, count, 0, &errors);
+	if (ret)
+		return ret;
+
+	mutex_lock(&ctx->mode_lock); /*TODO(b/267170999): MODE*/
+	bitmap_write(ctx->panel_errors, errors, 0, GS_PANEL_ERR_MAX);
+	mutex_unlock(&ctx->mode_lock); /*TODO(b/267170999): MODE*/
+
+	return count;
+}
+
+static const struct file_operations gs_panel_errors_fops = {
+	.open = simple_open,
+	.write = gs_debugfs_panel_errors,
+};
+
 /* High-level Functions */
 
 /**
@@ -349,6 +376,8 @@ static int debugfs_add_dsi_folder(struct mipi_dsi_device *dsi,
 
 	debugfs_create_file("name", 0600, panel_entry, dsi, &gs_dsi_name_fops);
 	debugfs_create_file("reset_panel", 0200, panel_entry, dsi, &gs_reset_panel_fops);
+
+	debugfs_create_file("panel_errors", 0200, panel_entry, dsi, &gs_panel_errors_fops);
 
 	entries->reg = reg_root;
 

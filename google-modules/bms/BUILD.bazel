@@ -2,7 +2,7 @@
 
 # Google Battery Management System
 
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_module", "kernel_module_group")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers", "ddk_module", "kernel_module_group")
 
 checkpatch(
     name = "checkpatch",

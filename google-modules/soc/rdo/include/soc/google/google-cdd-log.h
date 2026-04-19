@@ -77,10 +77,14 @@ struct google_cdd_log {
 	struct task_log task[CDD_NR_CPUS][CDD_LOG_MAX_NUM];
 	struct work_log work[CDD_NR_CPUS][CDD_LOG_MAX_NUM];
 	struct cpuidle_log cpuidle[CDD_NR_CPUS][CDD_LOG_MAX_NUM];
-	struct suspend_log suspend[CDD_LOG_MAX_NUM * 2];
+	struct suspend_log suspend[CDD_LOG_MAX_NUM * 4];
 	struct irq_log irq[CDD_NR_CPUS][CDD_LOG_MAX_NUM * 4];
 	struct freq_log freq[CDD_DOMAIN_NUM];
 };
+
+/* This buffer is intentionally large to accommodate logs from S/R callback diagnostics */
+static_assert(ARRAY_SIZE((((struct google_cdd_log *)0)->suspend)) >= SZ_4K,
+	      "suspend log buffer must be at least 4096 units");
 
 struct google_cdd_log_misc {
 	atomic_t task_log_idx[CDD_NR_CPUS];

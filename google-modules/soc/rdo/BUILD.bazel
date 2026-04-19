@@ -6,7 +6,7 @@
 # Generally, it is at
 #   private/device/google/**/BUILD.bazel
 
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch", "ddk_headers")
 
 package(
     default_visibility = [

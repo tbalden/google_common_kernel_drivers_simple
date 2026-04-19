@@ -8,14 +8,21 @@
 
 #include "g2d_sc_hw.h"
 #include "g2d_writeback.h"
+#include "g2d_recovery.h"
 
 struct g2d_sc {
+	/* one plane per pipeline */
+	struct g2d_plane *plane[NUM_PIPELINES];
 	struct g2d_crtc *crtc[NUM_PIPELINES];
 	struct g2d_writeback_connector *writeback[NUM_PIPELINES];
 	struct sc_hw hw;
 
 	unsigned int irq_num;
 	int *irqs;
+	atomic_t frame_done[NUM_PIPELINES];
+	bool requires_reset;
+	bool allow_reset;
+	struct g2d_recovery g2d_recovery;
 
 	struct dentry *debugfs;
 };
@@ -33,12 +40,7 @@ int sc_irq_init(struct platform_device *pdev);
 int g2d_pm_runtime_suspend(struct device *dev);
 int g2d_pm_runtime_resume(struct device *dev);
 void g2d_sc_print_id_regs(struct device *dev);
-#if IS_ENABLED(CONFIG_DEBUG_FS)
-int sc_debugfs_init(struct device *dev);
-void sc_debugfs_deinit(struct device *dev);
-#else /* CONFIG_DEBUG_FS */
-static inline int sc_debugfs_init(struct device *dev) { return 0; }
-static inline void sc_debugfs_deinit(struct device *dev) {}
-#endif /* CONFIG_DEBUG_FS */
+void sc_reset(struct drm_crtc *crtc);
+int sc_check_frame_done(struct drm_crtc *crtc);
 
 #endif //G2D_SC_H_

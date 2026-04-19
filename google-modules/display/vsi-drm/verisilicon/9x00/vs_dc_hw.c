@@ -495,12 +495,8 @@ void dc_hw_save_status(struct dc_hw *hw)
 		dc_hw_save_plane_status(&hw->plane[i]);
 	}
 
-	for (i = 0; i < hw->info->display_num; i++) {
-		if (!hw->display[i].config_status)
-			continue;
-
+	for (i = 0; i < hw->info->display_num; i++)
 		dc_hw_save_display_status(&hw->display[i]);
-	}
 
 	for (i = 0; i < hw->info->wb_num; i++) {
 		if (!hw->wb[i].config_status)
@@ -859,6 +855,7 @@ int dc_wb_hw_init(struct dc_hw *hw)
 		}
 		dev_dbg(hw->dev, "%s: Alloc states mem %lu for writeback %u\n", __func__,
 			hw->wb[i].states.mem.total_size, i);
+		hw->wb_irq_refcnt[i] = 0;
 	}
 
 	return ret;
@@ -897,6 +894,7 @@ int dc_hw_init(struct dc_hw *hw)
 	else
 		hw->rev = DC_REV_1;
 
+	mutex_init(&hw->secure_lock);
 	spin_lock_init(&hw->histogram_slock);
 	spin_lock_init(&hw->be_irq_slock);
 	spin_lock_init(&hw->output_mux_slock);
@@ -1001,7 +999,14 @@ void dc_hw_update_plane_sram(struct dc_hw *hw, u8 id, struct dc_hw_sram_pool *sr
 		plane->sram.dirty = true;
 	}
 
-	trace_update_hw_layer_feature_en_dirty("SRAM", hw_id, true, plane->sram.dirty);
+	trace_update_hw_layer_feature_en_dirty("SRAM DMA", hw_id,
+					       plane->sram.sp_handle ? true : false,
+					       plane->sram.dirty);
+
+	if (plane->info->scl_sram_max_size_kb)
+		trace_update_hw_layer_feature_en_dirty("SRAM SCL", hw_id,
+						       plane->sram.scl_sp_handle ? true : false,
+						       plane->sram.dirty);
 }
 
 void dc_hw_update_plane_position(struct dc_hw *hw, u8 id, struct dc_hw_position *pos)
@@ -1079,12 +1084,10 @@ void dc_hw_update_plane_roi(struct dc_hw *hw, u8 id, struct dc_hw_roi *roi)
 	u8 hw_id = dc_hw_get_plane_id(id, hw);
 
 	if (plane && roi) {
-		if (memcmp(&plane->roi, roi, sizeof(struct dc_hw_roi) - sizeof(roi->dirty))) {
-			memcpy(&plane->roi, roi, sizeof(struct dc_hw_roi) - sizeof(roi->dirty));
+		memcpy(&plane->roi, roi, sizeof(struct dc_hw_roi));
 
-			plane->roi.dirty = true;
-			plane->roi.enable = true;
-		}
+		plane->roi.dirty = true;
+		plane->roi.enable = true;
 	}
 
 	trace_update_hw_layer_feature_en_dirty("ROI", hw_id, plane->roi.enable, plane->roi.dirty);
@@ -1314,6 +1317,65 @@ void dc_hw_setup_wb(struct dc_hw *hw, u8 id)
 	}
 }
 
+void dc_hw_enable_wb_irqs(struct dc_hw *hw, u8 wb_hw_id, bool enable)
+{
+	u32 i = 0;
+	unsigned long flags;
+	u32 config = 0;
+
+	DPU_ATRACE_BEGIN("%s id %u, en:%u", __func__, wb_hw_id, enable);
+	/* DCREG_BE_INTR_ENABLE/1 is accessed from multiple context */
+	spin_lock_irqsave(&hw->be_irq_slock, flags);
+	for (i = 0; i < 4; i++) {
+		if (!(hw->intr_dest & BIT(i)))
+			continue;
+
+		config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1));
+		switch (wb_hw_id) {
+		case HW_WB_0:
+			hw->wb_irq_refcnt[HW_WB_0] += (enable) ? 1 : -1;
+			/* only disable IRQ when irq refcnt is 0 */
+			if (!enable && hw->wb_irq_refcnt[HW_WB_0])
+				break;
+
+			config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_POST_WB0, FRM_DONE,
+					      enable);
+			config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_WB0, DATALOST_INTR,
+					      enable);
+
+			break;
+		case HW_WB_1:
+			hw->wb_irq_refcnt[HW_WB_1] += (enable) ? 1 : -1;
+			/* only disable IRQ when irq refcnt is 0 */
+			if (!enable && hw->wb_irq_refcnt[HW_WB_1])
+				break;
+
+			config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_POST_WB1, FRM_DONE,
+					      enable);
+			config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_WB1, DATALOST_INTR,
+					      enable);
+
+			break;
+		case HW_BLEND_WB:
+			hw->wb_irq_refcnt[HW_BLEND_WB] += (enable) ? 1 : -1;
+			/* only disable IRQ when irq refcnt is 0 */
+			if (!enable && hw->wb_irq_refcnt[HW_BLEND_WB])
+				break;
+
+			config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_BLD_WB, FRM_DONE,
+					      enable);
+
+			break;
+		default:
+			dev_err(hw->dev, "%s: Invalid wb_hw_id %u", __func__, wb_hw_id);
+			break;
+		}
+		dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1), config);
+	}
+	spin_unlock_irqrestore(&hw->be_irq_slock, flags);
+	DPU_ATRACE_END("%s id %u, en:%u", __func__, wb_hw_id, enable);
+}
+
 void dc_hw_set_wb_stall(struct dc_hw *hw, bool enable)
 {
 	dc_write(hw, DCREG_POST_PRO_WB_STALL_Address, enable);
@@ -1324,7 +1386,7 @@ void dc_hw_config_plane_status(struct dc_hw *hw, u8 id, bool config)
 	struct dc_hw_plane *plane = &hw->plane[id];
 
 	if (plane)
-		plane->config_status = !!config;
+		plane->config_status = config;
 }
 
 void dc_hw_config_display_status(struct dc_hw *hw, u8 id, bool config)
@@ -1332,7 +1394,7 @@ void dc_hw_config_display_status(struct dc_hw *hw, u8 id, bool config)
 	struct dc_hw_display *display = &hw->display[id];
 
 	if (display)
-		display->config_status = !!config;
+		display->config_status = config;
 }
 
 void dc_hw_config_wb_status(struct dc_hw *hw, u8 id, bool config)
@@ -1340,17 +1402,17 @@ void dc_hw_config_wb_status(struct dc_hw *hw, u8 id, bool config)
 	struct dc_hw_wb *wb = &hw->wb[id];
 
 	if (wb)
-		wb->config_status = !!config;
+		wb->config_status = config;
 }
 
 void dc_hw_enable_clock_domain_iso(struct dc_hw *hw, bool enable)
 {
 	u32 config = 0;
 
-	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DSI0_ISOLATE, !!enable);
-	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DSI1_ISOLATE, !!enable);
-	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DP0_ISOLATE, !!enable);
-	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DP1_ISOLATE, !!enable);
+	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DSI0_ISOLATE, enable);
+	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DSI1_ISOLATE, enable);
+	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DP0_ISOLATE, enable);
+	config = VS_SET_FIELD(config, DCREG_CLOCK_DOMAIN_ISOLATION, DP1_ISOLATE, enable);
 
 	dc_write_immediate(hw, DCREG_CLOCK_DOMAIN_ISOLATION_Address, config);
 }
@@ -1366,43 +1428,43 @@ void dc_hw_enable_frame_irqs(struct dc_hw *hw, u8 id, bool enable)
 	for (i = 0; i < 4; i++) {
 		if (hw->intr_dest & BIT(i)) {
 			switch (output_id) {
-			case 0:
+			case HW_OUTIF_0:
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE));
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH0,
-						      FRM_START, !!enable);
+						      FRM_START, enable);
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH0,
-						      FRM_DONE, !!enable);
+						      FRM_DONE, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE), config);
 				break;
-			case 1:
+			case HW_OUTIF_1:
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE));
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH1,
-						      FRM_START, !!enable);
+						      FRM_START, enable);
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH1,
-						      FRM_DONE, !!enable);
+						      FRM_DONE, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE), config);
 				break;
-			case 2:
+			case HW_OUTIF_2:
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1));
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_OUTPATH2,
-						      FRM_START, !!enable);
+						      FRM_START, enable);
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_OUTPATH2,
-						      FRM_DONE, !!enable);
+						      FRM_DONE, enable);
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_OUTPATH2,
-						      UNDERRUN, !!enable);
+						      UNDERRUN, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1), config);
 				break;
-			case 3:
+			case HW_OUTIF_3:
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1));
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_OUTPATH3,
-						      FRM_START, !!enable);
+						      FRM_START, enable);
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_OUTPATH3,
-						      FRM_DONE, !!enable);
+						      FRM_DONE, enable);
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_OUTPATH3,
-						      UNDERRUN, !!enable);
+						      UNDERRUN, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1), config);
 				break;
-			case 4:
+			case HW_OUTIF_4:
 				/* interrupts will get enabled/disabled during wb fb update */
 				break;
 			default:
@@ -1411,7 +1473,7 @@ void dc_hw_enable_frame_irqs(struct dc_hw *hw, u8 id, bool enable)
 		}
 	}
 
-	trace_disp_frame_irq_enable(output_id, !!enable);
+	trace_disp_frame_irq_enable(output_id, enable);
 	trace_disp_be_intr_enabled(id, output_id, config);
 	spin_unlock_irqrestore(&hw->be_irq_slock, flags);
 }
@@ -1429,18 +1491,18 @@ void dc_hw_enable_vblank_irqs(struct dc_hw *hw, u8 id, bool enable)
 	for (i = 0; i < 4; i++) {
 		if (hw->intr_dest & BIT(i)) {
 			switch (output_id) {
-			case 0:
+			case HW_OUTIF_0:
 				trace_disp_vblank_irq_enable(id, output_id, enable);
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE));
 				/* underrun workaround for command mode trigger only */
 				if (!is_display_cmd_sw_trigger(&hw->display[i]))
 					config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH0,
-							      UNDERRUN, !!enable);
+							      UNDERRUN, enable);
 				// TODO(b/298512663) listen for falling edge only when needed
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH0,
-						      TE_RISING_EDGE, !!enable);
+						      TE_RISING_EDGE, enable);
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH0,
-						      TE_FALLING_EDGE, !!enable);
+						      TE_FALLING_EDGE, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE), config);
 
 				if (enable) {
@@ -1468,18 +1530,18 @@ void dc_hw_enable_vblank_irqs(struct dc_hw *hw, u8 id, bool enable)
 
 				trace_disp_be_intr_enabled(id, output_id, config);
 				break;
-			case 1:
+			case HW_OUTIF_1:
 				trace_disp_vblank_irq_enable(id, output_id, enable);
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE));
 				/* underrun workaround for command mode trigger only */
 				if (!is_display_cmd_sw_trigger(&hw->display[i]))
 					config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH1,
-							      UNDERRUN, !!enable);
+							      UNDERRUN, enable);
 				// TODO(b/298512663) listen for falling edge only when needed
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH1,
-						      TE_RISING_EDGE, !!enable);
+						      TE_RISING_EDGE, enable);
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH1,
-						      TE_FALLING_EDGE, !!enable);
+						      TE_FALLING_EDGE, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE), config);
 
 				if (enable) {
@@ -1507,9 +1569,9 @@ void dc_hw_enable_vblank_irqs(struct dc_hw *hw, u8 id, bool enable)
 
 				trace_disp_be_intr_enabled(id, output_id, config);
 				break;
-			case 2:
-			case 3:
-			case 4:
+			case HW_OUTIF_2:
+			case HW_OUTIF_3:
+			case HW_OUTIF_4:
 				break;
 			default:
 				break;
@@ -1537,28 +1599,28 @@ void dc_hw_enable_underrun_interrupt(struct dc_hw *hw, u8 id, bool enable)
 	for (i = 0; i < 4; i++) {
 		if (hw->intr_dest & BIT(i)) {
 			switch (output_id) {
-			case 0:
+			case HW_OUTIF_0:
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE));
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH0,
-						      UNDERRUN, !!enable);
+						      UNDERRUN, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE), config);
 				break;
-			case 1:
+			case HW_OUTIF_1:
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE));
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE_OUTPATH1,
-						      UNDERRUN, !!enable);
+						      UNDERRUN, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE), config);
 				break;
-			case 2:
+			case HW_OUTIF_2:
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1));
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_OUTPATH2,
-						      UNDERRUN, !!enable);
+						      UNDERRUN, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1), config);
 				break;
-			case 3:
+			case HW_OUTIF_3:
 				config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1));
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_OUTPATH3,
-						      UNDERRUN, !!enable);
+						      UNDERRUN, enable);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1), config);
 				break;
 			default:
@@ -1579,22 +1641,22 @@ void dc_hw_clear_underrun_interrupt(struct dc_hw *hw, u8 id)
 	for (i = 0; i < 4; i++) {
 		if (hw->intr_dest & BIT(i)) {
 			switch (output_id) {
-			case 0:
+			case HW_OUTIF_0:
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_STATUS,
 						      OUTPATH0_UNDERRUN, 1);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS), config);
 				break;
-			case 1:
+			case HW_OUTIF_1:
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_STATUS,
 						      OUTPATH1_UNDERRUN, 1);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS), config);
 				break;
-			case 2:
+			case HW_OUTIF_2:
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_STATUS1,
 						      OUTPATH2_UNDERRUN, 1);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS1), config);
 				break;
-			case 3:
+			case HW_OUTIF_3:
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_STATUS1,
 						      OUTPATH3_UNDERRUN, 1);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS1), config);
@@ -1614,22 +1676,22 @@ static void dc_hw_clear_start_interrupt(struct dc_hw *hw, u8 id)
 	for (i = 0; i < 4; i++) {
 		if (hw->intr_dest & BIT(i)) {
 			switch (output_id) {
-			case 0:
+			case HW_OUTIF_0:
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_STATUS,
 						      OUTPATH0_FRM_START, 1);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS), config);
 				break;
-			case 1:
+			case HW_OUTIF_1:
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_STATUS,
 						      OUTPATH1_FRM_START, 1);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS), config);
 				break;
-			case 2:
+			case HW_OUTIF_2:
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_STATUS1,
 						      OUTPATH2_FRM_START, 1);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS1), config);
 				break;
-			case 3:
+			case HW_OUTIF_3:
 				config = VS_SET_FIELD(config, DCREG_BE_INTR_STATUS1,
 						      OUTPATH3_FRM_START, 1);
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS1), config);
@@ -1639,30 +1701,12 @@ static void dc_hw_clear_start_interrupt(struct dc_hw *hw, u8 id)
 	}
 }
 
-static u8 _output_select_display_mask(struct dc_hw *hw, u8 output_id)
-{
-	u32 mask = 0;
-	u8 i = 0;
-
-	for (i = 0; i < hw->info->display_num; i++) {
-		if (hw->display[i].config_status && (hw->display[i].output_id == output_id) &&
-		    (hw->display[i].info->id < HW_DISPLAY_4))
-			mask |= BIT(hw->display[i].info->id);
-	}
-
-	return mask;
-}
-
 int dc_hw_get_interrupt(struct dc_hw *hw, struct dc_hw_interrupt_status *status)
 {
 	u32 fe0_status = 0, fe1_status = 0;
 	u32 be_status0 = 0, be_status1 = 0;
+	u32 be_overflow0 = 0, be_overflow1 = 0;
 	u32 i = 0;
-	u8 masks[DC_OUTPUT_NUM] = { 0 };
-
-	/* get the output select display mask */
-	for (i = 0; i < DC_OUTPUT_NUM; i++)
-		masks[i] = _output_select_display_mask(hw, i);
 
 	fe0_status = dc_read_immediate(hw, DCREG_FE0_INTR_STATUS_Address);
 	if (fe0_status) {
@@ -1741,17 +1785,17 @@ int dc_hw_get_interrupt(struct dc_hw *hw, struct dc_hw_interrupt_status *status)
 			status->layer_frm_done |= BIT(HW_PLANE_13);
 
 		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR0))
-			status->pvric_decode_err |= BIT(HW_PLANE_6);
-		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR1))
-			status->pvric_decode_err |= BIT(HW_PLANE_7);
-		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR2))
 			status->pvric_decode_err |= BIT(HW_PLANE_8);
-		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR3))
+		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR1))
 			status->pvric_decode_err |= BIT(HW_PLANE_9);
-		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR4))
+		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR2))
 			status->pvric_decode_err |= BIT(HW_PLANE_10);
-		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR5))
+		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR3))
 			status->pvric_decode_err |= BIT(HW_PLANE_11);
+		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR4))
+			status->pvric_decode_err |= BIT(HW_PLANE_12);
+		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, PVRIC_DECODE_ERROR5))
+			status->pvric_decode_err |= BIT(HW_PLANE_13);
 
 		if (VS_GET_FIELD(fe1_status, DCREG_FE1_INTR_STATUS, AXI_HANG0))
 			set_bit(DC_HW_FE_BUS_ERROR_AXI_HANG0, status->fe1_bus_errors);
@@ -1785,11 +1829,19 @@ int dc_hw_get_interrupt(struct dc_hw *hw, struct dc_hw_interrupt_status *status)
 			be_status0 = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS));
 			if (be_status0)
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS), be_status0);
+			be_overflow0 = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, OVERFLOW));
+			if (be_overflow0)
+				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, OVERFLOW),
+						   be_overflow0);
 
 			be_status1 = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS1));
 			if (be_status1)
 				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, STATUS1),
 						   be_status1);
+			be_overflow1 = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, OVERFLOW1));
+			if (be_overflow1)
+				dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, OVERFLOW1),
+						   be_overflow1);
 
 			/* stop at first interrupt destination */
 			break;
@@ -1797,75 +1849,122 @@ int dc_hw_get_interrupt(struct dc_hw *hw, struct dc_hw_interrupt_status *status)
 	}
 
 	if (be_status0) {
+		/* frame and TE irqs are based on output interface id */
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH0_FRM_START))
-			status->display_frm_start |= masks[0];
+			status->output_frm_start |= BIT(HW_OUTIF_0);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH0_FRM_START))
+			status->of_output_frm_start |= BIT(HW_OUTIF_0);
 
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH1_FRM_START))
-			status->display_frm_start |= masks[1];
+			status->output_frm_start |= BIT(HW_OUTIF_1);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH1_FRM_START))
+			status->of_output_frm_start |= BIT(HW_OUTIF_1);
 
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH0_FRM_DONE))
-			status->display_frm_done |= masks[0];
+			status->output_frm_done |= BIT(HW_OUTIF_0);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH0_FRM_DONE))
+			status->of_output_frm_done |= BIT(HW_OUTIF_0);
 
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH1_FRM_DONE))
-			status->display_frm_done |= masks[1];
+			status->output_frm_done |= BIT(HW_OUTIF_1);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH1_FRM_DONE))
+			status->of_output_frm_done |= BIT(HW_OUTIF_1);
 
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH0_UNDERRUN))
-			status->display_underrun |= masks[0];
+			status->output_underrun |= BIT(HW_OUTIF_0);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH0_UNDERRUN))
+			status->of_output_underrun |= BIT(HW_OUTIF_0);
 
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH1_UNDERRUN))
-			status->display_underrun |= masks[1];
+			status->output_underrun |= BIT(HW_OUTIF_1);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH1_UNDERRUN))
+			status->of_output_underrun |= BIT(HW_OUTIF_1);
 
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH0_TE_RISING_EDGE))
-			status->display_te_rising |= masks[0];
+			status->output_te_rising |= BIT(HW_OUTIF_0);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH0_TE_RISING_EDGE))
+			status->of_output_te_rising |= BIT(HW_OUTIF_0);
 
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH1_TE_RISING_EDGE))
-			status->display_te_rising |= masks[1];
+			status->output_te_rising |= BIT(HW_OUTIF_1);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH1_TE_RISING_EDGE))
+			status->of_output_te_rising |= BIT(HW_OUTIF_1);
 
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH0_TE_FALLING_EDGE))
-			status->display_te_falling |= masks[0];
+			status->output_te_falling |= BIT(HW_OUTIF_0);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH0_TE_FALLING_EDGE))
+			status->of_output_te_falling |= BIT(HW_OUTIF_0);
 
 		if (VS_GET_FIELD(be_status0, DCREG_BE_INTR_STATUS, OUTPATH1_TE_FALLING_EDGE))
-			status->display_te_falling |= masks[1];
+			status->output_te_falling |= BIT(HW_OUTIF_1);
+		if (VS_GET_FIELD(be_overflow0, DCREG_BE_INTR_OVERFLOW, OUTPATH1_TE_FALLING_EDGE))
+			status->of_output_te_falling |= BIT(HW_OUTIF_1);
 	}
 
 	if (be_status1) {
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, SW_RST_DONE))
 			status->reset_status[BE_SW_RESET] = 1;
 
+		/* frame and TE irqs are based on output interface id */
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, OUTPATH2_FRM_START))
-			status->display_frm_start |= masks[2];
+			status->output_frm_start |= BIT(HW_OUTIF_2);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, OUTPATH2_FRM_START))
+			status->of_output_frm_start |= BIT(HW_OUTIF_2);
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, OUTPATH3_FRM_START))
-			status->display_frm_start |= masks[3];
+			status->output_frm_start |= BIT(HW_OUTIF_3);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, OUTPATH3_FRM_START))
+			status->of_output_frm_start |= BIT(HW_OUTIF_3);
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, OUTPATH2_FRM_DONE))
-			status->display_frm_done |= masks[2];
+			status->output_frm_done |= BIT(HW_OUTIF_2);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, OUTPATH2_FRM_DONE))
+			status->of_output_frm_done |= BIT(HW_OUTIF_2);
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, OUTPATH3_FRM_DONE))
-			status->display_frm_done |= masks[3];
+			status->output_frm_done |= BIT(HW_OUTIF_3);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, OUTPATH3_FRM_DONE))
+			status->of_output_frm_done |= BIT(HW_OUTIF_3);
 
+		/* blender WB uses an artificial output frame done */
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, BLD_WB_FRM_DONE)) {
-			status->display_frm_done |= BIT(HW_DISPLAY_4);
+			status->output_frm_done |= BIT(HW_OUTIF_4);
 			status->wb_frm_done |= BIT(HW_BLEND_WB);
+		}
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, BLD_WB_FRM_DONE)) {
+			status->of_output_frm_done |= BIT(HW_OUTIF_4);
+			status->of_wb_frm_done |= BIT(HW_BLEND_WB);
 		}
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, OUTPATH2_UNDERRUN))
-			status->display_underrun |= masks[2];
+			status->output_underrun |= BIT(HW_OUTIF_2);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, OUTPATH2_UNDERRUN))
+			status->of_output_underrun |= BIT(HW_OUTIF_2);
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, OUTPATH3_UNDERRUN))
-			status->display_underrun |= masks[3];
+			status->output_underrun |= BIT(HW_OUTIF_3);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, OUTPATH3_UNDERRUN))
+			status->of_output_underrun |= BIT(HW_OUTIF_3);
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, POST_WB0_FRM_DONE))
 			status->wb_frm_done |= BIT(HW_WB_0);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, POST_WB0_FRM_DONE))
+			status->of_wb_frm_done |= BIT(HW_WB_0);
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, POST_WB1_FRM_DONE))
 			status->wb_frm_done |= BIT(HW_WB_1);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, POST_WB1_FRM_DONE))
+			status->of_wb_frm_done |= BIT(HW_WB_1);
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, WB0_DATALOST_INTR))
 			status->wb_datalost |= BIT(HW_WB_0);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, WB0_DATALOST_INTR))
+			status->of_wb_datalost |= BIT(HW_WB_0);
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, WB1_DATALOST_INTR))
 			status->wb_datalost |= BIT(HW_WB_1);
+		if (VS_GET_FIELD(be_overflow1, DCREG_BE_INTR_OVERFLOW1, WB1_DATALOST_INTR))
+			status->of_wb_datalost |= BIT(HW_WB_1);
 
 		if (VS_GET_FIELD(be_status1, DCREG_BE_INTR_STATUS1, APB_HANG))
 			set_bit(DC_HW_BE_BUS_ERROR_APB_HANG, status->be_bus_errors);
@@ -1885,16 +1984,16 @@ int dc_hw_get_interrupt(struct dc_hw *hw, struct dc_hw_interrupt_status *status)
 
 int dc_hw_clear_be_interrupt_overflows(struct dc_hw *hw)
 {
-	dc_write_immediate(hw, DCREG_BE_INTR_OVERFLOW_Address, DCREG_BE_INTR_OVERFLOW_ResetValue);
-	dc_write_immediate(hw, DCREG_BE_INTR_OVERFLOW1_Address, DCREG_BE_INTR_OVERFLOW1_ResetValue);
+	dc_write_immediate(hw, DCREG_BE_INTR_OVERFLOW_Address, DCREG_BE_INTR_OVERFLOW_WriteMask);
+	dc_write_immediate(hw, DCREG_BE_INTR_OVERFLOW1_Address, DCREG_BE_INTR_OVERFLOW1_WriteMask);
 
 	return 0;
 }
 
 int dc_hw_clear_be_interrupt_statuses(struct dc_hw *hw)
 {
-	dc_write_immediate(hw, DCREG_BE_INTR_STATUS_Address, DCREG_BE_INTR_STATUS_ResetValue);
-	dc_write_immediate(hw, DCREG_BE_INTR_STATUS1_Address, DCREG_BE_INTR_STATUS1_ResetValue);
+	dc_write_immediate(hw, DCREG_BE_INTR_STATUS_Address, DCREG_BE_INTR_STATUS_WriteMask);
+	dc_write_immediate(hw, DCREG_BE_INTR_STATUS1_Address, DCREG_BE_INTR_STATUS1_WriteMask);
 
 	return 0;
 }
@@ -1906,16 +2005,22 @@ int dc_hw_disable_all_be_interrupts(struct dc_hw *hw)
 
 	/* DCREG_BE_INTR_ENABLE/1 is accessible from multiple contexts */
 	spin_lock_irqsave(&hw->be_irq_slock, flags);
+
+	/* Flag BE interrupts that have not been previously disabled */
 	prev_intr_en_val = dc_read_immediate(hw, DCREG_BE_INTR_ENABLE_Address);
 	if (prev_intr_en_val & DCREG_BE_INTR_ENABLE_WriteMask)
 		dev_warn(hw->dev, "BE Interrupts still enabled during suspend; INTR_EN %#x\n",
 			 prev_intr_en_val);
+
 	prev_intr_en1_val = dc_read_immediate(hw, DCREG_BE_INTR_ENABLE1_Address);
-	if (prev_intr_en_val & DCREG_BE_INTR_ENABLE1_WriteMask)
+	if (prev_intr_en1_val & DCREG_BE_INTR_ENABLE1_WriteMask)
 		dev_warn(hw->dev, "BE Interrupts still enabled during suspend; INTR_EN1 %#x\n",
 			 prev_intr_en1_val);
+
+	/* Disable all BE interrupts */
 	dc_write_immediate(hw, DCREG_BE_INTR_ENABLE_Address, DCREG_BE_INTR_ENABLE_ResetValue);
 	dc_write_immediate(hw, DCREG_BE_INTR_ENABLE1_Address, DCREG_BE_INTR_ENABLE1_ResetValue);
+
 	/* Disable clocks associated with vblank interrupts */
 	dc_write_immediate(hw, DCREG_SH_OUTPUT0_CLK_EN_Address, 0);
 	dc_write_immediate(hw, DCREG_SH_OUTPUT1_CLK_EN_Address, 0);
@@ -2747,7 +2852,7 @@ void dc_hw_enable_shadow_register(struct dc_hw *hw, u8 display_id, bool enable)
 void dc_hw_sw_sof_trigger(struct dc_hw *hw, u8 output_id, bool trig_enable)
 {
 	dc_write_immediate(hw, VS_SET_PANEL01_FIELD(DCREG_OUTPUT, output_id, SW_CONFIG_Address),
-			   !!trig_enable);
+			   trig_enable);
 }
 
 static u32 set_panel_output_mux(u32 mux_value, u8 src_panel, u8 output_id)
@@ -2755,16 +2860,16 @@ static u32 set_panel_output_mux(u32 mux_value, u8 src_panel, u8 output_id)
 	u32 config = mux_value;
 
 	switch (output_id) {
-	case 0:
+	case HW_OUTIF_0:
 		config = VS_SET_FIELD(config, DCREG_POST_PROCESS_OUT, MUX_OUT0_SEL, src_panel);
 		break;
-	case 1:
+	case HW_OUTIF_1:
 		config = VS_SET_FIELD(config, DCREG_POST_PROCESS_OUT, MUX_OUT1_SEL, src_panel);
 		break;
-	case 2:
+	case HW_OUTIF_2:
 		config = VS_SET_FIELD(config, DCREG_POST_PROCESS_OUT, MUX_OUT2_SEL, src_panel);
 		break;
-	case 3:
+	case HW_OUTIF_3:
 		config = VS_SET_FIELD(config, DCREG_POST_PROCESS_OUT, MUX_OUT3_SEL, src_panel);
 		break;
 	default:
@@ -2777,13 +2882,13 @@ static u32 set_panel_output_mux(u32 mux_value, u8 src_panel, u8 output_id)
 static u8 get_panel_output_mux(u32 mux_value, u8 output_id)
 {
 	switch (output_id) {
-	case 0:
+	case HW_OUTIF_0:
 		return VS_GET_FIELD(mux_value, DCREG_POST_PROCESS_OUT, MUX_OUT0_SEL);
-	case 1:
+	case HW_OUTIF_1:
 		return VS_GET_FIELD(mux_value, DCREG_POST_PROCESS_OUT, MUX_OUT1_SEL);
-	case 2:
+	case HW_OUTIF_2:
 		return VS_GET_FIELD(mux_value, DCREG_POST_PROCESS_OUT, MUX_OUT2_SEL);
-	case 3:
+	case HW_OUTIF_3:
 		return VS_GET_FIELD(mux_value, DCREG_POST_PROCESS_OUT, MUX_OUT3_SEL);
 	default:
 		return U8_MAX; /* invalid */
@@ -2835,9 +2940,9 @@ static void spliter_trigger(struct dc_hw *hw, u8 src_panel, u8 output_id, bool t
 				   VS_SET_PANEL_FIELD(DCREG_OUTPUT,
 						      hw->display[src_panel - 1].output_id,
 						      START_Address),
-				   !!trig_enable);
+				   trig_enable);
 		dc_write_immediate(hw, VS_SET_PANEL_FIELD(DCREG_OUTPUT, output_id, START_Address),
-				   !!trig_enable);
+				   trig_enable);
 		return;
 	}
 }
@@ -2878,7 +2983,7 @@ void online_trigger(struct dc_hw *hw, u8 src_panel, u8 output_id, bool trig_enab
 		hw->output_mux_value = config;
 		spin_unlock_irqrestore(&hw->output_mux_slock, flags);
 		dc_write_immediate(hw, VS_SET_PANEL_FIELD(DCREG_OUTPUT, output_id, START_Address),
-				   !!trig_enable);
+				   trig_enable);
 	}
 }
 
@@ -2965,7 +3070,7 @@ void link_node_offline_trigger(struct dc_hw *hw, u8 src_panel, bool trig_enable)
 	/* Offline trigger DBUFFER no need to link. */
 	if (src_panel < HW_DISPLAY_4)
 		vs_dpu_link_node_config(hw, VS_DPU_LINK_POST, src_panel, link_node_id,
-					!!trig_enable);
+					trig_enable);
 	link_node_config = vs_dpu_link_node_config_get(hw, link_node_id);
 
 	dc_write(hw, VS_SET_LINKNODE_FIELD(DCREG_SH_LINK_NODE, link_node_id, RESOURCE_Address),
@@ -3014,23 +3119,23 @@ static bool ofifo_splice_trigger(struct dc_hw *hw, u8 display_id, struct drm_crt
 		case 0:
 			return false;
 		case 1:
-			if (output_id == 0 || output_id == 1) {
+			if (output_id == HW_OUTIF_0 || output_id == HW_OUTIF_1) {
 				return false;
-			} else if (output_id == 2) {
+			} else if (output_id == HW_OUTIF_2) {
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT2_START_Address, 0x1);
 				return true;
 			}
 			break;
 		case 2:
-			if (output_id == 0 || output_id == 1) {
+			if (output_id == HW_OUTIF_0 || output_id == HW_OUTIF_1) {
 				return false;
-			} else if (output_id == 2) {
+			} else if (output_id == HW_OUTIF_2) {
 				drm_crtc_vblank_off(crtc);
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				dc_write_immediate(hw, DCREG_OUTPUT3_START_Address, 0x1);
 				return true;
 			}
@@ -3046,53 +3151,54 @@ static bool ofifo_splice_trigger(struct dc_hw *hw, u8 display_id, struct drm_crt
 	case 1:
 		switch (splice_mode1) {
 		case 0:
-			if (output_id == 0) {
+			if (output_id == HW_OUTIF_0) {
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT0_START_Address, 0x1);
 				return true;
-			} else if (output_id == 2 || output_id == 3)
+			} else if (output_id == HW_OUTIF_2 || output_id == HW_OUTIF_3) {
 				return false;
+			}
 			break;
 		case 1:
-			if (output_id == 0 || output_id == 2) {
+			if (output_id == HW_OUTIF_0 || output_id == HW_OUTIF_2) {
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT0_START_Address, 0x1);
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT2_START_Address, 0x1);
 				return true;
 			}
 			break;
 		case 2:
-			if (output_id == 0) {
+			if (output_id == HW_OUTIF_0) {
 				return true;
-			} else if (output_id == 2) {
+			} else if (output_id == HW_OUTIF_2) {
 				drm_crtc_vblank_off(crtc);
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT0_START_Address, 0x1);
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				dc_write_immediate(hw, DCREG_OUTPUT3_START_Address, 0x1);
 				return true;
 			}
 			break;
 		case 3:
-			if (output_id == 0) {
+			if (output_id == HW_OUTIF_0) {
 				return true;
-			} else if (output_id == 2) {
+			} else if (output_id == HW_OUTIF_2) {
 				drm_crtc_vblank_off(crtc);
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				dc_write_immediate(hw, DCREG_OUTPUT0_START_Address, 0x1);
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT1_START_Address, 0x1);
 				return true;
@@ -3105,52 +3211,53 @@ static bool ofifo_splice_trigger(struct dc_hw *hw, u8 display_id, struct drm_crt
 	case 2:
 		switch (splice_mode1) {
 		case 0:
-			if (output_id == 0) {
+			if (output_id == HW_OUTIF_0) {
 				drm_crtc_vblank_off(crtc);
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				dc_write_immediate(hw, DCREG_OUTPUT1_START_Address, 0x1);
 				return true;
-			} else if (output_id == 2 || output_id == 3)
+			} else if (output_id == HW_OUTIF_2 || output_id == HW_OUTIF_3) {
 				return false;
+			}
 			break;
 		case 1:
-			if (output_id == 0) {
+			if (output_id == HW_OUTIF_0) {
 				drm_crtc_vblank_off(crtc);
 				return true;
-			} else if (output_id == 2) {
+			} else if (output_id == HW_OUTIF_2) {
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				dc_write_immediate(hw, DCREG_OUTPUT1_START_Address, 0x1);
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT2_START_Address, 0x1);
 				return true;
 			}
 			break;
 		case 2:
-			if (output_id == 0 || output_id == 2) {
+			if (output_id == HW_OUTIF_0 || output_id == HW_OUTIF_2) {
 				drm_crtc_vblank_off(crtc);
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				dc_write_immediate(hw, DCREG_OUTPUT1_START_Address, 0x1);
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				dc_write_immediate(hw, DCREG_OUTPUT3_START_Address, 0x1);
 				return true;
 			}
 			break;
 		case 3:
-			if (output_id == 0) {
+			if (output_id == HW_OUTIF_0) {
 				return true;
-			} else if (output_id == 2) {
+			} else if (output_id == HW_OUTIF_2) {
 				drm_crtc_vblank_off(crtc);
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				dc_write_immediate(hw, DCREG_OUTPUT1_START_Address, 0x1);
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT0_START_Address, 0x1);
 				return true;
@@ -3168,31 +3275,31 @@ static bool ofifo_splice_trigger(struct dc_hw *hw, u8 display_id, struct drm_crt
 			       splice_mode0, splice_mode1);
 			return false;
 		case 1:
-			if (output_id == 0) {
+			if (output_id == HW_OUTIF_0) {
 				drm_crtc_vblank_off(crtc);
 				return true;
-			} else if (output_id == 2) {
+			} else if (output_id == HW_OUTIF_2) {
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT3_START_Address, 0x1);
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				dc_write_immediate(hw, DCREG_OUTPUT2_START_Address, 0x1);
 				return true;
 			}
 			break;
 		case 2:
-			if (output_id == 0) {
+			if (output_id == HW_OUTIF_0) {
 				drm_crtc_vblank_off(crtc);
 				return true;
-			} else if (output_id == 2) {
+			} else if (output_id == HW_OUTIF_2) {
 				return true;
-			} else if (output_id == 1) {
+			} else if (output_id == HW_OUTIF_1) {
 				drm_crtc_vblank_off(crtc);
 				dc_write_immediate(hw, DCREG_OUTPUT2_START_Address, 0x1);
 				return true;
-			} else if (output_id == 3) {
+			} else if (output_id == HW_OUTIF_3) {
 				dc_write_immediate(hw, DCREG_OUTPUT3_START_Address, 0x1);
 				return true;
 			}
@@ -3250,7 +3357,7 @@ void dc_hw_start_trigger(struct dc_hw *hw, u8 display_id, struct drm_crtc *crtc)
 			}
 		}
 
-		if (hw->rev == DC_REV_1) {
+		if (wb && hw->rev == DC_REV_1) {
 			if (hw_id == HW_DISPLAY_5)
 				link_node_offline_trigger(hw, hw_id, hw->wb[wb->wb_id].fb.enable);
 			else
@@ -3265,7 +3372,7 @@ void dc_hw_start_trigger(struct dc_hw *hw, u8 display_id, struct drm_crtc *crtc)
 		if (hw_id == HW_BLEND_WB) {
 			if (hw->rev == DC_REV_0)
 				dc_write_immediate(hw, DCREG_BLD_WB_START_Address,
-						   !!hw->wb[wb->wb_id].fb.enable);
+						   hw->wb[wb->wb_id].fb.enable);
 		}
 	}
 }
@@ -3281,6 +3388,18 @@ void dc_hw_disable_trigger(struct dc_hw *hw, u8 id)
 		dc_write_immediate(hw, DCREG_BLD_WB_START_Address, false);
 	else
 		online_trigger(hw, hw_id, output_id, false);
+}
+
+void dc_hw_hard_reset_output_regs(struct dc_hw *hw, u8 id)
+{
+	u8 output_id = 0;
+	u32 config;
+	u32 addr = VS_SET_OUTPUT_FIELD(DCREG_OUTPUT, output_id, CONFIG_Address);
+
+	output_id = hw->display[id].output_id;
+	config = dc_read_immediate(hw, addr);
+	dc_write_immediate(hw, addr,
+			   VS_SET_FIELD_PREDEF(config, DCREG_OUTPUT0_CONFIG, RESET, RESET));
 }
 
 void dc_hw_do_fe0_reset(struct dc_hw *hw)
@@ -3386,7 +3505,7 @@ void dc_hw_do_be_reset(struct dc_hw *hw)
 		dc_write_immediate(hw, DCREG_POST_PRO_WB0_CONFIG_Address, 0x00);
 		dc_write_immediate(hw, DCREG_POST_PRO_WB1_CONFIG_Address, 0x00);
 
-		for (i = 0; i < DC_DISPLAY_NUM; i++) {
+		for (i = 0; i < hw->info->display_num; i++) {
 			if (hw->display[i].info->bld_dth) {
 				for (j = 0; j < hw->display[i].states.num; j++) {
 					const struct vs_dc_property_proto *proto =
@@ -3511,20 +3630,27 @@ static void toggle_secure(struct dc_hw *hw, u8 layer, bool secure)
 			__func__);
 		return;
 	}
-	ret = trusty_protect_ip(&(dc->tzprot_pdev->dev), sid, secure);
-	if (ret)
-		dev_err(dev,
-			"%s: trusty_protect_ip call failed for sid %d, fb->secure: %d. error %d",
-			__func__, sid, secure, ret);
 
+	mutex_lock(&hw->secure_lock);
 	if (test_bit(plane_info->id, hw->secured_layers_mask) == secure)
 		dev_warn(dev, "layer %d already has secure %d, double enable or disable", layer,
 			 secure);
 
 	if (secure)
 		set_bit(plane_info->id, hw->secured_layers_mask);
-	else
+	mutex_unlock(&hw->secure_lock);
+
+	ret = trusty_protect_ip(&(dc->tzprot_pdev->dev), sid, secure);
+	if (ret)
+		dev_err(dev,
+			"%s: trusty_protect_ip call failed for sid %d, fb->secure: %d. error %d",
+			__func__, sid, secure, ret);
+
+	if (!secure) {
+		mutex_lock(&hw->secure_lock);
 		clear_bit(plane_info->id, hw->secured_layers_mask);
+		mutex_unlock(&hw->secure_lock);
+	}
 }
 
 static void plane_set_secure(struct dc_hw *hw, u8 layer, struct dc_hw_fb *fb)
@@ -4283,7 +4409,7 @@ static void plane_set_sram(struct dc_hw *hw, u8 hw_id, struct dc_hw_sram_pool *s
 inline void dc_hw_set_output_start(struct dc_hw *hw, u8 output_id, bool trig_enable)
 {
 	dc_write_immediate(hw, VS_SET_PANEL_FIELD(DCREG_OUTPUT, output_id, START_Address),
-			   !!trig_enable);
+			   trig_enable);
 }
 
 static void plane_set_rcd_mask(struct dc_hw *hw, struct dc_hw_rcd_mask *rcd_mask)
@@ -4467,7 +4593,7 @@ static void display_set_mode(struct dc_hw *hw, u8 hw_id, u8 output_id,
 
 	/* output path clock configuration*/
 	dc_write(hw, VS_SET_PANEL_FIELD(DCREG_SH_OUTPUT, output_id, CLK_EN_Address),
-		 !!mode->enable);
+		 mode->enable);
 
 	mode->is_yuv = false;
 	if (mode->enable) {
@@ -4540,10 +4666,10 @@ static void display_set_mode(struct dc_hw *hw, u8 hw_id, u8 output_id,
 		if (mode->dsc_enable)
 			ipi_format = DCREG_SH_OUTPUT0_IPI_FORMAT_VALUE_COMPRESS_DATA;
 
-		if (output_id == 0) {
+		if (output_id == HW_OUTIF_0) {
 			dc_write(hw, DCREG_SH_OUTPUT0_IPI_FORMAT_Address, ipi_format);
 			dc_write(hw, DCREG_SH_OUTPUT0_IPI_COLOR_DEPTH_Address, ipi_colordepth);
-		} else if (output_id == 1) {
+		} else if (output_id == HW_OUTIF_1) {
 			dc_write(hw, DCREG_SH_OUTPUT1_IPI_FORMAT_Address, ipi_format);
 			dc_write(hw, DCREG_SH_OUTPUT1_IPI_COLOR_DEPTH_Address, ipi_colordepth);
 		}
@@ -5171,34 +5297,13 @@ static void wb_ex_enable_shadow(struct dc_hw *hw, u8 hw_id, bool enable)
 
 static void wb_set_fb(struct dc_hw *hw, u8 hw_id, struct dc_hw_fb *fb)
 {
-	u32 config = 0, i = 0;
-	unsigned long flags;
+	u32 config = 0;
 
 	trace_config_hw_wb_fb("WB_FB", hw_id, fb);
 
-	/* DCREG_BE_INTR_ENABLE/1 is accessed from multiple context */
-	spin_lock_irqsave(&hw->be_irq_slock, flags);
-	for (i = 0; i < 4; i++) {
-		if (hw->intr_dest & BIT(i)) {
-			config = dc_read_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1));
-			if (hw_id == HW_WB_0) {
-				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_POST_WB0,
-						      FRM_DONE, fb->enable);
-				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_WB0,
-						      DATALOST_INTR, fb->enable);
-			} else if (hw_id == HW_WB_1) {
-				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_POST_WB1,
-						      FRM_DONE, fb->enable);
-				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_WB1,
-						      DATALOST_INTR, fb->enable);
-			} else if (hw_id == HW_BLEND_WB) {
-				config = VS_SET_FIELD(config, DCREG_BE_INTR_ENABLE1_BLD_WB,
-						      FRM_DONE, fb->enable);
-			}
-			dc_write_immediate(hw, VS_SET_INTR_ADDR(BE, i, ENABLE1), config);
-		}
-	}
-	spin_unlock_irqrestore(&hw->be_irq_slock, flags);
+	/* writeback module irq disable will be pending to job cleanup callback */
+	if (fb->enable)
+		dc_hw_enable_wb_irqs(hw, hw_id, fb->enable);
 
 	if (!fb->enable) {
 		if (hw_id < HW_BLEND_WB) {
@@ -5570,6 +5675,7 @@ static void display_commit(struct dc_hw *hw, u8 display_id)
 
 		/* handle histogram channels */
 		vs_dc_hist_chans_commit(hw, display_id);
+		vs_dc_hist_rgb_commit(hw, display_id);
 
 		/* TBD */
 	}
@@ -5649,12 +5755,8 @@ void dc_hw_display_commit(struct dc_hw *hw, u8 display_id)
 /*
  * Handle frame done
  */
-void dc_hw_display_frame_done(struct dc_hw *hw, u8 display_id,
-			      struct dc_hw_interrupt_status *irq_status)
+void dc_hw_display_frame_done(struct dc_hw *hw, u8 display_id)
 {
-	/* histogram channels + rgb */
-	vs_dc_hist_frame_done(hw, display_id, irq_status);
-
 	dc_hw_read_dsc_status(hw, display_id);
 }
 
@@ -5765,7 +5867,7 @@ const struct dc_hw_display *vs_dc_hw_get_display(const struct dc_hw *hw, u32 hw_
 {
 	u32 i;
 
-	for (i = 0; i < DC_DISPLAY_NUM; i++)
+	for (i = 0; i < hw->info->display_num; i++)
 		if (hw->display[i].info->id == hw_id)
 			return &hw->display[i];
 	return NULL;
@@ -5773,7 +5875,7 @@ const struct dc_hw_display *vs_dc_hw_get_display(const struct dc_hw *hw, u32 hw_
 
 const int vs_dc_hw_get_display_id(const struct dc_hw *hw, u32 hw_id)
 {
-	for (int i = 0; i < DC_DISPLAY_NUM; i++)
+	for (int i = 0; i < hw->info->display_num; i++)
 		if (hw->display[i].info->id == hw_id)
 			return i;
 
@@ -5856,7 +5958,8 @@ int dc_hw_reg_dump(struct dc_hw *hw, struct drm_printer *p, enum dc_hw_reg_bank_
 			 VS_SET_FIELD_PREDEF(be_src, DCREG_BE_REG_READ_SRC, SEL, ACTIVE) :
 			 VS_SET_FIELD_PREDEF(be_src, DCREG_BE_REG_READ_SRC, SEL, SHADOW));
 
-	ret = dc_hw_reg_dump_custom(hw, p, "DPU", hw->reg_dump_offset, hw->reg_dump_size);
+	ret = dc_hw_reg_dump_custom(hw, p, reg_type == DC_HW_REG_BANK_ACTIVE ?
+		"DPU active reg" : "DPU shadow reg", hw->reg_dump_offset, hw->reg_dump_size);
 
 	dc_write(hw, DCREG_FE0_REG_READ_SRC_Address, fe0_src);
 	dc_write(hw, DCREG_FE1_REG_READ_SRC_Address, fe1_src);

@@ -28,12 +28,14 @@ struct gpowercap {
 	struct cdev_opp_table *opp_table;
 	struct mutex lock;
 	struct delayed_work bypass_work;
+	void *algo_data;
 };
 
 struct gpowercap_ops {
 	u64 (*set_power_uw)(struct gpowercap *, u64);
 	u64 (*get_power_uw)(struct gpowercap *);
 	int (*update_power_uw)(struct gpowercap *);
+	int (*evaluate)(struct gpowercap *gpc);
 	void (*release)(struct gpowercap *);
 };
 
@@ -44,16 +46,21 @@ struct gpowercap_subsys_ops {
 	void (*exit)(void);
 	int (*setup)(struct gpowercap *gpc, struct device_node *np,
 		     enum hw_dev_type cdev_id);
+	struct gpowercap *(*algo_setup)(const char *name, struct gpowercap *parent);
 };
 
 extern struct gpowercap_subsys_ops gpc_cpu_dev_ops;
 extern struct gpowercap_subsys_ops gpc_devfreq_dev_ops;
 extern struct gpowercap_subsys_ops gpc_test_device_ops;
+extern struct gpowercap_subsys_ops gpc_virt_volt_dev_ops;
 
 static struct gpowercap_subsys_ops *gpc_device_ops[] = {
 	&gpc_cpu_dev_ops, // GPOWERCAP_NODE_CPU
 	&gpc_devfreq_dev_ops, // GPOWERCAP_NODE_DEVFREQ
 	&gpc_test_device_ops, // GPOWERCAP_NODE_TEST_DT
+	NULL, // GPOWERCAP_NODE_VIRTUAL
+	&gpc_virt_volt_dev_ops, // GPOWERCAP_NODE_VIRTUAL_VOLTAGE
+	NULL, // GPOWERCAP_NODE_TEST_VIRTUAL
 };
 
 enum GPOWERCAP_NODE_TYPE {
@@ -62,6 +69,7 @@ enum GPOWERCAP_NODE_TYPE {
 	GPOWERCAP_NODE_TEST_DT,
 	// All actual nodes should be before virtual type node.
 	GPOWERCAP_NODE_VIRTUAL,
+	GPOWERCAP_NODE_VIRTUAL_VOLTAGE,
 	GPOWERCAP_NODE_TEST_VIRTUAL,
 };
 
@@ -89,4 +97,6 @@ int gpowercap_register(const char *name, struct gpowercap *gpowercap, struct gpo
 int gpowercap_create_hierarchy(struct of_device_id *gpowercap_match_table);
 void gpowercap_destroy_hierarchy(void);
 
+#define gpowercap_for_each_children(gpc, child_ptr) \
+		list_for_each_entry((child_ptr), &(gpc)->children, siblings)
 #endif //__GOOGLE_POWERCAP_H__

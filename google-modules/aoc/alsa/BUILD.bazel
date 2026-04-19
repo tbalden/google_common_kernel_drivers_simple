@@ -2,7 +2,7 @@
 
 # ASoC-based ALSA driver gluing all the audio amplifier drivers
 
-load("//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module", "ddk_uapi_headers", "kernel_module_group")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module", "ddk_uapi_headers", "kernel_module_group")
 
 ddk_uapi_headers(
     name = "uapi_headers",

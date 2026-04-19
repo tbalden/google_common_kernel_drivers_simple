@@ -237,6 +237,7 @@ out:
 	 * representative value.
 	 */
 	if (static_branch_likely(&use_em_for_freq_mapping) &&
+	    !static_branch_likely(&enable_ptick) &&
 	    TICK_USEC > USEC_PER_MSEC && cap == SCHED_CAPACITY_SCALE) {
 		cap -= 1;
 	}
@@ -1577,6 +1578,20 @@ static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set, const char 
 
 static struct governor_attr up_rate_limit_us = __ATTR_RW(up_rate_limit_us);
 
+static ssize_t efficiencies_available_show(struct gov_attr_set *attr_set, char *buf)
+{
+	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
+	struct sugov_policy *sg_policy;
+
+	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook)
+		if (sg_policy->tunables == tunables)
+			break;
+
+	return sprintf(buf, "%u\n", sg_policy->policy->efficiencies_available);
+}
+
+static struct governor_attr efficiencies_available = __ATTR_RO(efficiencies_available);
+
 static ssize_t down_rate_limit_us_show(struct gov_attr_set *attr_set, char *buf)
 {
 	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
@@ -1811,6 +1826,7 @@ static struct attribute *sugov_attrs[] = {
 	&response_time_ms.attr,
 	&response_time_ms_nom.attr,
 	&cpu_busy_limit_ms.attr,
+	&efficiencies_available.attr,
 
 	// For PMU Limit
 	&lcpi_threshold.attr,

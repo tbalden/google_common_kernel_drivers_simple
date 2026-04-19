@@ -7,11 +7,12 @@
 #define G2D_SC_HW_H_
 #include <drm/g2d_drm.h>
 #include <drm/drm_print.h>
+#include <drm/drm_rect.h>
 
 #include "g2d_pvric_hw.h"
 
 // Todo(b/390265640): Move to dts
-#define NUM_PIPELINES (2)
+#define NUM_PIPELINES (1)
 
 #define __vsFIELDSTART(reg_field) \
 		(0 ? reg_field)
@@ -111,7 +112,9 @@ enum sc_hw_color_format {
 	FORMAT_A4R4G4B4,
 	FORMAT_X4R4G4B4,
 	FORMAT_A16R16G16B16 = 0x0A,
+	/* b/332946613 Note that YUV422 formats like FORMAT_YUY2 are unsupported by HW */
 	FORMAT_YUY2,
+	/* b/332946613 Note that YUV422 formats like FORMAT_UYVY are unsupported by HW */
 	FORMAT_UYVY,
 	FORMAT_YV12,
 	FORMAT_NV12,
@@ -203,7 +206,6 @@ struct sc_hw_fb {
 	u8 zpos;
 	u8 display_id;
 	bool enable;
-	bool dirty;
 };
 
 struct sc_hw_roi {
@@ -212,7 +214,6 @@ struct sc_hw_roi {
 	enum drm_g2d_dma_mode mode;
 	struct drm_g2d_rect in_rect;
 	bool enable;
-	bool dirty;
 };
 
 struct sc_hw_scale {
@@ -224,7 +225,6 @@ struct sc_hw_scale {
 	u32 factor_y;
 	u32 offset_x;
 	u32 offset_y;
-	bool stretch_mode;
 	bool enable;
 	bool coefficients_dirty;
 };
@@ -249,11 +249,6 @@ struct sc_hw_wb {
 	struct pvric_hw_config pvric;
 };
 
-struct sc_hw;
-struct sc_hw_funcs {
-	void (*plane)(struct sc_hw *hw, u8 display_id);
-};
-
 struct sc_hw_interrupt_status {
 	u8 pipe_frame_start;
 	u8 pipe_frame_done;
@@ -273,15 +268,15 @@ struct sc_hw {
 	u32 reg_size;
 	struct sc_hw_plane plane[NUM_PIPELINES];
 	struct sc_hw_wb wb[NUM_PIPELINES];
-	const struct sc_hw_funcs *func;
 	struct sc_hw_sub_funcs *sub_func;
 	/*for multiple interrupt destinations*/
 	u8 intr_dest;
+	u8 reset_status;
 	struct device *dev;
 };
 
 void sc_hw_commit(struct sc_hw *hw, u8 display_id);
-void sc_hw_wb_commit(struct sc_hw *hw, u8 display_id);
+void sc_hw_wb_commit(struct sc_hw *hw, u8 display_id, struct drm_rect *dst);
 void sc_hw_enable_shadow_register(struct sc_hw *hw, u8 display_id, bool enable);
 void sc_hw_start_trigger(struct sc_hw *hw, u8 display_id);
 void sc_hw_update_wb_fb(struct sc_hw *hw, u8 id, struct sc_hw_fb *fb);

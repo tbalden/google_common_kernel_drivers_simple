@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include "linux/of.h"
 #include "include/uwb_coredump.h"
 #include "include/uwb.h"
 
@@ -13,6 +14,7 @@
 #define SEG_COUNT 1
 
 #define UWB_COREDUMP_TIMEOUT 3
+#define BOOT_FAIL_BUF_SIZE 40
 
 static void u100_release_coredump(struct device *dev)
 {
@@ -47,6 +49,11 @@ int u100_register_coredump(struct u100_ctx *u100_ctx)
 	if (ret) {
 		devm_kfree(&spi->dev, sscd);
 		return ret;
+	}
+
+	if (of_property_read_bool(u100_ctx->spi->dev.of_node, "ignore-boot-error")) {
+		coredump->ignore_boot_error = true;
+		UWB_INFO("don't report ssr boot error: %d\n", coredump->ignore_boot_error);
 	}
 
 	coredump->sscd = sscd;
@@ -118,3 +125,20 @@ bool is_coredump(struct u100_ctx *u100_ctx, struct sk_buff *skb)
 		(hdr->gid == GID_VENDOR_CONFIG && hdr->oid == OID_VENDOR_DEV_CRASH));
 }
 
+void u100_report_coredump_on_poweron(struct u100_ctx *u100_ctx, int err)
+{
+	if (u100_ctx->coredump && u100_ctx->coredump->sscd &&
+		!u100_ctx->coredump->ignore_boot_error) {
+		char buf[BOOT_FAIL_BUF_SIZE];
+		struct uwb_coredump *coredump = u100_ctx->coredump;
+		struct sscd_platform_data *sscd_pdata = &coredump->sscd->sscd_pdata;
+
+		if (u100_ctx->gpio_u100_power && sscd_pdata && sscd_pdata->sscd_report) {
+			scnprintf(buf, BOOT_FAIL_BUF_SIZE, "u100 power on err: %d", err);
+			err = sscd_pdata->sscd_report(&coredump->sscd->sscd_dev,
+					coredump->sscd->segs, 0, 0, (const char *)buf);
+			if (err)
+				UWB_WARN("sscd report error %d", err);
+		}
+	}
+}

@@ -19,47 +19,7 @@
 #include "pkvm/arm_smmu_v3.h"
 
 #include "arm-smmu-v3.h"
-
-struct host_arm_smmu_device {
-	struct arm_smmu_device		smmu;
-	pkvm_handle_t			id;
-	u32				boot_gbpa;
-	bool				hvc_pd;
-	struct io_pgtable_cfg		cfg_s1;
-	struct io_pgtable_cfg		cfg_s2;
-};
-
-#define smmu_to_host(_smmu) \
-	container_of(_smmu, struct host_arm_smmu_device, smmu);
-
-struct kvm_arm_smmu_master {
-	struct arm_smmu_device		*smmu;
-	struct device			*dev;
-	struct xarray			domains;
-	struct kvm_arm_smmu_stream	*streams;
-	unsigned int			num_streams;
-	u32				ssid_bits;
-	bool				idmapped; /* Stage-2 is transparently identity mapped*/
-	bool				force_cacheable;
-	bool				single_page_size;
-};
-
-struct kvm_arm_smmu_stream {
-	u32				id;
-	struct kvm_arm_smmu_master	*master;
-	struct rb_node			node;
-};
-
-struct kvm_arm_smmu_domain {
-	struct iommu_domain		domain;
-	struct arm_smmu_device		*smmu;
-	struct mutex			init_mutex;
-	pkvm_handle_t			id;
-	unsigned long			type;
-};
-
-#define to_kvm_smmu_domain(_domain) \
-	container_of(_domain, struct kvm_arm_smmu_domain, domain)
+#include "arm-smmu-v3-common-telemetry.h"
 
 #ifdef MODULE
 static unsigned long                   pkvm_module_token;
@@ -82,6 +42,9 @@ static DEFINE_PER_CPU(local_lock_t, err_lock) = INIT_LOCAL_LOCK(err_lock);
 int kvm_nvhe_sym(smmu_init_hyp_module)(const struct pkvm_module_ops *ops);
 extern struct kvm_iommu_ops kvm_nvhe_sym(smmu_ops);
 
+#define UNFINALIZED_DOMAIN		(-1)
+
+static struct hyp_shared_arm_smmu_telemetry *kvm_shared_arm_smmu_telemetry;
 /*
  * Pre allocated pages that can be used from the EL2 part of the driver from atomic
  * context, ideally used for page table pages for identity domains.
@@ -401,6 +364,18 @@ static struct iommu_domain *kvm_arm_smmu_domain_alloc(unsigned type)
 		return NULL;
 
 	mutex_init(&kvm_smmu_domain->init_mutex);
+	spin_lock_init(&kvm_smmu_domain->masters_lock);
+
+	if (arm_smmu_domain_telemetry_alloc(kvm_smmu_domain, PKVM_MODE_DRIVER)) {
+		kfree(kvm_smmu_domain);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	/*
+	 * Initialize domain_id of just allocated domains to -1. This will be updated later
+	 * during domain attach time.
+	 */
+	arm_smmu_dom_tlm_rec_domain_id(kvm_smmu_domain->telemetry, UNFINALIZED_DOMAIN);
 
 	return &kvm_smmu_domain->domain;
 }
@@ -467,6 +442,7 @@ static int kvm_arm_smmu_domain_finalize(struct kvm_arm_smmu_domain *kvm_smmu_dom
 	}
 
 out:
+	arm_smmu_dom_tlm_rec_domain_id(kvm_smmu_domain->telemetry, kvm_smmu_domain->id);
 	kvm_smmu_domain->smmu = smmu;
 	return ret;
 }
@@ -481,6 +457,8 @@ static void kvm_arm_smmu_domain_free(struct iommu_domain *domain)
 		ret = kvm_call_hyp_nvhe(__pkvm_host_iommu_free_domain, kvm_smmu_domain->id);
 		ida_free(&kvm_arm_smmu_domain_ida, kvm_smmu_domain->id);
 	}
+
+	arm_smmu_domain_telemetry_free(kvm_smmu_domain, PKVM_MODE_DRIVER);
 	kfree(kvm_smmu_domain);
 }
 
@@ -489,11 +467,21 @@ static int kvm_arm_smmu_detach_dev_pasid(struct host_arm_smmu_device *host_smmu,
 					 ioasid_t pasid)
 {
 	int i, ret;
+	unsigned long flags;
 	struct arm_smmu_device *smmu = &host_smmu->smmu;
 	struct kvm_arm_smmu_domain *domain = xa_load(&master->domains, pasid);
 
 	if (!domain)
 		return 0;
+
+	spin_lock_irqsave(&domain->masters_lock, flags);
+	for (i = 0; i < MAX_MASTER_DEVICES_PER_DOMAIN; i++) {
+		if (domain->masters[i] == master) {
+			domain->masters[i] = NULL;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&domain->masters_lock, flags);
 
 	for (i = 0; i < master->num_streams; i++) {
 		int sid = master->streams[i].id;
@@ -591,6 +579,23 @@ static int kvm_arm_smmu_set_dev_pasid(struct iommu_domain *domain,
 		}
 	}
 	ret = xa_insert(&master->domains, pasid, kvm_smmu_domain, GFP_KERNEL);
+	if (!ret) {
+		int i;
+		bool space_found = false;
+		unsigned long flags;
+
+		spin_lock_irqsave(&kvm_smmu_domain->masters_lock, flags);
+		for (i = 0; i < MAX_MASTER_DEVICES_PER_DOMAIN; i++) {
+			if (!kvm_smmu_domain->masters[i]) {
+				kvm_smmu_domain->masters[i] = master;
+				kvm_smmu_domain->pasid[i] = pasid;
+				space_found = true;
+				break;
+			}
+		}
+		spin_unlock_irqrestore(&kvm_smmu_domain->masters_lock, flags);
+		WARN_ON(!space_found);
+	}
 
 out_ret:
 	if (ret)
@@ -621,6 +626,8 @@ static int kvm_arm_smmu_map_pages(struct iommu_domain *domain,
 	struct arm_smccc_res res;
 	int ret;
 
+	arm_smmu_dom_tlm_rec_iova_pa_alignment(kvm_smmu_domain->telemetry, iova, paddr, size);
+
 	do {
 		res = kvm_call_hyp_nvhe_smccc(__pkvm_host_iommu_map_pages,
 					      kvm_smmu_domain->id,
@@ -633,11 +640,14 @@ static int kvm_arm_smmu_map_pages(struct iommu_domain *domain,
 		WARN_ON(mapped > pgcount * pgsize);
 		pgcount -= mapped / pgsize;
 		*total_mapped += mapped;
+		arm_smmu_dom_tlm_inc_sg_segment_cnt(kvm_smmu_domain->telemetry);
+		arm_smmu_dom_tlm_rec_iova_range(kvm_smmu_domain->telemetry, iova, mapped);
 	} while (*total_mapped < size && !kvm_arm_smmu_topup_memcache(&res, gfp));
 	if (*total_mapped < size) {
 		dev_err(kvm_smmu_domain->smmu->dev,
 			"failed to map iova=0x%lx paddr=%pap, mapped [0x%zx/0x%zx] bytes ret=%d\n",
 			iova, &paddr,  *total_mapped, size, ret);
+		arm_smmu_dom_tlm_reset_sg_segment_cnt(kvm_smmu_domain->telemetry);
 		return -EINVAL;
 	}
 
@@ -716,6 +726,7 @@ static void kvm_arm_smmu_iotlb_sync_map(struct iommu_domain *domain,
 	struct kvm_arm_smmu_domain *kvm_smmu_domain = to_kvm_smmu_domain(domain);
 	struct host_arm_smmu_device *host_smmu = smmu_to_host(kvm_smmu_domain->smmu);
 
+	arm_smmu_dom_tlm_commit_sg_list_len(kvm_smmu_domain->telemetry);
 	if (!host_smmu->cfg_s1.coherent_walk)
 		kvm_call_hyp_nvhe(__pkvm_host_iommu_iotlb_sync_map,
 				  kvm_smmu_domain->id, iova, size);
@@ -800,7 +811,8 @@ static bool kvm_arm_smmu_validate_features(struct arm_smmu_device *smmu)
 		ARM_SMMU_OPT_CMDQ_FORCE_SYNC	|
 		ARM_SMMU_OPT_OVR_INSTCFG_DATA	|
 		ARM_SMMU_OPT_RPM_DISABLE	|
-		ARM_SMMU_OPT_NON_COHERENT_TTW;
+		ARM_SMMU_OPT_NON_COHERENT_TTW	|
+		ARM_SMMU_OPT_SYNC_FW;
 
 	if (smmu->options & ARM_SMMU_OPT_PAGE0_REGS_ONLY) {
 		dev_err(smmu->dev, "unsupported layout\n");
@@ -1284,6 +1296,10 @@ static int kvm_arm_smmu_probe(struct platform_device *pdev)
 	 */
 	pm_runtime_resume_and_get(dev);
 
+	host_smmu->telemetry = arm_smmu_device_telemetry_alloc(smmu, PKVM_MODE_DRIVER);
+	if (host_smmu->telemetry)
+		arm_smmu_dev_tlm_rec_dev_id(host_smmu->telemetry, host_smmu->id);
+
 	return 0;
 }
 
@@ -1302,6 +1318,8 @@ static int kvm_arm_smmu_remove(struct platform_device *pdev)
 	arm_smmu_device_disable(smmu);
 	arm_smmu_update_gbpa(smmu, host_smmu->boot_gbpa, GBPA_ABORT);
 	host_arm_smmu_array[host_smmu->id] = NULL;
+	arm_smmu_device_telemetry_free(smmu, PKVM_MODE_DRIVER);
+	host_smmu->telemetry = NULL;
 	return 0;
 }
 
@@ -1373,6 +1391,26 @@ static int kvm_arm_smmu_array_alloc(void)
 	if (!kvm_arm_smmu_v3_err)
 		return -ENOMEM;
 	return 0;
+}
+
+static int kvm_arm_smmu_telemetry_alloc(void)
+{
+	kvm_shared_arm_smmu_telemetry = (void *)alloc_pages_exact(sizeof(*kvm_shared_arm_smmu_telemetry),
+									 GFP_KERNEL | __GFP_ZERO);
+	if (!kvm_shared_arm_smmu_telemetry)
+		return -ENOMEM;
+
+	kvm_hyp_shared_arm_smmu_telemetry = kvm_shared_arm_smmu_telemetry;
+	arm_smmu_set_shared_telemetry_ptr(kvm_hyp_shared_arm_smmu_telemetry);
+	return 0;
+}
+
+static void kvm_arm_smmu_telemetry_free(void)
+{
+	int order;
+
+	order = get_order(sizeof(*kvm_shared_arm_smmu_telemetry));
+	free_pages((unsigned long)kvm_shared_arm_smmu_telemetry, order);
 }
 
 int smmu_put_device(struct device *dev, void *data)
@@ -1489,9 +1527,23 @@ static int kvm_arm_smmu_v3_init_block_region(void)
 	return 0;
 }
 
+static void kvm_arm_smmu_v3_init_use_smc_s2(void)
+{
+	struct hyp_arm_smmu_v3_device *smmu;
+
+	if (!smc_s2)
+		return;
+
+	for_each_smmu(smmu)
+		if (smmu->options & ARM_SMMU_OPT_SYNC_FW) {
+			kvm_hyp_smmu_global_config.use_smc_s2 = true;
+			return;
+		}
+}
+
 static int kvm_arm_smmu_v3_init_global_config(void)
 {
-	kvm_hyp_smmu_global_config.use_smc_s2 = smc_s2;
+	kvm_arm_smmu_v3_init_use_smc_s2();
 	return kvm_arm_smmu_v3_init_block_region();
 }
 
@@ -1516,14 +1568,18 @@ static int kvm_arm_smmu_v3_init(void)
 	if (ret || !kvm_arm_smmu_count)
 		return ret;
 
-	ret = platform_driver_probe(&kvm_arm_smmu_driver, kvm_arm_smmu_probe);
+	ret = kvm_arm_smmu_telemetry_alloc();
 	if (ret)
 		goto err_unregister;
+
+	ret = platform_driver_probe(&kvm_arm_smmu_driver, kvm_arm_smmu_probe);
+	if (ret)
+		goto free_telemetry;
 
 	if (kvm_arm_smmu_cur != kvm_arm_smmu_count) {
 		/* A device exists but failed to probe */
 		ret = -EUNATCH;
-		goto err_unregister;
+		goto free_telemetry;
 	}
 
 #ifdef MODULE
@@ -1532,7 +1588,7 @@ static int kvm_arm_smmu_v3_init(void)
 
 	if (ret) {
 		pr_err("Failed to load SMMUv3 IOMMU EL2 module: %d\n", ret);
-		goto err_unregister;
+		goto free_telemetry;
 	}
 #endif
 	/*
@@ -1547,7 +1603,7 @@ static int kvm_arm_smmu_v3_init(void)
 	kvm_hyp_smmu_last_err = kvm_arm_smmu_v3_err;
 	ret = smmu_alloc_atomic_mc(&atomic_mc);
 	if (ret)
-		goto err_free_mc;
+		goto free_telemetry;
 
 	ret = kvm_arm_smmu_v3_init_global_config();
 	if (ret)
@@ -1574,6 +1630,8 @@ static int kvm_arm_smmu_v3_init(void)
 	return 0;
 err_free_mc:
 	free_hyp_memcache(&atomic_mc);
+free_telemetry:
+	kvm_arm_smmu_telemetry_free();
 err_unregister:
 	pr_err("pKVM SMMUv3 init failed with %d\n", ret);
 	WARN_ON(driver_for_each_device(&kvm_arm_smmu_driver.driver, NULL,

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
-load("//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module")
 
 ddk_headers(
     name = "ddk_headers",
@@ -34,6 +34,7 @@ ddk_module(
         "vs_qos.c",
         "vs_recovery.c",
         "vs_simple_enc.c",
+        "vs_task_fence.c",
         "vs_trace.c",
         "vs_writeback.c",
     ],

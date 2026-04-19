@@ -74,7 +74,8 @@ static inline void gia_unlock_process_context(raw_spinlock_t *lock, unsigned lon
 	raw_spin_unlock_irqrestore(lock, *flags);
 }
 
-static inline bool gia_get_power(struct gia_device_data *gdd, bool irq_context)
+static inline bool gia_get_power(struct gia_device_data *gdd, bool irq_context,
+				 bool *skip_put_power)
 {
 	int ret;
 
@@ -98,6 +99,14 @@ static inline bool gia_get_power(struct gia_device_data *gdd, bool irq_context)
 		ret = pm_runtime_get_if_in_use(gdd->dev);
 		if (ret > 0)
 			return true;
+
+		if (gdd->ignore_rpm_status) {
+			trace_gia_error(gdd, "[ATTENTION] Ignoring power domain off");
+			dev_warn(gdd->dev, "[ATTENTION] Ignoring power domain off - ret %d\n", ret);
+			if (skip_put_power)
+				*skip_put_power = true;
+			return true;
+		}
 
 		trace_gia_error(gdd, "[ATTENTION] Power domain off and can't be turned on from irq context");
 		dev_err(gdd->dev, "[ATTENTION] Power domain off and can't be turned on from irq context - ret %d\n", ret);
@@ -420,7 +429,7 @@ static ssize_t irq_hw_status_show(struct kobject *kobj, struct kobj_attribute *a
 	gdd = container_of(gia_kobj, struct gia_device_data, gia_kobj);
 	gil = container_of(kobj, struct gia_irq_latency, irq_kobj);
 
-	gia_get_power(gdd, false);
+	gia_get_power(gdd, false, NULL);
 	gia_lock_process_context(&gdd->lock, &flags);
 
 	enabled = check_hwirq_reg_status(gdd, gdd->type_data->enable_offset, gil->hwirq);
@@ -706,12 +715,13 @@ static void gia_irq_handler_chained(struct irq_desc *desc)
 	struct irq_chip *chip = irq_desc_get_chip(desc);
 	struct irq_data *d = irq_desc_get_irq_data(desc);
 	struct gia_device_data *gdd = irq_desc_get_handler_data(desc);
+	bool skip_put_power = false;
 	u32 nr_irqs_handled = 0;
 
 	trace_gia_irq_handler_entry(gdd, d);
 	gia_telemetry_start(gdd);
 
-	if (!gia_get_power(gdd, true))
+	if (!gia_get_power(gdd, true, &skip_put_power))
 		return;
 
 	chained_irq_enter(chip, desc);
@@ -728,7 +738,9 @@ static void gia_irq_handler_chained(struct irq_desc *desc)
 			gia_process_each_status_reg(gdd, gdd->type_data->status_overflow_offset);
 
 	chained_irq_exit(chip, desc);
-	gia_put_power(gdd);
+
+	if (!skip_put_power)
+		gia_put_power(gdd);
 
 	gia_telemetry_end(gdd, nr_irqs_handled);
 	trace_gia_irq_handler_exit(gdd, d);
@@ -783,7 +795,7 @@ static void gia_irq_bus_lock(struct irq_data *d)
 	struct gia_device_data *gdd = d->domain->host_data;
 
 	trace_gia_irq_bus_lock(gdd, d);
-	gia_get_power(gdd, false);
+	gia_get_power(gdd, false, NULL);
 }
 
 static void gia_irq_bus_sync_unlock(struct irq_data *d)
@@ -1185,6 +1197,10 @@ int gia_init(struct gia_device_data *gdd)
 		dev_err(gdd->dev, "Cannot get IRQ domain\n");
 		return -EINVAL;
 	}
+
+	gdd->ignore_rpm_status = of_property_read_bool(gdd->dev->of_node, "ignore-rpm-status");
+	if (gdd->ignore_rpm_status)
+		dev_warn(gdd->dev, "ignore_rpm_status set\n");
 
 	/*
 	 * Each GIA node sends 1 (or more) interrupts out to upstream interrupt controller. For

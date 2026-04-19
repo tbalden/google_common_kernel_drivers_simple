@@ -1131,7 +1131,7 @@ PVRSRV_ERROR PVRSRVSetDeviceSystemPowerState(PPVRSRV_DEVICE_NODE psDeviceNode,
 
 	/* If setting devices to default state, force idle all devices whose default state is off */
 	pfnIsDefaultStateOff =
-	  (eNewDevicePowerState == PVRSRV_DEV_POWER_STATE_OFF) ? PVRSRVDeviceIsDefaultStateOFF : NULL;
+	  (eNewDevicePowerState == PVRSRV_DEV_POWER_STATE_OFF) ? NULL : PVRSRVDeviceIsDefaultStateOFF;
 
 	/* No power transition requested, so do nothing */
 	if (eNewSysPowerState == psDeviceNode->eCurrentSysPowerState)

@@ -10,11 +10,13 @@
 #include "vs_drm_atomic.h"
 #include "vs_crtc.h"
 #include "vs_drm_state_record.h"
+#include "vs_dc.h"
 
 #include <linux/bitmap.h>
 #include <linux/dma-fence.h>
 #include <linux/kthread.h>
 #include <linux/sched.h>
+#include <linux/timekeeping.h>
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_blend.h>
@@ -123,17 +125,33 @@ static int vs_drm_atomic_helper_wait_for_fences(struct drm_device *dev,
 	return err;
 }
 
+static void vs_drm_atomic_mark_commit_timestamp(struct drm_atomic_state *state, bool is_begin_ts)
+{
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *new_crtc_state;
+	int i;
+	ktime_t ts = ktime_get_real();
+
+	for_each_new_crtc_in_state(state, crtc, new_crtc_state, i) {
+		struct vs_crtc_state *vs_crtc_state = to_vs_crtc_state(new_crtc_state);
+
+		if (is_begin_ts)
+			vs_crtc_state->commit_begin_ts = ts;
+		else
+			vs_crtc_state->commit_done_ts = ts;
+	}
+}
+
 static void vs_drm_commit_tail(struct drm_atomic_state *old_state)
 {
 	struct drm_device *dev = old_state->dev;
 	const struct drm_mode_config_helper_funcs *funcs;
-	struct vs_drm_private *priv = dev->dev_private;
 
 	DPU_ATRACE_BEGIN(__func__);
 	funcs = dev->mode_config.helper_private;
 
 	/* Record the state being committed */
-	vs_drm_record_state(old_state, priv->sh_record);
+	vs_drm_record_state(old_state);
 
 	DPU_ATRACE_BEGIN("wait_for_fences");
 	vs_drm_atomic_helper_wait_for_fences(dev, old_state, false);
@@ -151,6 +169,8 @@ static void vs_drm_commit_tail(struct drm_atomic_state *old_state)
 	DPU_ATRACE_BEGIN("cleanup_done");
 	drm_atomic_helper_commit_cleanup_done(old_state);
 	DPU_ATRACE_END("cleanup_done");
+
+	vs_drm_atomic_mark_commit_timestamp(old_state, false);
 
 	drm_atomic_state_put(old_state);
 	DPU_ATRACE_END(__func__);
@@ -199,6 +219,8 @@ static int vs_drm_atomic_commit_internal(struct drm_device *dev, struct drm_atom
 					 bool nonblock)
 {
 	int ret;
+
+	vs_drm_atomic_mark_commit_timestamp(state, true);
 
 	DPU_ATRACE_BEGIN("setup_commit");
 	ret = drm_atomic_helper_setup_commit(state, nonblock);
@@ -553,7 +575,41 @@ static int vs_drm_atomic_check_updated_planes(struct drm_device *dev,
 	return 0;
 }
 
-static void vs_drm_atomic_check_recovery_needed(struct drm_device *dev,
+static void vs_drm_atomic_check_gram_collision(struct drm_device *dev,
+					       struct drm_atomic_state *state)
+{
+	struct drm_connector *connector;
+	struct drm_connector_state *new_conn_state;
+	int i;
+
+	for_each_new_connector_in_state(state, connector, new_conn_state, i) {
+		if (is_gs_drm_connector_state(new_conn_state)) {
+			struct gs_drm_connector_state *gs_conn_state =
+				to_gs_connector_state(new_conn_state);
+
+			/* won't trigger coredump again until the next reboot */
+			if (gs_conn_state->coredump_for_gram_collision_triggered)
+				continue;
+
+			if (test_bit(GS_PANEL_ERR_GRAM_COLLISION, gs_conn_state->panel_errors)) {
+				struct vs_crtc *vs_crtc = to_vs_crtc(new_conn_state->crtc);
+
+				dev_err(dev->dev, "GRAM collision detected from panel\n");
+
+				gs_conn_state->coredump_for_gram_collision_triggered = true;
+
+				if (!dc_is_coredump_source_enabled(dev_get_drvdata(vs_crtc->dev),
+								   SSCD_SRC_GRAM_COLLISION))
+					continue;
+
+				vs_crtc_trigger_gram_collision_coredump(vs_crtc,
+								new_conn_state->crtc->state);
+			}
+		}
+	}
+}
+
+static void vs_drm_atomic_check_display_errors(struct drm_device *dev,
 						struct drm_atomic_state *state)
 {
 	struct drm_connector *connector;
@@ -581,6 +637,10 @@ static void vs_drm_atomic_check_recovery_needed(struct drm_device *dev,
 		gs_conn_state = to_gs_connector_state(new_conn_state);
 		vs_crtc_state = to_vs_crtc_state(new_crtc_state);
 
+		if (vs_crtc_state->recovery_disabled)
+			continue;
+
+
 		if (test_bit(GS_DSI_ERR_HARD_RSTN, gs_conn_state->dsi_errors)) {
 			vs_crtc_state->needs_recovery = true;
 			dev_err(dev->dev, "marking crtc needs_recovery dsi:%*pb\n",
@@ -590,6 +650,11 @@ static void vs_drm_atomic_check_recovery_needed(struct drm_device *dev,
 /*
 		if (test_bit(GS_DSI_ERR_HARD_RSTN, gs_conn_state->dsi_errors) ||
 		    !bitmap_empty(gs_conn_state->panel_errors, GS_PANEL_ERR_MAX)) {
+			// skip recovery if only GRAM collision is detected
+			if (gs_panel_only_specific_error_detected_in_bitmap(
+					gs_conn_state->panel_errors, GS_PANEL_ERR_GRAM_COLLISION))
+				continue;
+
 			vs_crtc_state->needs_recovery = true;
 			dev_err(dev->dev, "marking crtc needs_recovery dsi:%*pb panel:%*pb\n",
 				GS_DSI_ERR_MAX, gs_conn_state->dsi_errors, GS_PANEL_ERR_MAX,
@@ -643,7 +708,8 @@ int vs_drm_atomic_check(struct drm_device *dev, struct drm_atomic_state *state)
 		}
 	}
 
-	vs_drm_atomic_check_recovery_needed(dev, state);
+	vs_drm_atomic_check_gram_collision(dev, state);
+	vs_drm_atomic_check_display_errors(dev, state);
 
 	DPU_ATRACE_BEGIN("check_planes");
 	ret = drm_atomic_helper_check_planes(dev, state);

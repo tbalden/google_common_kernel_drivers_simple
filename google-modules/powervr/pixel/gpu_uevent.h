@@ -29,6 +29,7 @@ enum gpu_uevent_info {
 struct gpu_uevent {
 	enum gpu_uevent_type type;
 	enum gpu_uevent_info info;
+	uid_t uid;
 };
 
 struct gpu_uevent_ctx {

@@ -23,8 +23,8 @@ struct map_benchmark_data {
 	struct iommu_map_benchmark bparam;
 	struct device *dev;
 	struct dentry  *debugfs;
-	atomic64_t sum_map_100ns;
-	atomic64_t sum_unmap_100ns;
+	atomic64_t sum_map_ns;
+	atomic64_t sum_unmap_ns;
 	atomic64_t sum_sq_map;
 	atomic64_t sum_sq_unmap;
 	atomic64_t loops;
@@ -50,8 +50,17 @@ static int map_benchmark_thread(void *data)
 	dma_addr_t iova;
 	int prot = IOMMU_READ | IOMMU_WRITE;
 	int npages = map->bparam.num_pages;
+	int nmappings = map->bparam.num_mappings;
 	struct iommu_domain *domain = iommu_get_domain_for_dev(map->dev);
 	int ret = 0, i;
+	size_t size = npages * PAGE_SIZE;
+	size_t aligned_size;
+	unsigned long align_mask = ~0UL;
+	unsigned long shift;
+
+	shift = fls_long(size - 1);
+	align_mask <<= shift;
+	aligned_size = 1UL << shift;
 
 	iova = t_data->iova_start;
 	dev_info(map->dev, "iova starting address of thread %u: %pad", t_data->thread_num, &iova);
@@ -70,24 +79,27 @@ static int map_benchmark_thread(void *data)
 	}
 
 	while (!kthread_should_stop())  {
-		u64 map_100ns, unmap_100ns, map_sq, unmap_sq;
+		u64 map_sq, unmap_sq;
 		ktime_t map_stime, map_etime, unmap_stime, unmap_etime;
 		ktime_t map_delta, unmap_delta;
 		ssize_t map_size;
 		size_t unmapped_size;
 
 		map_stime = ktime_get();
-		map_size = iommu_map_sg(domain, iova, sgt.sgl, sgt.orig_nents, prot, GFP_KERNEL);
-		if (map_size < 0) {
-			ret = map_size;
-			pr_err("iommu_map_sg failed on %s: %d\n", dev_name(map->dev), ret);
-			goto out;
-		}
-		if (map_size < (npages << PAGE_SHIFT)) {
-			ret = -ENOMEM;
-			pr_err("iommu_map_sg not all memory are mapped %s (%zd vs %zu)\n",
-			       dev_name(map->dev), map_size, (size_t)npages << PAGE_SHIFT);
-			goto out;
+		for (i = 0; i < nmappings; i++) {
+			map_size = iommu_map_sg(domain, iova + i * aligned_size, sgt.sgl,
+						sgt.orig_nents, prot, GFP_KERNEL);
+			if (map_size < 0) {
+				ret = map_size;
+				pr_err("iommu_map_sg failed on %s: %d\n", dev_name(map->dev), ret);
+				goto out;
+			}
+			if (map_size < (npages << PAGE_SHIFT)) {
+				ret = -ENOMEM;
+				pr_err("iommu_map_sg not all memory are mapped %s (%zd vs %zu)\n",
+				       dev_name(map->dev), map_size, (size_t)npages << PAGE_SHIFT);
+				goto out;
+			}
 		}
 		map_etime = ktime_get();
 		map_delta = ktime_sub(map_etime, map_stime);
@@ -96,28 +108,47 @@ static int map_benchmark_thread(void *data)
 		ndelay(map->bparam.dma_trans_ns);
 
 		unmap_stime = ktime_get();
-		unmapped_size = iommu_unmap(domain, iova, map_size);
-		if (unmapped_size != (size_t)map_size) {
-			ret = -EIO;
-			pr_err("iommu_unmap reported different size than iommu_map_sg (%zu vs %zd)\n",
-			       unmapped_size, map_size);
-			goto out;
+		for (i = 0; i < nmappings; i++) {
+			unmapped_size = iommu_unmap(domain, iova + i * aligned_size, map_size);
+			if (unmapped_size != (size_t)map_size) {
+				ret = -EIO;
+				pr_err("iommu_unmap reported different size than iommu_map_sg (%zu vs %zd)\n",
+				       unmapped_size, map_size);
+				goto out;
+			}
 		}
 		unmap_etime = ktime_get();
 		unmap_delta = ktime_sub(unmap_etime, unmap_stime);
 
 		/* calculate sum and sum of squares */
 
-		map_100ns = div64_ul(map_delta,  100);
-		unmap_100ns = div64_ul(unmap_delta, 100);
-		map_sq = map_100ns * map_100ns;
-		unmap_sq = unmap_100ns * unmap_100ns;
 
-		atomic64_add(map_100ns, &map->sum_map_100ns);
-		atomic64_add(unmap_100ns, &map->sum_unmap_100ns);
+		map_delta = div64_ul(map_delta,  nmappings);
+		unmap_delta = div64_ul(unmap_delta,  nmappings);
+		map_sq = map_delta * map_delta;
+		unmap_sq = unmap_delta * unmap_delta;
+
+		atomic64_add(map_delta, &map->sum_map_ns);
+		atomic64_add(unmap_delta, &map->sum_unmap_ns);
 		atomic64_add(map_sq, &map->sum_sq_map);
 		atomic64_add(unmap_sq, &map->sum_sq_unmap);
 		atomic64_inc(&map->loops);
+
+		/*
+		 * We may test for a long time so periodically check whether
+		 * we need to schedule to avoid starving the others. Otherwise
+		 * we may hangup the kernel in a non-preemptible kernel when
+		 * the test kthreads number >= CPU number, the test kthreads
+		 * will run endless on every CPU since the thread resposible
+		 * for notifying the kthread stop (in do_map_benchmark())
+		 * could not be scheduled.
+		 *
+		 * Note this may degrade the test concurrency since the test
+		 * threads may need to share the CPU time with other load
+		 * in the system. So it's recommended to run this benchmark
+		 * on an idle system.
+		 */
+		cond_resched();
 	}
 
 out:
@@ -132,8 +163,6 @@ static int do_map_benchmark(struct map_benchmark_data *map)
 	struct task_struct **tsk = NULL;
 	struct thread_data *t_data = NULL;
 	int threads = map->bparam.threads;
-	int node = map->bparam.node;
-	const cpumask_t *cpu_mask = cpumask_of_node(node);
 	size_t size = map->bparam.num_pages * PAGE_SIZE;
 	size_t aligned_size;
 	u64 loops;
@@ -142,10 +171,12 @@ static int do_map_benchmark(struct map_benchmark_data *map)
 	unsigned long align_mask = ~0UL;
 	u64 dma_size;
 	unsigned long shift;
+	cpumask_t cpu_mask;
 
 	shift = fls_long(size - 1);
 	align_mask <<= shift;
 	aligned_size = 1UL << shift;
+	aligned_size *= map->bparam.num_mappings;
 
 	dma_size = iova_end - iova_start + 1;
 
@@ -169,24 +200,29 @@ static int do_map_benchmark(struct map_benchmark_data *map)
 
 	get_device(map->dev);
 
+	iova_ptr = iova_end;
+
+	cpumask_copy(&cpu_mask, &current->cpus_mask);
+
 	for (i = 0; i < threads; i++) {
 		t_data[i].map = map;
 		t_data[i].thread_num = i;
-		if ((iova_ptr - iova_start + 1) < size)
-			t_data[i].iova_start = (iova_end - size + 1) & align_mask;
+		if ((iova_ptr - iova_start + 1) < aligned_size)
+			t_data[i].iova_start = (iova_end - aligned_size + 1) & align_mask;
 		else
-			t_data[i].iova_start = (iova_ptr - size + 1) & align_mask;
+			t_data[i].iova_start = (iova_ptr - aligned_size + 1) & align_mask;
 
 		tsk[i] = kthread_create_on_node(map_benchmark_thread, &t_data[i], map->bparam.node,
 						"iommu-map-benchmark/%d", i);
 		if (IS_ERR(tsk[i])) {
 			pr_err("create iommu_map thread failed\n");
 			ret = PTR_ERR(tsk[i]);
+			while (--i >= 0)
+				kthread_stop(tsk[i]);
 			goto out;
 		}
 
-		if (node != NUMA_NO_NODE)
-			kthread_bind_mask(tsk[i], cpu_mask);
+		kthread_bind_mask(tsk[i], &cpu_mask);
 
 		if (t_data[i].iova_start == 0)
 			iova_ptr = iova_end;
@@ -195,8 +231,8 @@ static int do_map_benchmark(struct map_benchmark_data *map)
 	}
 
 	/* clear the old value in the previous benchmark */
-	atomic64_set(&map->sum_map_100ns, 0);
-	atomic64_set(&map->sum_unmap_100ns, 0);
+	atomic64_set(&map->sum_map_ns, 0);
+	atomic64_set(&map->sum_unmap_ns, 0);
 	atomic64_set(&map->sum_sq_map, 0);
 	atomic64_set(&map->sum_sq_unmap, 0);
 	atomic64_set(&map->loops, 0);
@@ -208,45 +244,42 @@ static int do_map_benchmark(struct map_benchmark_data *map)
 
 	msleep_interruptible(map->bparam.seconds * 1000);
 
-	/* wait for the completion of benchmark threads */
+	/* wait for the completion of all started benchmark threads */
 	for (i = 0; i < threads; i++) {
-		ret = kthread_stop(tsk[i]);
-		if (ret)
-			goto out;
+		int kthread_ret = kthread_stop_put(tsk[i]);
+
+		if (kthread_ret)
+			ret = kthread_ret;
 	}
+
+	if (ret)
+		goto out;
 
 	loops = atomic64_read(&map->loops);
 	if (likely(loops > 0)) {
 		u64 map_variance, unmap_variance;
-		u64 sum_map = atomic64_read(&map->sum_map_100ns);
-		u64 sum_unmap = atomic64_read(&map->sum_unmap_100ns);
+		u64 sum_map = atomic64_read(&map->sum_map_ns);
+		u64 sum_unmap = atomic64_read(&map->sum_unmap_ns);
 		u64 sum_sq_map = atomic64_read(&map->sum_sq_map);
 		u64 sum_sq_unmap = atomic64_read(&map->sum_sq_unmap);
 
 		/* average latency */
-		map->bparam.avg_map_100ns = div64_u64(sum_map, loops);
-		map->bparam.avg_unmap_100ns = div64_u64(sum_unmap, loops);
+		map->bparam.avg_map_ns = div64_u64(sum_map, loops);
+		map->bparam.avg_unmap_ns = div64_u64(sum_unmap, loops);
 
 		/* standard deviation of latency */
 		map_variance = div64_u64(sum_sq_map, loops) -
-				map->bparam.avg_map_100ns *
-				map->bparam.avg_map_100ns;
+				map->bparam.avg_map_ns *
+				map->bparam.avg_map_ns;
 		unmap_variance = div64_u64(sum_sq_unmap, loops) -
-				map->bparam.avg_unmap_100ns *
-				map->bparam.avg_unmap_100ns;
+				map->bparam.avg_unmap_ns *
+				map->bparam.avg_unmap_ns;
 		map->bparam.map_stddev = int_sqrt64(map_variance);
 		map->bparam.unmap_stddev = int_sqrt64(unmap_variance);
 	}
 
 out:
-	if (tsk) {
-		for (i = 0; i < threads; i++) {
-			if (tsk[i])
-				put_task_struct(tsk[i]);
-		}
-
-		kfree(tsk);
-	}
+	kfree(tsk);
 	kfree(t_data);
 	put_device(map->dev);
 	return ret;
@@ -283,7 +316,8 @@ static long map_benchmark_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		if (map->bparam.node != NUMA_NO_NODE &&
-		    !node_possible(map->bparam.node)) {
+		    (map->bparam.node < 0 || map->bparam.node >= MAX_NUMNODES ||
+		     !node_possible(map->bparam.node))) {
 			pr_err("invalid numa node\n");
 			return -EINVAL;
 		}
@@ -292,6 +326,9 @@ static long map_benchmark_ioctl(struct file *file, unsigned int cmd,
 			pr_err("invalid num_pages\n");
 			return -EINVAL;
 		}
+
+		if (map->bparam.num_mappings < 1)
+			map->bparam.num_mappings = 1;
 
 		old_dma_mask = dma_get_mask(map->dev);
 
@@ -312,6 +349,9 @@ static long map_benchmark_ioctl(struct file *file, unsigned int cmd,
 		 * dma_mask changed by benchmark
 		 */
 		dma_set_mask(map->dev, old_dma_mask);
+
+		if (ret)
+			return ret;
 		break;
 	default:
 		return -EINVAL;
@@ -340,9 +380,11 @@ static int __map_benchmark_probe(struct device *dev)
 	struct dentry *entry;
 	struct map_benchmark_data *map;
 	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
-	u64 dma_limit = dma_get_mask(dev);
+	u64 dma_limit;
 	int ret;
 
+	dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+	dma_limit = dma_get_mask(dev);
 	if (domain->geometry.force_aperture)
 		dma_limit = min_t(u64, dma_limit, (u64)domain->geometry.aperture_end);
 
@@ -387,9 +429,16 @@ static int map_benchmark_platform_probe(struct platform_device *pdev)
 	return __map_benchmark_probe(&pdev->dev);
 }
 
+static const struct of_device_id map_benchmark_of_match[] = {
+	{ .compatible = "iommu-map-benchmark", },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, map_benchmark_of_match);
+
 static struct platform_driver map_benchmark_platform_driver = {
 	.driver		= {
 		.name	= "iommu_map_benchmark",
+		.of_match_table = map_benchmark_of_match,
 	},
 	.probe = map_benchmark_platform_probe,
 };

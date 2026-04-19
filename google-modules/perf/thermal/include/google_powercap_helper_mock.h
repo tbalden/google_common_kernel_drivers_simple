@@ -27,6 +27,8 @@ const struct of_device_id *mock_match_of_node(const struct of_device_id *matches
 struct powercap_control_type *mock_powercap_register_control_type(
 		struct powercap_control_type *control_type, const char *name,
 		const struct powercap_control_type_ops *ops);
+struct device_node *mock_of_find_node_by_path(const char *path);
+void mock_of_node_put(struct device_node *np);
 int mock_powercap_unregister_control_type(struct powercap_control_type *control_type);
 struct gpowercap *gpc_test_setup(const struct gpowercap_node *hierarchy,
 				 struct gpowercap *parent);
@@ -69,6 +71,14 @@ static inline const struct of_device_id *mock_match_of_node(const struct of_devi
 {
 	return NULL;
 }
+
+static inline struct device_node *mock_of_find_node_by_path(const char *path)
+{
+	return NULL;
+}
+
+static inline void mock_of_node_put(struct device_node *np)
+{ }
 
 static inline struct powercap_control_type *mock_powercap_register_control_type(
 		struct powercap_control_type *control_type, const char *name,
@@ -183,6 +193,25 @@ static inline const struct of_device_id *match_of_node(const struct of_device_id
 	return of_match_node(matches, node);
 #endif
 }
+
+static inline struct device_node *gpc_of_find_node_by_path(const char *path)
+{
+#if IS_ENABLED(CONFIG_GOOGLE_POWERCAP_KUNIT_TEST)
+	return mock_of_find_node_by_path(path);
+#else
+	return of_find_node_by_path(path);
+#endif
+}
+
+static inline void gpc_of_node_put(struct device_node *np)
+{
+#if IS_ENABLED(CONFIG_GOOGLE_POWERCAP_KUNIT_TEST)
+	mock_of_node_put(np);
+#else
+	of_node_put(np);
+#endif
+}
+
 
 static inline struct powercap_control_type *register_control_type(
 		struct powercap_control_type *control_type, const char *name,

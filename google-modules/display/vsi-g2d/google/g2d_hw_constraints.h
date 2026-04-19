@@ -21,14 +21,14 @@ struct g2d_alignment_constraints {
 	/* In Pixels */
 	u16 width;
 	u16 height;
+	unsigned int max_width;
+	unsigned int max_scaled_width;
+	unsigned int max_height_rot;
 };
 
 struct g2d_layer_constraints {
 	unsigned int min_width;
 	unsigned int min_height;
-	unsigned int max_width;
-	unsigned int max_height;
-	unsigned int max_height_rot;
 
 	/*
 	 * Some formats can have a weird 1-off difference (eg FP16 is *almost* the same as the other
@@ -42,13 +42,11 @@ struct g2d_layer_constraints {
 };
 
 struct g2d_wb_constraints {
-	unsigned int max_width;
-	unsigned int max_height;
-
 	struct g2d_alignment_constraints alignment[NUM_WB_FORMATS];
 };
 
 const struct g2d_layer_constraints *get_layer_dma_constraints(void);
 const struct g2d_wb_constraints *get_wb_dma_constraints(void);
+int g2d_get_max_scaling_width(u8 hw_format);
 
 #endif //_G2D_HW_CONSTRAINTS_H_

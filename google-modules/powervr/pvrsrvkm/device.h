@@ -64,6 +64,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "virt_validation_defs.h"
 #endif
 
+/*
+ * Define PVRSRV_USE_LOCKLESS_PMR_ZOMBIE_LIST to use lockless list implementation
+ * for PVRSRV_DEVICE_NODE::sPMRZombieList.
+ */
+#define PVRSRV_USE_LOCKLESS_PMR_ZOMBIE_LIST
+
 typedef struct _PVRSRV_POWER_DEV_TAG_ *PPVRSRV_POWER_DEV;
 
 struct SYNC_RECORD;
@@ -225,6 +231,7 @@ typedef struct _PVRSRV_DEVICE_DEBUG_INFO_
 	DI_GROUP *psGroup;
 	DI_ENTRY *psDumpDebugEntry;
 #ifdef SUPPORT_RGX
+	DI_ENTRY *psUtilStatsEntry;
 	DI_ENTRY *psFWTraceEntry;
 #ifdef SUPPORT_FIRMWARE_GCOV
 	DI_ENTRY *psFWGCOVEntry;
@@ -235,7 +242,6 @@ typedef struct _PVRSRV_DEVICE_DEBUG_INFO_
 	IMG_UINT64 ui64RiscvDmi;
 #endif
 	DI_ENTRY *psDevMemEntry;
-	IMG_HANDLE hGpuUtilUserDebugFS;
 #endif /* SUPPORT_RGX */
 #ifdef SUPPORT_POWER_SAMPLING_VIA_DEBUGFS
 	DI_ENTRY *psPowerDataEntry;
@@ -634,10 +640,16 @@ typedef struct _PVRSRV_DEVICE_NODE_
 	ATOMIC_T                i32NumCleanupItems;   /*!< Number of cleanup thread work items. Includes items being freed. */
 #if defined(SUPPORT_PMR_DEFERRED_FREE)
 	/* Data for the deferred freeing of a PMR physical pages for a given device */
+#if defined(PVRSRV_USE_LOCKLESS_PMR_ZOMBIE_LIST)
+	struct llist_head       sPMRZombieList;       /*!< List of PMRs to free */
+	ATOMIC_T                uiPMRZombieCount;     /*!< Number of elements in the list */
+	ATOMIC_T                uiPMRZombieCountInCleanup; /*!< Number of elements in cleanup items */
+#else
 	DLLIST_NODE             sPMRZombieList;       /*!< List of PMRs to free */
 	POS_LOCK                hPMRZombieListLock;   /*!< List lock */
 	IMG_UINT32              uiPMRZombieCount;     /*!< Number of elements in the list */
 	IMG_UINT32              uiPMRZombieCountInCleanup; /*!< Number of elements in cleanup items */
+#endif
 #endif /* defined(SUPPORT_PMR_DEFERRED_FREE) */
 	ATOMIC_T                eFrozen;              /*< Frozen / Unfrozen indicator */
 	IMG_HANDLE              hDeviceThreadEvObj;   /*< Event Object for Freeze indicator */
@@ -656,6 +668,26 @@ typedef struct _PVRSRV_DEVICE_NODE_
 	IMG_UINT32              *pui32RTContextCount;
 #endif
 } PVRSRV_DEVICE_NODE;
+
+#if !defined(PVRSRV_USE_LOCKLESS_PMR_ZOMBIE_LIST)
+/* Protects:
+ * - `psDevNode->sPMRZombieList`
+ * - `uiPMRZombieCount`
+ * - `uiPMRZombieCountInCleanup`
+ */
+
+INLINE void
+_ZombieListLock(PPVRSRV_DEVICE_NODE psDevNode)
+{
+	OSLockAcquire(psDevNode->hPMRZombieListLock);
+}
+
+INLINE void
+_ZombieListUnlock(PPVRSRV_DEVICE_NODE psDevNode)
+{
+	OSLockRelease(psDevNode->hPMRZombieListLock);
+}
+#endif
 
 /*
  * Macros to be used instead of calling directly the pfns since these macros
@@ -680,7 +712,6 @@ void PVRSRVDeviceSetState(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_DEVICE_STATE 
 	(((eStatus == PVRSRV_DEVICE_HEALTH_STATUS_DEAD)) ? \
 	 IMG_FALSE : IMG_TRUE)
 
-#if defined(SUPPORT_PMR_DEFERRED_FREE) || defined(SUPPORT_MMU_DEFERRED_FREE)
 /* Determines if a 32-bit `uiCurrent` counter advanced to or beyond
  * `uiRequired` value. The function takes into consideration that the
  * counter could have wrapped around. */
@@ -694,7 +725,6 @@ static INLINE IMG_BOOL PVRSRVHasCounter32Advanced(IMG_UINT32 uiCurrent,
 	    /* There can't be ~4 billion transactions pending, so consider wrapped */
 	    (((uiRequired - uiCurrent) > 0xF0000000UL) ? IMG_TRUE : IMG_FALSE);
 }
-#endif
 
 #endif /* DEVICE_H */
 

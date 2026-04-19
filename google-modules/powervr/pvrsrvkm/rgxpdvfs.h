@@ -69,8 +69,20 @@ PVRSRV_ERROR PDVFSLimitMaxFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui
 
 PVRSRV_ERROR PDVFSLimitMinFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32MinOPPPoint);
 
-PVRSRV_ERROR PDVFSSetParams(PVRSRV_RGXDEV_INFO *psDevInfo, RGXFW_PDVFS_PARAMS *psPDVFSParams);
+#if defined(SUPPORT_PDVFS_HEADROOM_EXT)
+PVRSRV_ERROR PDVFSSetFrequencyHeadroom(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_INT32 i32Headroom);
+#endif
+
+#if defined(SUPPORT_PDVFS_POLLINT_EXT)
+PVRSRV_ERROR PDVFSSetReactivePollingInterval(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32PollingMs);
+#endif
+
+PVRSRV_ERROR PDVFSSetUpThreshold(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32UpThresholdInPct);
+
+PVRSRV_ERROR PDVFSSetDownDifferential(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32DownDifferentialInPct);
 
 void RGXPDVFSCheckCoreClkRateChange(PVRSRV_RGXDEV_INFO *psDevInfo);
+
+void RGXPDVFSCheckUtilisationChange(PVRSRV_RGXDEV_INFO *psDevInfo);
 
 #endif /* RGXPDVFS_H */

@@ -607,6 +607,13 @@ static int google_wlc_chip_get_limit_rsn(struct google_wlc_data *chgr, u8 *reaso
 	return ret;
 }
 
+static int google_wlc_chip_set_qi_id(struct google_wlc_data *chgr, u16 qi_id)
+{
+	if (chgr->chip->reg_qi_id < 0)
+		return -EINVAL;
+	return chgr->chip->reg_write_16(chgr, chgr->chip->reg_qi_id, qi_id);
+}
+
 /* Functions that should be implemented individually by chip */
 
 static int google_wlc_chip_get_vout_set(struct google_wlc_data *chgr, u32 *mv)
@@ -825,6 +832,7 @@ static int google_wlc_chip_init_funcs(struct google_wlc_data *chgr)
 	chip->reg_rf_curr_start = -1;
 	chip->reg_limit_rsn = -1;
 	chip->val_eds_stream_fwupdate = -1;
+	chip->reg_qi_id = -1;
 
 	/* Initialize default i2c functions */
 	chip->reg_read_n = google_wlc_chip_reg_read_n;
@@ -892,6 +900,7 @@ static int google_wlc_chip_init_funcs(struct google_wlc_data *chgr)
 	chip->chip_get_vinv = google_wlc_chip_get_vinv;
 	chip->chip_get_mode_capabilities = google_wlc_chip_get_mode_capabilities;
 	chip->chip_set_dynamic_mod = google_wlc_chip_set_dynamic_mod;
+	chip->chip_set_qi_id = google_wlc_chip_set_qi_id;
 
 	/* Chip specific functions and registers. These may override the defaults */
 	switch (chgr->chip_id) {

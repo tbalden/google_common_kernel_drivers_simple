@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 
-load("//build/kernel/kleaf:kernel.bzl", "checkpatch", "kernel_module")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "checkpatch", "kernel_module")
 
 checkpatch(
     name = "checkpatch",
@@ -30,11 +30,14 @@ kernel_module(
         "drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c",
         "drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h",
         "drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-common.c",
+        "drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-common-telemetry.c",
+        "drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-common-telemetry.h",
         "drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3-kvm.c",
         "drivers/iommu/arm/arm-smmu-v3/pkvm/Kbuild",
         "drivers/iommu/arm/arm-smmu-v3/pkvm/arm-smmu-v3.c",
         "drivers/iommu/arm/arm-smmu-v3/pkvm/arm-smmu-v3-module.h",
         "drivers/iommu/arm/arm-smmu-v3/pkvm/arm_smmu_v3.h",
+        "drivers/iommu/arm/arm-smmu-v3/pkvm/hyp-arm-smmu-v3-common-telemetry.h",
         "drivers/iommu/arm/arm-smmu-v3/pkvm/io-pgtable-arm.c",
         "drivers/iommu/io-pgtable.c",
         "drivers/iommu/io-pgtable-arm.c",
@@ -43,6 +46,7 @@ kernel_module(
         "drivers/perf/Makefile",
         "drivers/perf/arm_smmuv3_pmu.c",
         "include/arm-smmu-v3/arm-smmu-v3-regs.h",
+        "include/arm-smmu-v3/arm-smmu-v3-telemetry-callbacks.h",
         "include/arm-smmu-v3/io-pgtable.h",
         "include/arm-smmu-v3/io-pgtable-arm.h",
     ],

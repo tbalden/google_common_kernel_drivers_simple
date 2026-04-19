@@ -5,10 +5,13 @@
  * Google firmware tracepoint services source.
  */
 
+#include <linux/mutex.h>
+
 #include "fwtp.h"
 #define CREATE_TRACE_POINTS
 #include "fwtp_ftrace.h"
 #include "fwtp_protocol.h"
+#include "soc/google/google_timestamp_sync.h"
 
 /*******************************************************************************
  * Internal FWTP kernel device services.
@@ -162,6 +165,36 @@ void fwtp_dev_free_memio_ring(struct fwtp_dev *fwtp_dev,
 		devm_iounmap(fwtp_dev->dev, ring->buffer);
 }
 EXPORT_SYMBOL_GPL(fwtp_dev_free_memio_ring);
+
+/**
+ * fwtp_dev_trace_fwtp_perfetto_counter - Logs an FWTP Perfetto counter trace.
+ *
+ * @timestamp: FWTP tracepoint timestamp.
+ * @track_id: Perfetto track ID.
+ * @category: Perfetto category.
+ * @str: Perfetto trace string.
+ * @data: Perfetto counter data.
+ */
+void fwtp_dev_trace_fwtp_perfetto_counter(u64 timestamp, u32 track_id,
+					  const char *category, const char *str,
+					  u32 data)
+{
+	static DEFINE_MUTEX(prev_boottime_timestamp_mutex);
+	static u64 prev_boottime_timestamp;
+	u64 boottime_timestamp;
+
+	/* Use boot time based timestamps for decoding. */
+	mutex_lock(&prev_boottime_timestamp_mutex);
+	boottime_timestamp = max(goog_gtc_ticks_to_boottime(timestamp),
+				 prev_boottime_timestamp);
+	prev_boottime_timestamp = boottime_timestamp;
+	mutex_unlock(&prev_boottime_timestamp_mutex);
+
+	/* Log an FWTP Perfetto counter trace. */
+	trace_fwtp_perfetto_counter(boottime_timestamp, track_id, category, str,
+				    data);
+}
+EXPORT_SYMBOL_GPL(fwtp_dev_trace_fwtp_perfetto_counter);
 
 /* Module info. */
 MODULE_AUTHOR("Google LLC");

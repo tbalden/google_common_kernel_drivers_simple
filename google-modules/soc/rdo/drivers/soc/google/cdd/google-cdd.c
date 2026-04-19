@@ -11,6 +11,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/of.h>
+#include <linux/of_platform.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <soc/google/google-cdd.h>
@@ -77,6 +78,12 @@ bool google_cdd_get_warm_status(void)
 	return cdd_ctx.in_warm;
 }
 EXPORT_SYMBOL_GPL(google_cdd_get_warm_status);
+
+void google_cdd_set_powerkey_status(bool val)
+{
+	cdd_ctx.long_press_power = val;
+}
+EXPORT_SYMBOL_GPL(google_cdd_set_powerkey_status);
 
 void google_cdd_set_debug_test_buffer_addr(u64 paddr, unsigned int cpu)
 {
@@ -208,7 +215,7 @@ void google_cdd_set_item_enable(const char *name, int en)
 {
 	struct google_cdd_item *item = NULL;
 
-	if (!name || cdd_dpm.feature.dump_mode_enabled == NONE_DUMP)
+	if (!name)
 		return;
 
 	/* This is default for debug-mode */
@@ -489,6 +496,31 @@ static const struct attribute_group *cdd_sysfs_groups[] = {
 	NULL,
 };
 
+struct platform_device *google_cdd_get_pdev_handle(struct device *dev,
+						   const char *name, int index)
+{
+	struct device_node *np;
+	struct platform_device *pdev;
+	char prop_name[128];
+
+	if (!dev || !dev->of_node || !name)
+		return ERR_PTR(-EINVAL);
+
+	snprintf(prop_name, sizeof(prop_name), "%s-handle", name);
+
+	np = of_parse_phandle(dev->of_node, prop_name, index);
+	if (!np)
+		return ERR_PTR(-ENODEV);
+
+	pdev = of_find_device_by_node(np);
+	of_node_put(np);
+
+	if (!pdev)
+		return ERR_PTR(-EPROBE_DEFER);
+
+	return pdev;
+}
+
 static int google_cdd_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -502,6 +534,10 @@ static int google_cdd_probe(struct platform_device *pdev)
 		dev_err(dev, "%s failed\n", __func__);
 		return -ENODEV;
 	}
+
+	cdd_ctx.ufs_pdev = google_cdd_get_pdev_handle(dev, "ufs", 0);
+	if (IS_ERR_OR_NULL(cdd_ctx.ufs_pdev))
+		dev_err(dev, "failed to get ufs handle");
 
 	google_cdd_fixmap();
 	google_cdd_init_log();

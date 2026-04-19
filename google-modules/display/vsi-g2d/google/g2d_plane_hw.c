@@ -117,7 +117,6 @@ static void plane_set_fb(struct sc_hw *hw, u8 hw_id, struct sc_hw_fb *fb)
 	sc_write(hw, SCREG_LAYER0_CONFIG_Address + offset, config);
 
 	dev_dbg(hw->dev, "%s: finished fb config reg writes on hw_id %d", __func__, hw_id);
-	fb->dirty = false;
 }
 
 static void plane_set_scale(struct sc_hw *hw, u8 hw_id, struct sc_hw_scale *scale)
@@ -274,11 +273,8 @@ void plane_commit(struct sc_hw *hw, u8 layer_id)
 		if (plane->fb.display_id != layer_id)
 			continue;
 
-		/* TODO(b/390253155): Remove dirty bit logic for fb and roi */
-		if (plane->fb.dirty)
-			plane_set_fb(hw, i, &plane->fb);
-		if (plane->roi.dirty)
-			plane_set_roi(hw, i, &plane->roi);
+		plane_set_fb(hw, i, &plane->fb);
+		plane_set_roi(hw, i, &plane->roi);
 		plane_set_y2r(hw, i, &plane->y2r);
 		plane_set_scale(hw, i, &plane->scale);
 		pvric_hw_plane_commit(hw, layer_id);

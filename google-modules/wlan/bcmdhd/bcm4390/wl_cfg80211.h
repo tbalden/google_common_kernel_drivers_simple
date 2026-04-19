@@ -763,6 +763,7 @@ do {									\
 #define WL_SD(x)
 #define INDOOR_DBG(x)
 
+#define MAX_ERESTARTSYS_RETRIES 10u
 #define WL_SCAN_RETRY_MAX   3
 #define WL_NUM_PMKIDS_MAX   MAXPMKID
 #define WL_SCAN_BUF_MAX     (1024 * 8)
@@ -1318,7 +1319,7 @@ struct wl_event_q {
 	u32 id;			/* counter to track events */
 	wl_event_msg_t emsg;
 	u32 datalen;
-	s8 edata[1];
+	s8 edata[];
 };
 
 /* security information with currently associated ap */
@@ -4100,4 +4101,7 @@ extern s32 wl_validate_bss_length(uint32 version, uint32 tot_len, uint32 ie_leng
 bool wl_cfg80211_verify_bss(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 		struct cfg80211_bss **bss);
 bool wl_cfg80211_is_dualsta_active(struct bcm_cfg80211 *cfg);
+long wl_cfg80211_wait_interruptible(struct bcm_cfg80211 *cfg, struct net_device *ndev,
+		bool (*validate_wake_condition_fn)(struct bcm_cfg80211 *cfg,
+		struct net_device *ndev), u32 wait_dur_ms);
 #endif /* _wl_cfg80211_h_ */

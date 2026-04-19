@@ -175,3 +175,9 @@ kernel_prebuilt_ext.declare_kernel_prebuilts(
     local_artifact_path = "prebuilts/gki/kernel_aarch64_16k",
 )
 use_repo(kernel_prebuilt_ext, "gki_prebuilts_16k")
+
+new_kleaf_local_repository(
+    name = "bionic",
+    build_file = "private/devices/google/common/kleaf/bionic.BUILD",
+    path = "external/bionic",
+)

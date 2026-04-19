@@ -15,3 +15,6 @@ blocklist google-cpm-tracepoint.ko
 
 # Display
 blocklist gs-panel-common-test.ko
+
+# IOMMU
+blocklist iommu_map_benchmark.ko

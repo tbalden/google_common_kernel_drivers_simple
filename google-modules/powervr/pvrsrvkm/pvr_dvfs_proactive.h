@@ -1,6 +1,6 @@
 /*************************************************************************/ /*!
 @File           pvr_dvfs_proactive.h
-@Title          Linux kernel integration for proactive DVFS
+@Title          System level interface for DVFS and PDVFS
 @Copyright      Copyright (c) Imagination Technologies Ltd. All Rights Reserved
 @License        Dual MIT/GPLv2
 
@@ -40,15 +40,10 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 
-#ifndef PVR_DVFS_PROACTIVE_H
-#define PVR_DVFS_PROACTIVE_H
+#ifndef PVR_PDVFS_DEVICE_H
+#define PVR_PDVFS_DEVICE_H
 
-#include "opaque_types.h"
-#include "pvrsrv_error.h"
-#if defined(SUPPORT_FW_OPP_TABLE) && defined(CONFIG_OF) && defined(CONFIG_PM_OPP)
-#include "rgx_fwif_km.h"
-#endif
-
+#if defined(SUPPORT_PDVFS)
 /*************************************************************************/ /*!
 @Function       InitPDVFS
 
@@ -56,39 +51,42 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
                 Prepares the OPP table from the devicetree, if enabled.
 
 @Input          psDeviceNode       Device node
-@Return			PVRSRV_ERROR
+@Return         PVRSRV_ERROR
 */ /**************************************************************************/
 PVRSRV_ERROR InitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode);
 
 /*************************************************************************/ /*!
-@Function       InitPDVFS
+@Function       DeinitPDVFS
 
-@Description    Initialise the device for Proactive DVFS support.
+@Description    De-initialise the device for Proactive DVFS support.
 
 @Input          psDeviceNode       Device node
-@Return			PVRSRV_ERROR
+@Return         None
 */ /**************************************************************************/
 void DeinitPDVFS(PPVRSRV_DEVICE_NODE psDeviceNode);
 
+#if defined(SUPPORT_PDVFS_DEVFREQ)
 /*************************************************************************/ /*!
 @Function       RegisterPDVFSDevice
 
-@Description    Initialise the devfreq entries for Proactive DVFS.
+@Description    Register the device for Proactive DVFS support.
+                Prepares the OPP table from the devicetree, if enabled.
 
 @Input          psDeviceNode       Device node
-@Return			PVRSRV_ERROR
+@Return         PVRSRV_ERROR
 */ /**************************************************************************/
 PVRSRV_ERROR RegisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode);
 
 /*************************************************************************/ /*!
 @Function       UnregisterPDVFSDevice
 
-@Description    Remove the devfreq entries for Proactive DVFS.
+@Description    Unregister the device for Proactive DVFS support.
 
 @Input          psDeviceNode       Device node
-@Return			PVRSRV_ERROR
+@Return         None
 */ /**************************************************************************/
-PVRSRV_ERROR UnregisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode);
+void UnregisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode);
+#endif /* SUPPORT_PDVFS_DEVFREQ */
 
 /*************************************************************************/ /*!
 @Function       ResumePDVFS
@@ -99,5 +97,6 @@ PVRSRV_ERROR UnregisterPDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode);
 @Return			PVRSRV_ERROR
 */ /**************************************************************************/
 PVRSRV_ERROR ResumePDVFS(PPVRSRV_DEVICE_NODE psDeviceNode);
+#endif
 
-#endif /* PVR_DVFS_PROACTIVE_H */
+#endif /* PVR_PDVFS_DEVICE_H */

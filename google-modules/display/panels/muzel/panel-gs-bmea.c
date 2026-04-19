@@ -52,6 +52,11 @@ struct bmea_panel {
 	 *                              handled later
 	 */
 	bool pending_skin_temp_handling;
+	/**
+	 * @reg_dump_for_gram_collision_triggered: whether the register dump for GRAM collision
+	 *                                         has been triggered
+	 */
+	bool reg_dump_for_gram_collision_triggered;
 };
 
 #define to_spanel(ctx) container_of(ctx, struct bmea_panel, base)
@@ -326,6 +331,7 @@ static struct drm_dsc_config pps_configs[PANEL_TYPE_MAX][NUM_SUPPORTED_RESOLUTIO
 
 #define BMEA_PPS_LEN 90
 
+#define TEAR_CNT_ADDR 0xC4
 #define ERR_FG_ADDR 0xEE
 #define ERR_FG_LEN 2
 #define ERR_FG_VGH_ERR 0x01
@@ -1604,15 +1610,23 @@ static void bmea_set_panel_feat_manual_mode_fi(struct gs_panel *ctx, bool enable
 	dev_dbg(ctx->dev, "manual mode fi=%d\n", enabled);
 }
 
-static void bmea_set_panel_feat_te(struct gs_panel *ctx, unsigned long *feat,
-				   const struct gs_panel_mode *pmode)
+/**
+ * bmea_set_panel_feat_te - configure TE type, width and frequency
+ * @ctx: gs_panel struct
+ * @is_vrr: true if it's VRR mode
+ * @te_freq: TE frequency
+ * @return: enum gs_panel_tex_opt, fixed or changeable TE
+ *
+ * Description: this function should cache commands only, don't update hw_status.
+ */
+static enum gs_panel_tex_opt bmea_set_panel_feat_te(struct gs_panel *ctx, bool is_vrr, u32 te_freq)
 {
 	struct bmea_panel *spanel = to_spanel(ctx);
 	struct device *dev = ctx->dev;
-	bool is_vrr = gs_is_vrr_mode(pmode);
-	u32 te_freq = gs_drm_mode_te_freq(&pmode->mode);
+	const unsigned long *feat = ctx->sw_status.feat;
 	enum bmea_panel_type panel_type = GET_PANEL_TYPE(ctx);
 	bool dvt_and_after = (ctx->panel_rev_id.id <= PANEL_REVID_EVT1_1) ? 0 : 1;
+	enum gs_panel_tex_opt te_opt = TEX_OPT_FIXED;
 
 	if ((is_vrr || test_bit(FEAT_EARLY_EXIT, feat)) && !spanel->force_changeable_te) {
 		if (is_vrr && te_freq == 240) {
@@ -1671,7 +1685,6 @@ static void bmea_set_panel_feat_te(struct gs_panel *ctx, unsigned long *feat,
 			GS_DCS_BUF_ADD_CMD(dev, 0xB0, 0x00, 0x08, 0xB9);
 			GS_DCS_BUF_ADD_CMDLIST(dev, fixed_te_settings[panel_type][dvt_and_after]);
 		}
-		ctx->hw_status.te.option = TEX_OPT_FIXED;
 	} else {
 		static const u8 changeable_te_settings[PANEL_TYPE_MAX][2][4] = {
 			{ /* BZEA */
@@ -1689,20 +1702,20 @@ static void bmea_set_panel_feat_te(struct gs_panel *ctx, unsigned long *feat,
 		/* TE width */
 		GS_DCS_BUF_ADD_CMD(dev, 0xB0, 0x00, 0x08, 0xB9);
 		GS_DCS_BUF_ADD_CMDLIST(dev, changeable_te_settings[panel_type][dvt_and_after]);
-		ctx->hw_status.te.option = TEX_OPT_CHANGEABLE;
+		te_opt = TEX_OPT_CHANGEABLE;
 	}
 
 	/* TE sync setting */
 	GS_DCS_BUF_ADD_CMD(dev, 0xB0, 0x00, 0x91, 0xB9);
 	GS_DCS_BUF_ADD_CMD(dev, 0xB9, test_bit(FEAT_PWM_HIGH, feat) ? 0x80 : 0x00);
+	return te_opt;
 }
 
-static void bmea_set_panel_feat_hbm_irc(struct gs_panel *ctx)
+static void bmea_set_panel_feat_hbm_irc(struct gs_panel *ctx, enum irc_mode irc_mode)
 {
 	struct device *dev = ctx->dev;
-	struct gs_panel_status *sw_status = &ctx->sw_status;
 	enum bmea_panel_type panel_type = GET_PANEL_TYPE(ctx);
-	bool flat_z = (sw_status->irc_mode == IRC_FLAT_Z) ? 1 : 0;
+	bool flat_z = (irc_mode == IRC_FLAT_Z) ? 1 : 0;
 	bool dvt_and_after = (ctx->panel_rev_id.id <= PANEL_REVID_EVT1_1) ? 0 : 1;
 
 	/*
@@ -1749,14 +1762,13 @@ static void bmea_set_panel_feat_hbm_irc(struct gs_panel *ctx)
 		GS_DCS_BUF_ADD_CMDLIST(dev, sp_irc_settings[panel_type][flat_z]);
 	}
 
-	ctx->hw_status.irc_mode = sw_status->irc_mode;
-	dev_info(dev, "irc_mode=%d\n", ctx->hw_status.irc_mode);
+	dev_info(dev, "irc_mode=%d\n", irc_mode);
 }
 
-static void bmea_set_panel_feat_early_exit(struct gs_panel *ctx, unsigned long *feat, u32 vrefresh,
-					   u32 te_freq)
+static void bmea_set_panel_feat_early_exit(struct gs_panel *ctx, u32 vrefresh, u32 te_freq)
 {
 	struct device *dev = ctx->dev;
+	const unsigned long *feat = ctx->sw_status.feat;
 	u8 val;
 
 	if (!test_bit(FEAT_EARLY_EXIT, feat) || vrefresh == 80 || vrefresh == 48)
@@ -1790,10 +1802,10 @@ static void bmea_set_panel_feat_tsp_sync(struct gs_panel *ctx)
 	GS_DCS_BUF_ADD_CMD(dev, 0xB9, 0x81); /* TSP Sync setting */
 }
 
-static void bmea_set_panel_feat_frequency(struct gs_panel *ctx, unsigned long *feat, u32 vrefresh,
-					  u32 idle_vrefresh, bool is_vrr)
+static void bmea_set_panel_feat_frequency(struct gs_panel *ctx, u32 vrefresh, u32 idle_vrefresh)
 {
 	struct device *dev = ctx->dev;
+	const unsigned long *feat = ctx->sw_status.feat;
 	u8 val;
 
 	/*
@@ -1872,6 +1884,23 @@ static void bmea_set_panel_feat_frequency(struct gs_panel *ctx, unsigned long *f
 }
 
 /**
+ * bmea_set_panel_feat_pwm - enable or disable high pwm mode
+ * @ctx: gs_panel struct
+ *
+ * Description: the configs could possibly be overridden by frequency setting,
+ * depending on FI mode.
+ */
+static void bmea_set_panel_feat_pwm(struct gs_panel *ctx)
+{
+	struct device *dev = ctx->dev;
+	const unsigned long *feat = ctx->sw_status.feat;
+
+	GS_DCS_BUF_ADD_CMD(dev, 0x83, test_bit(FEAT_PWM_HIGH, feat) ? 0x10 : 0x00);
+	GS_DCS_BUF_ADD_CMD(dev, 0xB0, 0x00, 0x05, 0xBD);
+	GS_DCS_BUF_ADD_CMD(dev, 0xBD, test_bit(FEAT_PWM_HIGH, feat) ? 0x28 : 0x00);
+}
+
+/**
  * bmea_set_panel_feat - configure panel features
  * @ctx: gs_panel struct
  * @pmode: gs_panel_mode struct, target panel mode
@@ -1879,6 +1908,9 @@ static void bmea_set_panel_feat_frequency(struct gs_panel *ctx, unsigned long *f
  * @enforce: force to write all of registers even if no feature state changes
  *
  * Configure panel features based on the context.
+ * Note: bmea_set_panel_feat_xxx() should cache commands only while
+ *       bmea_set_panel_feat() aggregates and sends the commands, and update
+ *       hw_status. DO NOT update them in bmea_set_panel_feat_xxx().
  */
 static void bmea_set_panel_feat(struct gs_panel *ctx, const struct gs_panel_mode *pmode,
 				bool enforce)
@@ -1887,11 +1919,13 @@ static void bmea_set_panel_feat(struct gs_panel *ctx, const struct gs_panel_mode
 	struct gs_panel_status *sw_status = &ctx->sw_status;
 	struct gs_panel_status *hw_status = &ctx->hw_status;
 	unsigned long *feat = sw_status->feat;
+	enum irc_mode irc_mode = sw_status->irc_mode;
 	u32 idle_vrefresh = sw_status->idle_vrefresh;
 	u32 vrefresh = drm_mode_vrefresh(&pmode->mode);
 	u32 te_freq = gs_drm_mode_te_freq(&pmode->mode);
 	bool is_vrr = gs_is_vrr_mode(pmode);
-	bool irc_mode_changed;
+	bool irc_mode_changed, idle_vrefresh_changed, vrefresh_changed, te_freq_changed;
+	char trace_msg[64];
 	DECLARE_BITMAP(changed_feat, FEAT_MAX);
 
 	/* override settings if vrr */
@@ -1910,39 +1944,39 @@ static void bmea_set_panel_feat(struct gs_panel *ctx, const struct gs_panel_mode
 	if (enforce) {
 		bitmap_fill(changed_feat, FEAT_MAX);
 		irc_mode_changed = true;
+		idle_vrefresh_changed = true;
+		vrefresh_changed = true;
+		te_freq_changed = true;
 	} else {
 		bitmap_xor(changed_feat, feat, hw_status->feat, FEAT_MAX);
-		irc_mode_changed = (sw_status->irc_mode != hw_status->irc_mode);
-		if (bitmap_empty(changed_feat, FEAT_MAX) && vrefresh == hw_status->vrefresh &&
-		    idle_vrefresh == hw_status->idle_vrefresh && te_freq == hw_status->te.freq_hz &&
-		    !irc_mode_changed) {
+		irc_mode_changed = (irc_mode != hw_status->irc_mode);
+		idle_vrefresh_changed = (idle_vrefresh != hw_status->idle_vrefresh);
+		vrefresh_changed = (vrefresh != hw_status->vrefresh);
+		te_freq_changed = (te_freq != hw_status->te.freq_hz);
+		if (bitmap_empty(changed_feat, FEAT_MAX) && !vrefresh_changed &&
+		    !idle_vrefresh_changed && !te_freq_changed && !irc_mode_changed) {
 			dev_dbg(dev, "no changes to panel features, skip update\n");
 			return;
 		}
 	}
 
-	dev_dbg(dev, "hbm=%u irc=%u h_pwm=%u vrr=%u fi=%u@a,%u@m ee=%u rr=%u-%u:%u\n",
-		test_bit(FEAT_HBM, feat), sw_status->irc_mode, test_bit(FEAT_PWM_HIGH, feat),
-		is_vrr, test_bit(FEAT_FRAME_AUTO, feat), test_bit(FEAT_FRAME_MANUAL_FI, feat),
-		test_bit(FEAT_EARLY_EXIT, feat), idle_vrefresh ? idle_vrefresh : vrefresh,
-		drm_mode_vrefresh(&pmode->mode), te_freq);
-
-	PANEL_ATRACE_BEGIN(__func__);
+	snprintf(trace_msg, sizeof(trace_msg),
+		 "feat: hbm=%u irc=%u h_pwm=%u fi=%u@a,%u@m ee=%u rr=%3u-%3u@%3u",
+		 test_bit(FEAT_HBM, feat), irc_mode, test_bit(FEAT_PWM_HIGH, feat),
+		 test_bit(FEAT_FRAME_AUTO, feat), test_bit(FEAT_FRAME_MANUAL_FI, feat),
+		 test_bit(FEAT_EARLY_EXIT, feat), idle_vrefresh ? idle_vrefresh : vrefresh,
+		 drm_mode_vrefresh(&pmode->mode), te_freq);
+	dev_dbg(dev, "%s\n", trace_msg);
+	PANEL_ATRACE_BEGIN(trace_msg);
 
 	/* Unlock */
 	GS_DCS_BUF_ADD_CMDLIST(dev, unlock_cmd_f0);
 
-	/* TE setting */
+	/* TE Settings */
 	sw_status->te.freq_hz = te_freq;
 	if (test_bit(FEAT_EARLY_EXIT, changed_feat) || test_bit(FEAT_PWM_HIGH, changed_feat) ||
-	    hw_status->te.freq_hz != te_freq)
-		bmea_set_panel_feat_te(ctx, feat, pmode);
-
-	/*
-	 * HBM IRC setting
-	 */
-	if (irc_mode_changed)
-		bmea_set_panel_feat_hbm_irc(ctx);
+	    te_freq_changed)
+		hw_status->te.option = bmea_set_panel_feat_te(ctx, is_vrr, te_freq);
 
 	/*
 	 * High PWM mode: enable or disable
@@ -1950,18 +1984,11 @@ static void bmea_set_panel_feat(struct gs_panel *ctx, const struct gs_panel_mode
 	 * Description: the configs could possibly be overridden by frequency setting,
 	 * depending on FI mode.
 	 */
-	if (test_bit(FEAT_PWM_HIGH, changed_feat)) {
-		/* mode set */
-		GS_DCS_BUF_ADD_CMD(dev, 0x83, test_bit(FEAT_PWM_HIGH, feat) ? 0x10 : 0x00);
-		GS_DCS_BUF_ADD_CMD(dev, 0xB0, 0x00, 0x05, 0xBD);
-		GS_DCS_BUF_ADD_CMD(dev, 0xBD, test_bit(FEAT_PWM_HIGH, feat) ? 0x28 : 0x00);
-	}
+	if (test_bit(FEAT_PWM_HIGH, changed_feat))
+		bmea_set_panel_feat_pwm(ctx);
 
-	/*
-	 * Early-exit: enable or disable
-	 */
-	if (test_bit(FEAT_EARLY_EXIT, changed_feat))
-		bmea_set_panel_feat_early_exit(ctx, feat, vrefresh, te_freq);
+	if (test_bit(FEAT_EARLY_EXIT, changed_feat) || vrefresh_changed || te_freq_changed)
+		bmea_set_panel_feat_early_exit(ctx, vrefresh, te_freq);
 
 	/*
 	 * Manual FI: enable or disable manual mode FI
@@ -1969,20 +1996,30 @@ static void bmea_set_panel_feat(struct gs_panel *ctx, const struct gs_panel_mode
 	if (test_bit(FEAT_FRAME_MANUAL_FI, changed_feat))
 		bmea_set_panel_feat_manual_mode_fi(ctx, test_bit(FEAT_FRAME_MANUAL_FI, feat));
 
+	/*
+	 * Frequency setting: FI, frequency, idle frequency
+	 */
+	if (test_bit(FEAT_FRAME_AUTO, changed_feat) || test_bit(FEAT_PWM_HIGH, changed_feat) ||
+	    idle_vrefresh_changed || vrefresh_changed)
+		bmea_set_panel_feat_frequency(ctx, vrefresh, idle_vrefresh);
+
+	/*
+	 * HBM IRC setting
+	 */
+	if (irc_mode_changed) {
+		bmea_set_panel_feat_hbm_irc(ctx, irc_mode);
+		hw_status->irc_mode = irc_mode;
+	}
+
 	/* TSP Sync setting */
 	if (enforce)
 		bmea_set_panel_feat_tsp_sync(ctx);
 
-	/*
-	 * Frequency setting: FI, frequency, idle frequency
-	 */
-	bmea_set_panel_feat_frequency(ctx, feat, vrefresh, idle_vrefresh, is_vrr);
 	GS_DCS_BUF_ADD_CMDLIST(dev, panel_update);
-
 	/* Lock */
 	GS_DCS_BUF_ADD_CMDLIST_AND_FLUSH(dev, lock_cmd_f0);
 
-	PANEL_ATRACE_END(__func__);
+	PANEL_ATRACE_END(trace_msg);
 
 	hw_status->vrefresh = vrefresh;
 	hw_status->idle_vrefresh = idle_vrefresh;
@@ -2277,81 +2314,17 @@ static void bmea_set_panel_lp_feat(struct gs_panel *ctx, const struct gs_panel_m
 #ifndef PANEL_FACTORY_BUILD
 static void bmea_update_refresh_ctrl_feat(struct gs_panel *ctx, const struct gs_panel_mode *pmode)
 {
-	const u32 ctrl = ctx->refresh_ctrl;
-	unsigned long *feat = ctx->sw_status.feat;
-	u32 min_vrefresh = ctx->sw_status.idle_vrefresh;
-	u32 vrefresh;
-	bool lp_mode;
-	bool idle_vrefresh_changed = false;
-	bool feat_frame_auto_changed = false;
-	bool prev_feat_frame_auto_enabled = test_bit(FEAT_FRAME_AUTO, feat);
-
-	if (!pmode)
-		return;
-
-	dev_dbg(ctx->dev, "refresh_ctrl=0x%X\n", ctrl);
-
-	vrefresh = drm_mode_vrefresh(&pmode->mode);
-	lp_mode = pmode->gs_mode.is_lp_mode;
-
-	if (ctrl & GS_PANEL_REFRESH_CTRL_MIN_REFRESH_RATE_MASK) {
-		min_vrefresh = GS_PANEL_REFRESH_CTRL_MIN_REFRESH_RATE(ctrl);
-
-		if (min_vrefresh > vrefresh) {
-			dev_warn(ctx->dev, "%s: min RR %uHz requested, but valid range is 1-%uHz\n",
-				 __func__, min_vrefresh, vrefresh);
-			min_vrefresh = vrefresh;
-		}
-		ctx->sw_status.idle_vrefresh = min_vrefresh;
-		idle_vrefresh_changed = true;
-	}
-
-	if (ctrl & GS_PANEL_REFRESH_CTRL_FI_AUTO) {
-		if (min_vrefresh == vrefresh) {
-			clear_bit(FEAT_FRAME_AUTO, feat);
-			clear_bit(FEAT_FRAME_MANUAL_FI, feat);
-		} else {
-			set_bit(FEAT_FRAME_AUTO, feat);
-			clear_bit(FEAT_FRAME_MANUAL_FI, feat);
-		}
-	} else {
-		clear_bit(FEAT_FRAME_AUTO, feat);
-		clear_bit(FEAT_FRAME_MANUAL_FI, feat);
-	}
-
-	if (ctrl & GS_PANEL_REFRESH_CTRL_EARLY_EXIT)
-		set_bit(FEAT_EARLY_EXIT, feat);
-	else {
-		clear_bit(FEAT_EARLY_EXIT, feat);
-		clear_bit(FEAT_FRAME_AUTO, feat);
-		clear_bit(FEAT_FRAME_MANUAL_FI, feat);
-	}
-
-	if (lp_mode) {
-		bmea_set_panel_lp_feat(ctx, pmode);
-		return;
-	}
-
-	if (prev_feat_frame_auto_enabled != test_bit(FEAT_FRAME_AUTO, feat))
-		feat_frame_auto_changed = true;
-
-	PANEL_ATRACE_INT_PID_FMT(ctx->sw_status.idle_vrefresh, ctx->trace_pid,
-				 "idle_vrefresh[%s]", ctx->panel_model);
-	PANEL_ATRACE_INT_PID_FMT(test_bit(FEAT_FRAME_AUTO, feat), ctx->trace_pid,
-				 "FEAT_FRAME_AUTO[%s]", ctx->panel_model);
-	PANEL_ATRACE_INT_PID_FMT(test_bit(FEAT_EARLY_EXIT, feat), ctx->trace_pid,
-				 "FEAT_EARLY_EXIT[%s]", ctx->panel_model);
-
 	/**
-	 * The changes of idle vrefresh and frame auto could trigger a 120Hz frame.
-	 * Check whether we need to adjust the timing of sending the commands in these
-	 * conditions.
+	 * Setting changes could trigger a 120Hz frame. Check whether we need to adjust the timing
+	 * of sending the commands in these conditions.
 	 */
-	if (idle_vrefresh_changed && feat_frame_auto_changed &&
-	    !test_bit(FEAT_FRAME_MANUAL_FI, feat))
+	if (gs_panel_refresh_ctrl_full_helper(ctx, pmode) && !pmode->gs_mode.is_lp_mode)
 		bmea_check_command_timing_for_te2(ctx);
 
-	bmea_set_panel_feat(ctx, pmode, false);
+	if (pmode->gs_mode.is_lp_mode)
+		bmea_set_panel_lp_feat(ctx, pmode);
+	else
+		bmea_set_panel_feat(ctx, pmode, false);
 }
 
 static void bmea_refresh_ctrl(struct gs_panel *ctx)
@@ -2820,6 +2793,10 @@ static const struct gs_dsi_cmd bmea_init_cmds[] = {
 
 	GS_DSI_CMDLIST(unlock_cmd_f0),
 	GS_DSI_CMDLIST(unlock_cmd_fc),
+	/* Enable GRAM collision detection */
+	GS_DSI_CMD(0xE5, 0x1D),
+	GS_DSI_CMD(0xB0, 0x00, 0x01, 0xF8),
+	GS_DSI_CMD(0xF8, 0x04),
 	/* RETENTION Off */
 	GS_DSI_CMD(0xB0, 0x00, 0x9F, 0x62),
 	GS_DSI_CMD(0x62, 0xFF, 0xFF, 0xFF),
@@ -2841,6 +2818,17 @@ static const struct gs_dsi_cmd bmea_sap_cmds[] = {
 	GS_DSI_CMDLIST(lock_cmd_f0),
 };
 static DEFINE_GS_CMDSET(bmea_sap);
+
+static const struct gs_dsi_cmd bmea_collision_detection_cmds[] = {
+	GS_DSI_QUEUE_CMDLIST(unlock_cmd_f0),
+	GS_DSI_QUEUE_CMDLIST(unlock_cmd_fc),
+	GS_DSI_QUEUE_CMD(0xE5, 0x1D),
+	GS_DSI_QUEUE_CMD(0xB0, 0x00, 0x01, 0xF8),
+	GS_DSI_QUEUE_CMD(0xF8, 0x04),
+	GS_DSI_QUEUE_CMDLIST(lock_cmd_fc),
+	GS_DSI_FLUSH_CMDLIST(lock_cmd_f0),
+};
+static DEFINE_GS_CMDSET(bmea_collision_detection);
 
 static void bmea_set_scaler_settings(struct gs_panel *ctx, bool is_fhd)
 {
@@ -3010,12 +2998,13 @@ static int bmea_enable(struct drm_panel *panel)
 		bmea_change_frequency(ctx, pmode);
 
 		if (needs_init || (ctx->panel_state == GPANEL_STATE_BLANK)) {
-			u16 min_brightness = ctx->desc->brightness_desc->min_brightness;
+			const u16 min_brightness = ctx->desc->brightness_desc->min_brightness;
+			u16 brightness = max(ctx->bl->props.brightness, min_brightness);
 
-			ctx->bl->props.brightness = min_brightness;
+			ctx->bl->props.brightness = brightness;
 			GS_DCS_BUF_ADD_CMD(dev, MIPI_DCS_SET_DISPLAY_BRIGHTNESS,
-						(min_brightness >> 8) & 0xFF,
-						min_brightness & 0xFF);
+						(brightness >> 8) & 0xFF,
+						brightness & 0xFF);
 			GS_DCS_BUF_ADD_CMD_AND_FLUSH(dev, MIPI_DCS_SET_DISPLAY_ON);
 		}
 	}
@@ -3045,6 +3034,7 @@ static int bmea_disable(struct drm_panel *panel)
 
 	/* panel register state gets reset after disabling hardware */
 	bitmap_clear(ctx->hw_status.feat, 0, FEAT_MAX);
+	set_bit(FEAT_EARLY_EXIT, ctx->hw_status.feat);
 	ctx->hw_status.vrefresh = 60;
 	ctx->sw_status.te.freq_hz = 60;
 	ctx->hw_status.te.freq_hz = 60;
@@ -3119,17 +3109,45 @@ static void bmea_update_idle_state(struct gs_panel *ctx)
 }
 
 #define BR_LEN 2
+/**
+ * The threshold of TEAR_CNT to set the error bit of GRAM collision. That is, if the collision
+ * symptom lasts (or the accumulated time) over 200ms (120Hz, 200/8.3=~24), set the error bit,
+ * which will trigger dumps for debugging.
+ */
+#define SET_COLLISION_BIT_TH 24
 static int bmea_detect_fault(struct gs_panel *ctx)
 {
 	struct device *dev = ctx->dev;
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
 	u8 buf[ERR_FG_LEN] = { 0 };
+	u8 collision_cnt = 0;
 	int ret;
 
 	PANEL_ATRACE_BEGIN("bmea_detect_fault");
-	GS_DCS_BUF_ADD_CMDLIST_AND_FLUSH(dev, unlock_cmd_f0);
-	ret = mipi_dsi_dcs_read(dsi, ERR_FG_ADDR, buf, ERR_FG_LEN);
+	GS_DCS_BUF_ADD_CMDLIST(dev, unlock_cmd_f0);
+	GS_DCS_BUF_ADD_CMDLIST_AND_FLUSH(dev, unlock_cmd_fc);
 
+	bitmap_zero(ctx->panel_errors, GS_PANEL_ERR_MAX);
+	ret = mipi_dsi_dcs_read(dsi, TEAR_CNT_ADDR, &collision_cnt, 1);
+	if (ret != 1) {
+		dev_warn(dev, "Error reading TEAR_CNT (%pe)\n", ERR_PTR(ret));
+	} else {
+		dev_dbg(dev, "TEAR_CNT: %d\n", collision_cnt);
+		if (collision_cnt) {
+			/* TODO(b/454161439): decrease fault_detect_interval_ms if needed */
+			dev_err(dev, "GRAM collision found, TEAR_CNT: %d\n", collision_cnt);
+			if (collision_cnt > SET_COLLISION_BIT_TH) {
+				set_bit(GS_PANEL_ERR_GRAM_COLLISION, ctx->panel_errors);
+				dev_dbg(dev, "set bit for GRAM COLLISION\n");
+
+				/* reset TEAR_CNT */
+				GS_DCS_BUF_ADD_CMD(dev, 0xB0, 0x00, 0x01, 0xC4);
+				GS_DCS_BUF_ADD_CMD_AND_FLUSH(dev, 0xC4, 0x01);
+			}
+		}
+	}
+
+	ret = mipi_dsi_dcs_read(dsi, ERR_FG_ADDR, buf, ERR_FG_LEN);
 	if (ret != ERR_FG_LEN) {
 		dev_warn(dev, "Error reading ERR_FG (%pe)\n", ERR_PTR(ret));
 		goto end;
@@ -3137,30 +3155,39 @@ static int bmea_detect_fault(struct gs_panel *ctx)
 		dev_dbg(dev, "ERR_FG: %02x %02x\n", buf[0], buf[1]);
 	}
 
-	if (buf[0] == ERR_FG_VGH_ERR || buf[1] == ERR_FG_VLIN1_ERR || buf[1] == ERR_FG_DSI_ERR) {
+	if (buf[0] & ERR_FG_VGH_ERR)
+		set_bit(GS_PANEL_ERR_VGH, ctx->panel_errors);
+	if (buf[1] & ERR_FG_VLIN1_ERR)
+		set_bit(GS_PANEL_ERR_VLIN1, ctx->panel_errors);
+	if (buf[1] & ERR_FG_DSI_ERR) {
 		u8 err_buf[ERR_DSI_ERR_LEN] = { 0 };
+
+		ret = mipi_dsi_dcs_read(dsi, ERR_DSI_ADDR, err_buf, ERR_DSI_ERR_LEN);
+		if (ret == ERR_DSI_ERR_LEN) {
+			if (err_buf[0] || err_buf[1]) {
+				bitmap_set_value8(ctx->panel_errors, err_buf[0], 8);
+				bitmap_set_value8(ctx->panel_errors, err_buf[1], 0);
+			} else {
+				dev_dbg(dev, "DSI error flag set, but no specific error");
+			}
+		} else {
+			dev_err(dev, "Error reading DSI error register (%pe)\n", ERR_PTR(ret));
+		}
+	}
+	if (!bitmap_empty(ctx->panel_errors, GS_PANEL_ERR_MAX)) {
+		struct bmea_panel *spanel = to_spanel(ctx);
 		u8 br_buf[BR_LEN] = { 0 };
 		u8 pps_buf[BMEA_PPS_LEN] = { 0 };
 
-		dev_err(dev, "DDIC error found, trigger register dump\n");
-		dev_err(dev, "ERR_FG: %02x %02x\n", buf[0], buf[1]);
+		/* skip reg dump if it has been triggered and only GRAM collision is detected */
+		if (spanel->reg_dump_for_gram_collision_triggered &&
+		    gs_panel_only_specific_error_detected_in_bitmap(ctx->panel_errors,
+								    GS_PANEL_ERR_GRAM_COLLISION)) {
+			ret = 1;
+			goto end;
+		}
 
-		bitmap_zero(ctx->panel_errors, GS_PANEL_ERR_MAX);
-		if (buf[0] & ERR_FG_VGH_ERR)
-			set_bit(GS_PANEL_ERR_VGH, ctx->panel_errors);
-		if (buf[1] & ERR_FG_VLIN1_ERR)
-			set_bit(GS_PANEL_ERR_VLIN1, ctx->panel_errors);
-		if (buf[1] & ERR_FG_DSI_ERR)
-			set_bit(GS_PANEL_ERR_DSI_GENERAL, ctx->panel_errors);
-
-		/* DSI ERR */
-		ret = mipi_dsi_dcs_read(dsi, ERR_DSI_ADDR, err_buf, ERR_DSI_ERR_LEN);
-		if (ret == ERR_DSI_ERR_LEN)
-			dev_err(dev, "dsi_err: %02x %02x\n", err_buf[0], err_buf[1]);
-		else
-			dev_err(dev, "Error reading DSI error register (%pe)\n", ERR_PTR(ret));
-		bitmap_set_value8(ctx->panel_errors, err_buf[0], 8);
-		bitmap_set_value8(ctx->panel_errors, err_buf[1], 0);
+		dev_err(dev, "DDIC error: %*pbl\n", GS_PANEL_ERR_MAX, ctx->panel_errors);
 
 		/* Brightness */
 		ret = mipi_dsi_dcs_read(dsi, MIPI_DCS_GET_DISPLAY_BRIGHTNESS, br_buf, BR_LEN);
@@ -3179,6 +3206,10 @@ static int bmea_detect_fault(struct gs_panel *ctx)
 		} else {
 			dev_err(dev, "Error reading pps (%pe)\n", ERR_PTR(ret));
 		}
+
+		if (test_bit(GS_PANEL_ERR_GRAM_COLLISION, ctx->panel_errors))
+			spanel->reg_dump_for_gram_collision_triggered = true;
+
 		/* positive return to indicate successful read of extant faults */
 		ret = 1;
 	} else {
@@ -3186,6 +3217,7 @@ static int bmea_detect_fault(struct gs_panel *ctx)
 	}
 
 end:
+	GS_DCS_BUF_ADD_CMDLIST(dev, lock_cmd_fc);
 	GS_DCS_BUF_ADD_CMDLIST_AND_FLUSH(dev, lock_cmd_f0);
 	PANEL_ATRACE_END("bmea_detect_fault");
 
@@ -3423,6 +3455,7 @@ static void bmea_panel_init(struct gs_panel *ctx)
 		gs_panel_send_cmdset(ctx, &bmea_sap_cmdset);
 	bmea_set_opec_settings(ctx);
 	bmea_disable_retention(ctx);
+	gs_panel_send_cmdset(ctx, &bmea_collision_detection_cmdset);
 
 #ifdef PANEL_FACTORY_BUILD
 	ctx->idle_data.panel_idle_enabled = false;
@@ -3474,6 +3507,7 @@ static int bmea_panel_probe(struct mipi_dsi_device *dsi)
 	ctx->hw_status.acl_mode = ACL_OFF;
 	ctx->hw_status.dbv = 0;
 	clear_bit(FEAT_ZA, ctx->hw_status.feat);
+	spanel->reg_dump_for_gram_collision_triggered = false;
 
 	return gs_dsi_panel_common_init(dsi, ctx);
 }

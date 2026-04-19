@@ -1334,7 +1334,7 @@ typedef struct dhd_db7_info {
 } dhd_db7_info_t;
 
 #ifdef DHD_ART
-#define IS_ART_IFACE(ifname) strstr(ifname, "radiotap0")
+#define IS_ART_IFACE(ifname) strstr(ifname, "wondertap0")
 typedef struct dhd_art_counters {
     uint64 rx_packets;
     uint64 rx_dbg_monitor_packets;
@@ -2194,6 +2194,8 @@ typedef struct dhd_pub {
 	bool force_wl_reg_off;
 	bool reset_5g_rffe_vio;
 #ifdef DHD_ART
+	u8 art_bssid[ETHER_ADDR_LEN]; /* BSSID filter */
+	u8 art_mac_addr[ETHER_ADDR_LEN];
 	dhd_art_counters_t art_counters;
 #endif /* DHD_ART */
 } dhd_pub_t;

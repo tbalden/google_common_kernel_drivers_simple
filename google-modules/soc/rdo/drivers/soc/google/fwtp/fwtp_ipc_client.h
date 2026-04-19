@@ -28,6 +28,19 @@ __BEGIN_CDECLS
 #define FWTP_MAX_STRING_TABLE_SIZE (1024 * 1024)
 
 /**
+ * DOC: FWTP IPC clients
+ *
+ * FWTP provides a set of services that may be used by clients to make requests
+ * using IPC. These services may be used to get the tracepoint string table or
+ * print tracepoints.
+ *
+ * In order to use these services, an FWTP client initializes a
+ * &struct fwtp_ipc_client record and registers it using
+ * fwtp_ipc_client_register(). When an FWTP client is done using FWTP, it should
+ * unregister using fwtp_ipc_client_unregister().
+ */
+
+/**
  * struct fwtp_ipc_client - Structure representing an FWTP IPC client.
  *
  * @fwtp_if: FWTP IPC interface.
@@ -43,7 +56,7 @@ struct fwtp_ipc_client {
 	int string_table_num;
 	char *string_table;
 	uint32_t string_table_offset;
-	int string_table_size;
+	uint32_t string_table_size;
 	uint16_t ring_num;
 	uint32_t tracepoints_head_offset;
 };

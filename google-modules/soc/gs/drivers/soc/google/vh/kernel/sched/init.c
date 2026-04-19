@@ -74,6 +74,8 @@ extern void rvh_enqueue_task_fair_pixel_mod(void *data, struct rq *rq, struct ta
 					    int flags);
 extern void rvh_dequeue_task_fair_pixel_mod(void *data, struct rq *rq, struct task_struct *p,
 					    int flags);
+extern void rvh_after_enqueue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p,
+	int flags);
 extern void vh_binder_set_priority_pixel_mod(void *data, struct binder_transaction *t,
 	struct task_struct *task);
 extern void vh_binder_restore_priority_pixel_mod(void *data, struct binder_transaction *t,
@@ -207,6 +209,35 @@ static void vh_prio_restore(void *data, int nice)
 }
 #endif
 
+static enum hrtimer_restart ptick(struct hrtimer *timer)
+{
+	struct rq *rq = cpu_rq(smp_processor_id());
+	struct rq_flags rf;
+
+	rq_lock(rq, &rf);
+	update_rq_clock(rq);
+	rq->curr->sched_class->task_tick(rq, rq->curr, 1);
+	rq_unlock(rq, &rf);
+
+	vh_scheduler_tick_pixel_mod(NULL, rq);
+
+	hrtimer_forward_now(timer, ns_to_ktime(PTICK_PERIOD_NS));
+
+	return HRTIMER_RESTART;
+}
+
+static void ptick_init(struct rq *rq)
+{
+	struct vendor_rq_struct *vrq = get_vendor_rq_struct(rq);
+
+	vrq->ptick_timer = kcalloc(1, sizeof(struct hrtimer), GFP_ATOMIC);
+	if (WARN_ON(!vrq->ptick_timer))
+		return;
+
+	hrtimer_init(vrq->ptick_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_HARD);
+	vrq->ptick_timer->function = ptick;
+}
+
 static void init_vendor_rt_rq(void)
 {
 	int i;
@@ -218,6 +249,7 @@ static void init_vendor_rt_rq(void)
 		vrq->util_removed = 0;
 		vrq->iowait_boost = 0;
 		atomic_set(&vrq->num_adpf_tasks, 0);
+		ptick_init(cpu_rq(i));
 	}
 }
 
@@ -414,6 +446,10 @@ static int vh_sched_init(void)
 	REGISTER_TRACE_RVH(enqueue_task_fair, rvh_enqueue_task_fair_pixel_mod);
 	REGISTER_TRACE_RVH(dequeue_task_fair, rvh_dequeue_task_fair_pixel_mod);
 
+	ret = register_trace_android_rvh_after_enqueue_task(rvh_after_enqueue_task_pixel_mod, NULL);
+	if (ret)
+		return ret;
+
 	static_branch_enable(&enqueue_dequeue_ready);
 
 #if IS_ENABLED(CONFIG_USE_VENDOR_GROUP_UTIL)
@@ -500,6 +536,9 @@ static int vh_sched_init(void)
 	sysctl_sched_features &= ~(1UL << __SCHED_FEAT_TTWU_QUEUE);
 	static_key_disable(&sched_feat_keys[__SCHED_FEAT_TTWU_QUEUE]);
 
+	// Enable NEXT_BUDDY
+	sysctl_sched_features |= (1UL << __SCHED_FEAT_NEXT_BUDDY);
+	static_key_enable(&sched_feat_keys[__SCHED_FEAT_NEXT_BUDDY]);
 	return 0;
 }
 

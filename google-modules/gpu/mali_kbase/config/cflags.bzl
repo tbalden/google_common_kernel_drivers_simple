@@ -18,6 +18,10 @@
 #
 #
 
+"""
+CFLAGS and COPTS for Pixel Mali CSF driver
+"""
+
 KUTF_CFLAGS = [
     "-Wno-sign-compare",
     "-Wno-unused-but-set-variable",

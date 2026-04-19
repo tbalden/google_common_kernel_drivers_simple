@@ -442,6 +442,7 @@
 #define ARM_SMMU_OPT_OVR_INSTCFG_DATA	(1 << 4)
 #define ARM_SMMU_OPT_RPM_DISABLE	(1 << 5)
 #define ARM_SMMU_OPT_NON_COHERENT_TTW	(1 << 6)
+#define ARM_SMMU_OPT_SYNC_FW		(1 << 7)
 
 enum pri_resp {
 	PRI_RESP_DENY = 0,

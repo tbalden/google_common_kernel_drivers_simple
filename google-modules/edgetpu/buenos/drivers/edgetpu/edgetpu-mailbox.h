@@ -29,9 +29,6 @@
 /* Mailbox index for Inter-IP Fence signaling mailbox, if enabled */
 #define IIF_MAILBOX_INDEX 2
 
-/* Size of CSRs start from cmd_queue_csr_base can be mmap-ed to userspace. */
-#define USERSPACE_CSR_SIZE 0x1000ul
-
 /* Mailbox ID to indicate external mailboxes */
 #define EDGETPU_MAILBOX_ID_USE_ASSOC -1
 
@@ -53,7 +50,13 @@ struct edgetpu_mailbox {
 	u32 resp_queue_size; /* size of resp queue */
 	u32 resp_queue_head; /* offset within the resp queue */
 
-	/* IRQ handler */
+	/* IRQ number. */
+	int irq;
+	/*
+	 * IRQ handler.
+	 * If @irq is non-zero, it must be disabled with `disable_irq` before changing the function
+	 * this points to.
+	 */
 	void (*handle_irq)(struct edgetpu_mailbox *mailbox);
 
 	/*
@@ -114,7 +117,6 @@ struct edgetpu_external_mailbox_req {
  *   In usual cases @state always equals @fw_state. But when the FW is reloaded,
  *   @fw_state is reset to zero, then this structure can be used to know the FW
  *   state is out-of-sync and need further actions.
- *   In addition to "OPEN_DEVICE", "ALLOCATE_VMBOX" also use this structure to record the states.
  */
 struct edgetpu_handshake {
 	struct mutex lock;
@@ -123,30 +125,21 @@ struct edgetpu_handshake {
 	u32 fw_state;
 };
 
-typedef u32 (*get_csr_base_t)(uint index);
-
 struct edgetpu_mailbox_manager {
 	struct edgetpu_dev *etdev;
-	/* total number of mailboxes that edgetpu device could provide */
-	u8 num_mailbox;
+	/* total number of external mailboxes that can be provided for inter-IP communication. */
+	u8 num_ext_mailbox;
 	/* indices reserved for external mailboxes */
 	u8 ext_index_from, ext_index_to;
-	rwlock_t mailboxes_lock;	/* protects mailboxes */
-	struct edgetpu_mailbox **mailboxes;
-	/* converts index (0 ~ num_mailbox - 1) of mailbox to CSR offset */
-	get_csr_base_t get_context_csr_base;
+	rwlock_t ext_mailboxes_lock;	/* protects ext_mailboxes */
+	struct edgetpu_mailbox **ext_mailboxes;
 	struct edgetpu_handshake open_devices;
-	bool use_iif;
 };
 
 /* the structure to configure a mailbox manager */
 struct edgetpu_mailbox_manager_desc {
-	u8 num_mailbox;
 	u8 num_ext_mailbox;
 	u8 ext_mailbox_start;
-	get_csr_base_t get_context_csr_base;
-	/* Whether or not a mailbox is reserved for IIF signaling. */
-	bool use_iif;
 };
 
 /* Mailbox CSRs. The order and size are exactly the same as RTL defined. */
@@ -210,10 +203,17 @@ edgetpu_mailbox_create_mgr(struct edgetpu_dev *etdev,
 irqreturn_t edgetpu_mailbox_irq_handler(int irq, void *arg);
 
 /*
- * Enable or disable all mailbox IRQs for the device.
- * @enable: true to enable IRQs, or false to disable IRQs.
+ * Enable or disable the IRQ for a given mailbox.
+ * @enable: true to enable the IRQ, or false to disable it.
  */
-void edgetpu_mailbox_irqs_enable(struct edgetpu_dev *etdev, bool enable);
+void edgetpu_mailbox_irq_enable(struct edgetpu_mailbox *mailbox, bool enable);
+
+/*
+ * Set the callback for handling interrupts sent by @mailbox's doorbell.
+ * @handle_irq: callback function to handle doorbells. Pass NULL for no callback.
+ */
+void edgetpu_mailbox_set_irq_handler(struct edgetpu_mailbox *mailbox,
+				     void (*handle_irq)(struct edgetpu_mailbox *mailbox));
 
 /*
  * Allocate and initialize the mailbox located at @csr_base.
@@ -223,16 +223,21 @@ void edgetpu_mailbox_irqs_enable(struct edgetpu_dev *etdev, bool enable);
  * This function is safe to call in an atomic context.
  */
 /* TODO(b/376971597) remove @index once its only used for external mailboxes. */
-struct edgetpu_mailbox *edgetpu_mailbox_alloc(struct edgetpu_mailbox_manager *mgr,
-					      void __iomem *csr_base, uint index);
+struct edgetpu_mailbox *edgetpu_mailbox_alloc(struct edgetpu_dev *etdev, void __iomem *csr_base,
+					      int irq, uint index);
 
 /*
- * Removes and disables all the mailboxes previously requested.
+ * Release a mailbox allocated with `edgetpu_mailbox_alloc`.
+ */
+void edgetpu_mailbox_release(struct edgetpu_mailbox *mailbox);
+
+/*
+ * Removes and disables all the external mailboxes previously requested.
  *
  * @hwaccessok = false means hardware is in unknown state, do not access mailbox CSRs;
  *               true means hardware is powered on and mailbox CSRs are okay to access
  */
-void edgetpu_mailbox_remove_all(struct edgetpu_mailbox_manager *mgr, bool hwaccessok);
+void edgetpu_mailbox_remove_ext_mailboxes(struct edgetpu_mailbox_manager *mgr, bool hwaccessok);
 
 /* configure mailbox */
 

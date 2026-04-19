@@ -15,10 +15,10 @@
 #include <soc/google/goog_mba_cpm_iface.h>
 #include <soc/google/goog_cpm_service_ids.h>
 
-#define CREATE_TRACE_POINTS
 #include "cpm_decoder/cpm_trace.h"
 #include "cpm_decoder/cpm_tracepoint_decoder.h"
 #include "fwtp.h"
+#include "fwtp_entry.h"
 #include "fwtp_protocol.h"
 
 /*******************************************************************************
@@ -153,6 +153,19 @@ static int fwtp_cpm_subscribe(struct fwtp_dev *fwtp_dev, bool subscribe)
 	return 0;
 }
 
+/**
+ * fwtp_cpm_tracepoint_decoder_enable_cb - Callback to enable CPM tracepoints.
+ *
+ * @ctx: Callback context. Points to an FWTP device.
+ * @enable: If true, enable CPM tracepoints; otherwise, disable them.
+ */
+static int fwtp_cpm_tracepoint_decoder_enable_cb(void *ctx, bool enable)
+{
+	struct fwtp_dev *fwtp_dev = ctx;
+
+	return fwtp_cpm_subscribe(fwtp_dev, enable);
+}
+
 /*******************************************************************************
  * FWTP interface and printer functions.
  ******************************************************************************/
@@ -247,13 +260,14 @@ static fwtp_error_code_t fwtp_cpm_send_message(struct fwtp_if *fwtp_if,
  * fwtp_cpm_printer_post_process - Performs post-processing on CPM tracepoints.
  *
  * Runs CPM tracepoint post-processing using the decoded tracepoint with the
- * timestamp specified by timestamp, title string specified by str_id and str,
- * and data items specified by data_items. This function doesn't modify the
- * tracepoint or printer output, but it may collect information from the
- * tracepoint for other uses (e.g., generating a SEM report). The printer
- * context is specified by printer_ctx.
+ * type specified by type, timestamp specified by timestamp, title string
+ * specified by str_id and str, and data items specified by data_items. This
+ * function doesn't modify the tracepoint or printer output, but it may collect
+ * information from the tracepoint for other uses (e.g., generating a SEM
+ * report). The printer context is specified by printer_ctx.
  *
  * @printer_ctx: Printer context.
+ * @type: Tracepoint type.
  * @timestamp: Tracepoint timestamp.
  * @str_id: Tracepoint title string ID.
  * @str: Tracepoint title string.
@@ -261,13 +275,20 @@ static fwtp_error_code_t fwtp_cpm_send_message(struct fwtp_if *fwtp_if,
  */
 static void
 fwtp_cpm_printer_post_process(struct fwtp_printer_ctx *printer_ctx,
-			      u64 timestamp, u32 str_id, const char *str,
+			      unsigned int type, u64 timestamp, u32 str_id,
+			      const char *str,
 			      struct fwtp_data_item_list *data_items)
 {
 	/* Get the first data item up to 32-bits in size. */
 	u32 data = 0;
 	int data_item_size =
 		fwtp_get_next_data_item(data_items, &data, sizeof(data));
+
+	/* Log any trace counters. */
+	if (type == FWTP_LL_ENTRY_TYPE_TRACE_COUNTER) {
+		fwtp_dev_trace_fwtp_perfetto_counter(timestamp, 0, "cpm", str,
+						     data);
+	}
 
 	/*
 	 * Pass the tracepoint string and data item to the CPM tracepoint
@@ -385,7 +406,7 @@ static void fwtp_cpm_host_cb(u32 context, void *msg, void *priv_data)
 /**
  * fwtp_cpm_debugfs_write_subscribe - Handle write.
  *
- * @data: Pointer to CPM FWTP driver.
+ * @data: Pointer to FWTP device.
  * @val: Write value.
  *
  * Handles a debugfs write operation to enable or disable tracepoint ring
@@ -421,6 +442,97 @@ static int fwtp_cpm_debugfs_write_subscribe(void *data, u64 val)
 DEFINE_DEBUGFS_ATTRIBUTE(fwtp_cpm_debugfs_fops_subscribe, NULL,
 			 fwtp_cpm_debugfs_write_subscribe, "%llu\n");
 
+/**
+ * fwtp_cpm_debugfs_read_enable_log - Handle read.
+ *
+ * @data: Pointer to FWTP device.
+ * @val: Read value on return.
+ *
+ * Handles a debugfs read operation for publishing tracepoints to the kernel
+ * log.
+ *
+ * Return: 0 on success, non-zero error code on error.
+ */
+static int fwtp_cpm_debugfs_read_enable_log(void *data, u64 *val)
+{
+	struct fwtp_dev *fwtp_dev = data;
+
+	*val = fwtp_dev->log_enabled ? 1 : 0;
+	return 0;
+}
+
+/**
+ * fwtp_cpm_debugfs_write_enable_log - Handle write.
+ *
+ * @data: Pointer to FWTP device.
+ * @val: Write value.
+ *
+ * Handles a debugfs write operation for publishing tracepoints to the kernel
+ * log.
+ *
+ * Return: 0 on success, non-zero error code on error.
+ */
+static int fwtp_cpm_debugfs_write_enable_log(void *data, u64 val)
+{
+	struct fwtp_dev *fwtp_dev = data;
+
+	fwtp_dev->log_enabled = (val != 0);
+	return 0;
+}
+
+/*
+ * Define the CPM FWTP driver debug interface to enable publishing tracepoints
+ * to the kernel log.
+ */
+DEFINE_DEBUGFS_ATTRIBUTE(fwtp_cpm_debugfs_fops_enable_log,
+			 fwtp_cpm_debugfs_read_enable_log,
+			 fwtp_cpm_debugfs_write_enable_log, "%llu\n");
+
+/**
+ * fwtp_cpm_debugfs_read_enable_ftrace - Handle read.
+ *
+ * @data: Pointer to FWTP device.
+ * @val: Read value on return.
+ *
+ * Handles a debugfs read operation for publishing tracepoints to ftrace.
+ *
+ * Return: 0 on success, non-zero error code on error.
+ */
+static int fwtp_cpm_debugfs_read_enable_ftrace(void *data, u64 *val)
+{
+	struct fwtp_dev *fwtp_dev = data;
+
+	*val = fwtp_dev->ftrace_enabled ? 1 : 0;
+	return 0;
+}
+
+/**
+ * fwtp_cpm_debugfs_write_enable_ftrace - Handle write.
+ *
+ * @data: Pointer to FWTP device.
+ * @val: Write value.
+ *
+ * Handles a debugfs write operation for publishing tracepoints to ftrace.
+ *
+ * Return: 0 on success, non-zero error code on error.
+ */
+static int fwtp_cpm_debugfs_write_enable_ftrace(void *data, u64 val)
+{
+	struct fwtp_dev *fwtp_dev = data;
+
+	fwtp_dev->ftrace_enabled = (val != 0);
+
+	return 0;
+}
+
+/*
+ * Define the CPM FWTP driver debug interface to enable publishing tracepoints
+ * to ftrace.
+ */
+DEFINE_DEBUGFS_ATTRIBUTE(fwtp_cpm_debugfs_fops_enable_ftrace,
+			 fwtp_cpm_debugfs_read_enable_ftrace,
+			 fwtp_cpm_debugfs_write_enable_ftrace, "%llu\n");
+
 /*******************************************************************************
  * Platform driver functions.
  ******************************************************************************/
@@ -433,15 +545,14 @@ DEFINE_DEBUGFS_ATTRIBUTE(fwtp_cpm_debugfs_fops_subscribe, NULL,
  * @dev_num: Sub-device number.
  * @ring_num: Sub-device ring number.
  * @string_table_num: Sub-device string table number.
- * @debugfs_name: Sub-device debugfs file name.
  */
 static int fwtp_cpm_init_dev(struct fwtp_cpm_dev *fwtp_cpm_dev,
 			     const char *tracepoint_name, int dev_num,
-			     int ring_num, int string_table_num,
-			     const char *debugfs_name)
+			     int ring_num, int string_table_num)
 {
 	struct fwtp_dev *fwtp_dev;
 	struct tracepoint_ring *memio_ring;
+	struct dentry *dev_debugfs;
 	int ret;
 
 	/* Configure and initialize the FWTP sub-device. */
@@ -473,10 +584,30 @@ static int fwtp_cpm_init_dev(struct fwtp_cpm_dev *fwtp_cpm_dev,
 	}
 
 	/* Create the debugfs file used to subscribe to tracepoints. */
-	if (!debugfs_create_file(debugfs_name, 0220, fwtp_cpm_dev->debugfs_root,
+	dev_debugfs =
+		debugfs_create_dir(tracepoint_name, fwtp_cpm_dev->debugfs_root);
+	if (!dev_debugfs) {
+		dev_err(fwtp_dev->dev,
+			"Failed to create a debugfs directory for \"%s\".\n",
+			tracepoint_name);
+		return -ENOENT;
+	}
+	if (!debugfs_create_file("request_subscribe", 0220, dev_debugfs,
 				 fwtp_dev, &fwtp_cpm_debugfs_fops_subscribe)) {
 		dev_err(fwtp_dev->dev,
 			"Failed to create a subscription debugfs file.\n");
+		return -ENOENT;
+	}
+	if (!debugfs_create_file("enable_log", 0220, dev_debugfs, fwtp_dev,
+				 &fwtp_cpm_debugfs_fops_enable_log)) {
+		dev_err(fwtp_dev->dev,
+			"Failed to create an enable kernel log debugfs file.\n");
+		return -ENOENT;
+	}
+	if (!debugfs_create_file("enable_ftrace", 0220, dev_debugfs, fwtp_dev,
+				 &fwtp_cpm_debugfs_fops_enable_ftrace)) {
+		dev_err(fwtp_dev->dev,
+			"Failed to create an enable ftrace debugfs file.\n");
 		return -ENOENT;
 	}
 
@@ -525,14 +656,12 @@ static int fwtp_cpm_init_dev_list(struct fwtp_cpm_dev *fwtp_cpm_dev)
 			ret = fwtp_cpm_init_dev(fwtp_cpm_dev, "cpm",
 						FWTP_CPM_DEV_ID_CPM,
 						TRACEPOINT_REQUEST_DRAM,
-						CPM_STRING_TABLE_CPM,
-						"cpm_request_subscribe");
+						CPM_STRING_TABLE_CPM);
 		} else if (strcmp(sub_dev_name, "cap") == 0) {
 			ret = fwtp_cpm_init_dev(fwtp_cpm_dev, "cap",
 						FWTP_CPM_DEV_ID_CAP,
 						TRACEPOINT_REQUEST_CAP_DRAM,
-						CPM_STRING_TABLE_CAP,
-						"cap_request_subscribe");
+						CPM_STRING_TABLE_CAP);
 		} else {
 			dev_warn(dev, "Sub-device name %s unregognized.\n",
 				 sub_dev_name);
@@ -556,6 +685,7 @@ static int fwtp_cpm_probe(struct platform_device *pdev)
 	struct fwtp_cpm_dev *fwtp_cpm_dev;
 	struct cpm_iface_client *cpm_client;
 	struct fwtp_dev *fwtp_dev;
+	struct fwtp_ipc_client *fwtp_ipc_client;
 	struct device_node *dma_reserved_mem_node = NULL;
 	struct reserved_mem *dma_reserved_mem;
 	int ret;
@@ -663,6 +793,14 @@ static int fwtp_cpm_probe(struct platform_device *pdev)
 
 	/* Initialize the CPM tracepoint decoder. */
 	initialize_cpm_tracepoint_decoder();
+	fwtp_ipc_client = &(fwtp_dev->fwtp_ipc_client);
+	cpm_tracepoint_decoder_set_string_table(fwtp_ipc_client->string_table,
+						fwtp_ipc_client
+							->string_table_size,
+						fwtp_ipc_client
+							->string_table_offset);
+	cpm_tracepoint_decoder_set_enable_cb(fwtp_cpm_tracepoint_decoder_enable_cb,
+					     fwtp_dev);
 
 out:
 	/* Clean up. */
@@ -696,6 +834,10 @@ static int fwtp_cpm_remove(struct platform_device *pdev)
 		return 0;
 	platform_set_drvdata(pdev, NULL);
 	ftrace_fwtp_cpm_dev = NULL;
+
+	/* Deinitialize the CPM tracepoint decoder. */
+	cpm_tracepoint_decoder_set_enable_cb(NULL, NULL);
+	cpm_tracepoint_decoder_set_string_table(NULL, 0, 0);
 
 	/* Free the mem I/O tracepoint rings. */
 	for (i = 0; i < FWTP_CPM_DEV_NUM; i++) {
@@ -731,50 +873,6 @@ static int fwtp_cpm_remove(struct platform_device *pdev)
 	dev_dbg(dev, "Removed CPM FWTP device.\n");
 
 	return 0;
-}
-
-/*******************************************************************************
- * Ftrace functions.
- ******************************************************************************/
-
-/**
- * param_set_value_cpm_enable - Handles ftrace "param_set_value_cpm" enabled.
- */
-int param_set_value_cpm_enable(void)
-{
-	struct fwtp_dev *fwtp_dev;
-	struct fwtp_ipc_client *fwtp_ipc_client;
-
-	if (!ftrace_fwtp_cpm_dev)
-		return -EINVAL;
-
-	/* Initialize tracepoint decoder clients. */
-	fwtp_dev = &(ftrace_fwtp_cpm_dev->fwtp_dev_list[FWTP_CPM_DEV_ID_CPM]);
-	fwtp_ipc_client = &(fwtp_dev->fwtp_ipc_client);
-	client_init_callbacks(fwtp_ipc_client->string_table,
-			      fwtp_ipc_client->string_table_size,
-			      fwtp_ipc_client->string_table_offset);
-
-	/* Subscribe to CPM tracepoints. */
-	return fwtp_cpm_subscribe(fwtp_dev, true);
-}
-
-/**
- * param_set_value_cpm_disable - Handles ftrace "param_set_value_cpm" disabled.
- */
-void param_set_value_cpm_disable(void)
-{
-	struct fwtp_dev *fwtp_dev;
-
-	if (!ftrace_fwtp_cpm_dev)
-		return;
-
-	/* Unsubscribe from CPM tracepoints. */
-	fwtp_dev = &(ftrace_fwtp_cpm_dev->fwtp_dev_list[FWTP_CPM_DEV_ID_CPM]);
-	fwtp_cpm_subscribe(fwtp_dev, false);
-
-	/* Deinitialize tracepoint decoder clients. */
-	client_exit_callbacks();
 }
 
 /*******************************************************************************

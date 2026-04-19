@@ -27,6 +27,7 @@ struct vendor_group_list vendor_group_list[VG_MAX];
 extern void update_uclamp_stats(int cpu, u64 time);
 #endif
 
+extern inline void update_misfit_status(struct task_struct *p, struct rq *rq);
 extern int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		cpumask_t *valid_mask);
 
@@ -74,6 +75,8 @@ DEFINE_STATIC_KEY_FALSE(use_em_for_freq_mapping);
 DEFINE_STATIC_KEY_FALSE(per_task_memory_aware_enable);
 
 DEFINE_STATIC_KEY_FALSE(update_freq_on_idle_enable);
+
+DEFINE_STATIC_KEY_FALSE(enable_ptick);
 
 #define vi_set_adpf(vi, type, value) \
     do { \
@@ -185,6 +188,13 @@ void vh_scheduler_tick_pixel_mod(void *data, struct rq *rq)
 	task_tick_uclamp(rq, rq->curr);
 	__update_util_est_invariance(rq, rq->curr, true);
 	uclamp_st_updated = update_auto_max_uclamp_st(rq->curr);
+
+	if (uclamp_st_updated) {
+		/* rq clock is already updated */
+		rq->clock_update_flags = RQCF_UPDATED;
+		/* freq may have been updated in entity tick, so use force update here */
+		cpufreq_update_util(rq, SCHED_PIXEL_FORCE_UPDATE);
+	}
 	rq_unlock(rq, &rf);
 
 	/* Check if an RT task needs to move to a better fitting CPU */
@@ -199,11 +209,6 @@ void vh_scheduler_tick_pixel_mod(void *data, struct rq *rq)
 	 * up a helper thread to update memory frequencies.
 	 */
 	gs_perf_mon_tick_update_counters();
-
-	if (uclamp_st_updated) {
-		/* freq may have been updated in entity tick, so use force update here */
-		cpufreq_update_util(rq, SCHED_PIXEL_FORCE_UPDATE);
-	}
 }
 
 void reset_task_pmu(struct task_struct *p)
@@ -280,6 +285,27 @@ void update_task_pmu(int cpu, struct task_struct *prev, struct task_struct *next
 		prepare_task_pmu(cpu, next, cycle, stall, inst);
 }
 
+static inline void ptick_clear(struct rq *rq)
+{
+	struct vendor_rq_struct *vrq = get_vendor_rq_struct(rq);
+
+	if (!vrq->ptick_timer)
+		return;
+
+	if (hrtimer_active(vrq->ptick_timer))
+		hrtimer_cancel(vrq->ptick_timer);
+}
+
+static inline void ptick_start(struct rq *rq)
+{
+	struct vendor_rq_struct *vrq = get_vendor_rq_struct(rq);
+
+	if (!vrq->ptick_timer)
+		return;
+
+	hrtimer_start(vrq->ptick_timer, ns_to_ktime(PTICK_PERIOD_NS), HRTIMER_MODE_REL_PINNED_HARD);
+}
+
 void vh_sched_switch_pixel_mod(void *data, bool preempt, struct task_struct *prev,
 			       struct task_struct *next, unsigned int prev_state)
 {
@@ -303,7 +329,22 @@ void vh_sched_switch_pixel_mod(void *data, bool preempt, struct task_struct *pre
 
 	if (static_key_enabled(&per_task_memory_aware_enable))
 		update_task_pmu(cpu_of(rq), prev, next);
+
+	if (is_idle_task(next))
+		ptick_clear(rq);
+
+	if (static_key_enabled(&enable_ptick) && is_idle_task(prev))
+		ptick_start(rq);
 }
+
+void rvh_after_enqueue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p, int flags)
+{
+	if (p->prio < MAX_RT_PRIO)
+		return;
+
+	update_misfit_status(p, rq);
+}
+
 
 void rvh_enqueue_task_pixel_mod(void *data, struct rq *rq, struct task_struct *p, int flags)
 {

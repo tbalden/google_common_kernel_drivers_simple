@@ -8,7 +8,7 @@
 #define CRASH_INFO_MAX_LEN 256
 #define CRASH_PREFIX_MAX_LEN 64
 
-static const struct display_sscd_version current_version = { 0, 2, "Unknown", "Unknown" };
+static const struct display_sscd_version current_version = { 0, 3, "Unknown", "Unknown" };
 
 static inline const char *get_common_driver_commit(void)
 {

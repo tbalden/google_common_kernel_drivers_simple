@@ -27,6 +27,26 @@
 
 #define VS_DC_MAX_NUM_IRQS 48
 
+/**
+ * enum coredump_source - enum of possible trigger types for subsystem coredump
+ *
+ * @SSCD_SRC_MANUAL: Manual coredump trigger (via debugfs) for testing
+ * @SSCD_SRC_FRAME_UPDATE_TIMEOUT: Timeout waiting for frame start or frame done signal.
+ *				   Only triggers timeouts during normal frame timeline.
+ * @SSCD_SRC_DISABLE_TIMEOUT: Triggers on frame done timeouts during pipeline disable.
+ * @SSCD_SRC_GRAM_COLLISION: Trigger when GRAM collision is detected by panel.
+ *
+ * User can change which errors lead to coredumps by way of module parameter.
+ */
+enum coredump_source {
+	SSCD_SRC_MANUAL = 0,
+	SSCD_SRC_FRAME_UPDATE_TIMEOUT,
+	SSCD_SRC_DISABLE_TIMEOUT,
+	SSCD_SRC_GRAM_COLLISION,
+	/** @SSCD_SRC_MAX: bounding enumerator; add new entries before this */
+	SSCD_SRC_MAX,
+};
+
 static inline u8 to_vs_rotation(u32 rotation)
 {
 	u8 rot;
@@ -157,12 +177,14 @@ static inline struct vs_dc *to_vs_dc(const struct dc_hw *hw)
 {
 	return container_of(hw, struct vs_dc, hw);
 }
+bool dc_is_coredump_source_enabled(const struct vs_dc *dc, enum coredump_source source);
 
 int vs_sw_reset_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
 int vs_get_feature_cap_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
 int vs_get_hw_cap_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
 int vs_get_hist_bins_query_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
 int vs_get_ltm_hist_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
+int vs_task_fence_ioctl(struct drm_device *dev, void *data, struct drm_file *file_priv);
 bool vs_dc_is_yuv_format(u32 format);
 void vs_dc_check_interrupts(struct device *dev);
 int vs_dc_power_get(struct device *dev, bool sync);

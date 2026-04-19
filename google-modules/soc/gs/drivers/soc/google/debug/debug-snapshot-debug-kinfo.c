@@ -41,6 +41,9 @@ struct vendor_kernel_info {
 	/* For debug snapshot */
 	char dss_freq_name[DSS_FREQ_MAX_SIZE][DSS_FREQ_MAX_NAME_SIZE];
 	u32 dss_freq_size;
+	/* For kernel virt_to_phys */
+	u32 pgtable_levels;
+	u32 page_shift;
 } __packed;
 
 struct vendor_kernel_all_info {
@@ -106,6 +109,8 @@ static void update_vendor_kernel_all_info(void)
 	info->page_end = PAGE_END;
 	info->phys_offset = PHYS_OFFSET;
 	info->kimage_voffset = kimage_voffset;
+	info->pgtable_levels = CONFIG_PGTABLE_LEVELS;
+	info->page_shift = PAGE_SHIFT;
 
 	dbg_snapshot_get_freq_name(info->dss_freq_name);
 	info->dss_freq_size = dbg_snapshot_get_freq_size();

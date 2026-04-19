@@ -251,7 +251,7 @@ static int process_transaction(struct lwis_client *client, struct lwis_transacti
 			ktime_to_ns(lwis_get_time()) - transaction->triggered_event_timestamp;
 		if (ktime_to_ms(triggered_duration_ns) >= TRIGGRED_EVENT_EXECUTION_THRESHOLD_MS)
 			dev_warn(client->lwis_dev->dev,
-				 "Triggered event id %lld transaction id %llu, %lldms",
+				 "Triggered event id %#llx transaction id %llu, %lldms",
 				 transaction->info.trigger_event_id, transaction->info.id,
 				 ktime_to_ms(triggered_duration_ns));
 	}

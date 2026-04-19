@@ -15,6 +15,20 @@
 #include <linux/delay.h>
 #include "gbms_storage.h"
 
+/*
+ * IMPORTANT: EEPROM Layout Compatibility
+ *
+ * This file defines the EEPROM memory layout for the Android OS.
+ * This layout MUST be kept in sync with the corresponding layout in the
+ * bootloader. Any changes to the EEPROM memory map must be reflected
+ * in both the bootloader and the kernel to avoid data corruption and
+ * unexpected behavior.
+ *
+ * The EEPROM layout differs between EEPROM models (e.g., M24C08 vs. M24C64).
+ * Ensure that the correct offsets are used for the target hardware.
+ *
+ * See b/458510524 for more details.
+ */
 #define BATT_EEPROM_TAG_HIST_OFFSET	0x5E
 #define BATT_EEPROM_TAG_HIST_LEN	BATT_ONE_HIST_LEN
 #define BATT_MAX_HIST_CNT		200

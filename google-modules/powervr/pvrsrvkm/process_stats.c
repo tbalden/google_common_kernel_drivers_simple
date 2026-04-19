@@ -127,21 +127,11 @@ int RawProcessStatsPrintElements(OSDI_IMPL_ENTRY *psEntry, void *pvData);
 #endif
 int GlobalStatsPrintElements(OSDI_IMPL_ENTRY *psEntry, void *pvData);
 
-/* Note: all of the accesses to the global stats should be protected
- * by the gsGlobalStats.hGlobalStatsLock lock. This means all of the
- * invocations of macros *_GLOBAL_STAT_VALUE. */
-
 /* Macros for fetching stat values */
 #define GET_STAT_VALUE(ptr,var) (ptr)->i64StatValue[(var)]
-#define GET_GLOBAL_STAT_VALUE(idx) gsGlobalStats.ui64StatValue[idx]
+#define GET_GLOBAL_STAT_VALUE(idx) OSAtomic64Read(&gsGlobalStats.ui64StatValue[idx].stat)
 
-#define GET_GPUMEM_GLOBAL_STAT_VALUE() \
-	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA_POOL) + \
-	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_PT_MEMORY_UMA) + \
-	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_PT_MEMORY_LMA) + \
-	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_LMA) + \
-	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA) + \
-	GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_DMA_BUF_IMPORT)
+#define GET_GPUMEM_GLOBAL_STAT_VALUE() GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_GPU_MEM_TOTAL)
 
 #define GET_GPUMEM_PERPID_STAT_VALUE(ptr) \
 	GET_STAT_VALUE((ptr), PVRSRV_PROCESS_STAT_TYPE_ALLOC_PAGES_PT_UMA) + \
@@ -154,14 +144,30 @@ int GlobalStatsPrintElements(OSDI_IMPL_ENTRY *psEntry, void *pvData);
  */
 #define UPDATE_MAX_VALUE(a,b)					do { if ((b) > (a)) {(a) = (b);} } while (0)
 #define INCREASE_STAT_VALUE(ptr,var,val)		do { (ptr)->i64StatValue[(var)] += (IMG_INT64)(val); if ((ptr)->i64StatValue[(var)] > (ptr)->i64StatValue[(var##_MAX)]) {(ptr)->i64StatValue[(var##_MAX)] = (ptr)->i64StatValue[(var)];} } while (0)
-#define INCREASE_GLOBAL_STAT_VALUE(var,idx,val)		do { (var).ui64StatValue[(idx)] += (IMG_UINT64)(val); if ((var).ui64StatValue[(idx)] > (var).ui64StatValue[(idx##_MAX)]) {(var).ui64StatValue[(idx##_MAX)] = (var).ui64StatValue[(idx)];} } while (0)
+#define INCREASE_GLOBAL_STAT_VALUE(var, idx, val) do { \
+													IMG_INT64 _new_val = OSAtomic64Add((val), &((var).ui64StatValue[(idx)].stat)); \
+													IMG_INT64 _curr_max = OSAtomic64Read(&((var).ui64StatValue[(idx##_MAX)].stat)); \
+													while (unlikely(_new_val > _curr_max)) { \
+														if (OSAtomic64CmpXchg(&((var).ui64StatValue[(idx##_MAX)].stat), &_curr_max, _new_val)) { \
+															break; \
+														} \
+													} \
+												} while (0)
 #if defined(PVRSRV_DEBUG_LINUX_MEMORY_STATS)
 /* Allow stats to go negative */
 #define DECREASE_STAT_VALUE(ptr,var,val)		do { (ptr)->i64StatValue[(var)] -= (val); } while (0)
-#define DECREASE_GLOBAL_STAT_VALUE(var,idx,val)		do { (var).ui64StatValue[(idx)] -= (val); } while (0)
+#define DECREASE_GLOBAL_STAT_VALUE(var,idx,val)                do { OSAtomic64Subtract((val), &((var).ui64StatValue[(idx)].stat)); } while (0)
 #else
 #define DECREASE_STAT_VALUE(ptr,var,val)		do { if ((ptr)->i64StatValue[(var)] >= (val)) { (ptr)->i64StatValue[(var)] -= (IMG_INT64)(val); } else { (ptr)->i64StatValue[(var)] = 0; } } while (0)
-#define DECREASE_GLOBAL_STAT_VALUE(var,idx,val)		do { if ((var).ui64StatValue[(idx)] >= (val)) { (var).ui64StatValue[(idx)] -= (IMG_UINT64)(val); } else { (var).ui64StatValue[(idx)] = 0; } } while (0)
+#define DECREASE_GLOBAL_STAT_VALUE(var, idx, val) do { \
+													ATOMIC64_T *_p_stat = &((var).ui64StatValue[(idx)].stat); \
+													IMG_INT64 _old_val, _new_val; \
+													do { \
+														_old_val = OSAtomic64Read(_p_stat); \
+														if (unlikely((val) > _old_val)) { _new_val = 0; } \
+														else { _new_val = _old_val - (val); } \
+													} while (!OSAtomic64CmpXchg(_p_stat, &_old_val, _new_val)); \
+												} while (0)
 #endif
 #define MAX_CACHEOP_STAT 16
 #define INCREMENT_CACHEOP_STAT_IDX_WRAP(x) ((x+1) >= MAX_CACHEOP_STAT ? 0 : (x+1))
@@ -434,11 +440,14 @@ static DI_ENTRY *psProcStatsDIEntry;
 static IMG_HANDLE g_hDriverProcessStats;
 #endif
 
-/* Global driver-data folders */
+typedef struct _ALIGNED_STAT_
+{
+	ATOMIC64_T stat;
+} ____cacheline_aligned ALIGNED_STAT;
+
 typedef struct _GLOBAL_STATS_
 {
-	IMG_UINT64 ui64StatValue[PVRSRV_DRIVER_STAT_TYPE_COUNT];
-	POS_LOCK   hGlobalStatsLock;
+	ALIGNED_STAT ui64StatValue[PVRSRV_DRIVER_STAT_TYPE_COUNT];
 } GLOBAL_STATS;
 
 static DI_ENTRY *psGlobalMemDIEntry;
@@ -876,14 +885,11 @@ static void _ProcessStatsDKPShow(PVRSRV_DEVICE_NODE *psDevNode,
 
 #endif
 
-#if IS_ENABLED(CONFIG_PIXEL_STAT)
 struct kobject *pixel_stat_gpu_kobj, pixel_gpu_stat;
 
 unsigned long long get_total_gpu_mem_byte(void)
 {
 	unsigned long long total;
-
-	OSLockAcquire(gsGlobalStats.hGlobalStatsLock);
 	total = GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_PT_MEMORY_UMA) +
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_PT_MEMORY_LMA) +
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_LMA) +
@@ -891,7 +897,6 @@ unsigned long long get_total_gpu_mem_byte(void)
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA) +
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ZOMBIE_GPUMEM_UMA) +
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA_POOL);
-	OSLockRelease(gsGlobalStats.hGlobalStatsLock);
 
 	return total;
 }
@@ -957,7 +962,6 @@ static int pvr_init_pixel_stats(void)
 
 	return PVRSRV_OK;
 }
-#endif
 
 /*************************************************************************/ /*!
 @Function       PVRSRVStatsInitialise
@@ -973,10 +977,11 @@ PVRSRVStatsInitialise(void)
 	PVR_ASSERT(gpsSizeTrackingHashTable == NULL);
 	PVR_ASSERT(bProcessStatsInitialised == IMG_FALSE);
 
-#if IS_ENABLED(CONFIG_PIXEL_STAT)
-	error = pvr_init_pixel_stats();
-	PVR_LOG_IF_ERROR(error, "init_pixel_stats");
-#endif
+	if (IS_ENABLED(CONFIG_PIXEL_STAT))
+	{
+		error = pvr_init_pixel_stats();
+		PVR_LOG_IF_ERROR(error, "init_pixel_stats");
+	}
 
 	/* We need a lock to protect the linked lists... */
 #if defined(__linux__) && defined(__KERNEL__)
@@ -994,18 +999,10 @@ PVRSRVStatsInitialise(void)
 #endif
 	PVR_GOTO_IF_ERROR(error, destroy_linked_list_lock_);
 
-	/* We also need a lock to protect the GlobalStat counters */
-#if defined(__linux__) && defined(__KERNEL__)
-	error = OSLockCreateNoStats(&gsGlobalStats.hGlobalStatsLock);
-#else
-	error = OSLockCreate(&gsGlobalStats.hGlobalStatsLock);
-#endif
-	PVR_GOTO_IF_ERROR(error, destroy_hashtable_lock_);
-
 	/* Flag that we are ready to start monitoring memory allocations. */
 
 	gpsSizeTrackingHashTable = HASH_Create(HASH_INITIAL_SIZE);
-	PVR_GOTO_IF_NOMEM(gpsSizeTrackingHashTable, error, destroy_stats_lock_);
+	PVR_GOTO_IF_NOMEM(gpsSizeTrackingHashTable, error, destroy_hashtable_lock_);
 
 	dllist_init(&gsLiveList);
 	dllist_init(&gsDeadList);
@@ -1055,13 +1052,6 @@ PVRSRVStatsInitialise(void)
 
 	return PVRSRV_OK;
 
-destroy_stats_lock_:
-#if defined(__linux__) && defined(__KERNEL__)
-	OSLockDestroyNoStats(gsGlobalStats.hGlobalStatsLock);
-#else
-	OSLockDestroy(gsGlobalStats.hGlobalStatsLock);
-#endif
-	gsGlobalStats.hGlobalStatsLock = NULL;
 destroy_hashtable_lock_:
 #if defined(__linux__) && defined(__KERNEL__)
 	OSLockDestroyNoStats(gpsSizeTrackingHashTableLock);
@@ -1168,17 +1158,6 @@ PVRSRVStatsDestroy(void)
 #endif
 		gpsSizeTrackingHashTableLock = NULL;
 	}
-
-	if (NULL != gsGlobalStats.hGlobalStatsLock)
-	{
-#if defined(__linux__) && defined(__KERNEL__)
-		OSLockDestroyNoStats(gsGlobalStats.hGlobalStatsLock);
-#else
-		OSLockDestroy(gsGlobalStats.hGlobalStatsLock);
-#endif
-		gsGlobalStats.hGlobalStatsLock = NULL;
-	}
-
 }
 
 void
@@ -1204,6 +1183,25 @@ PVRSRVStatsDestroyDI(void)
 #endif
 }
 
+static inline void _update_gpu_mem_total(PVRSRV_MEM_ALLOC_TYPE eAllocType, size_t uiBytes, bool inc)
+{
+	switch (eAllocType) {
+	case PVRSRV_MEM_ALLOC_TYPE_UMA_POOL_PAGES:
+	case PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA:
+	case PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_LMA:
+	case PVRSRV_MEM_ALLOC_TYPE_ALLOC_LMA_PAGES:
+	case PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES:
+	case PVRSRV_MEM_ALLOC_TYPE_DMA_BUF_IMPORT:
+		if (inc)
+			INCREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_GPU_MEM_TOTAL, uiBytes);
+		else
+			DECREASE_GLOBAL_STAT_VALUE(gsGlobalStats, PVRSRV_DRIVER_STAT_TYPE_GPU_MEM_TOTAL, uiBytes);
+		break;
+	default:
+		break;
+	}
+}
+
 static void _decrease_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 								  size_t uiBytes)
 {
@@ -1211,11 +1209,11 @@ static void _decrease_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 	IMG_UINT64 ui64InitialSize;
 #endif
 
-	OSLockAcquire(gsGlobalStats.hGlobalStatsLock);
-
 #if defined(ENABLE_GPU_MEM_TRACEPOINT)
 	ui64InitialSize = GET_GPUMEM_GLOBAL_STAT_VALUE();
 #endif
+
+	_update_gpu_mem_total(eAllocType, uiBytes, IMG_FALSE);
 
 	switch (eAllocType)
 	{
@@ -1295,8 +1293,6 @@ static void _decrease_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		}
 	}
 #endif
-
-	OSLockRelease(gsGlobalStats.hGlobalStatsLock);
 }
 
 static void _increase_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
@@ -1306,11 +1302,11 @@ static void _increase_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 	IMG_UINT64 ui64InitialSize;
 #endif
 
-	OSLockAcquire(gsGlobalStats.hGlobalStatsLock);
-
 #if defined(ENABLE_GPU_MEM_TRACEPOINT)
 	ui64InitialSize = GET_GPUMEM_GLOBAL_STAT_VALUE();
 #endif
+
+	_update_gpu_mem_total(eAllocType, uiBytes, IMG_TRUE);
 
 	switch (eAllocType)
 	{
@@ -1390,8 +1386,6 @@ static void _increase_global_stat(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 		}
 	}
 #endif
-
-	OSLockRelease(gsGlobalStats.hGlobalStatsLock);
 }
 
 static PVRSRV_ERROR
@@ -2087,10 +2081,7 @@ PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE eAllocType,
 
 free_record:
 	_decrease_global_stat(eAllocType, uiBytes);
-	if (psRecord != NULL)
-	{
-		OSFreeMemNoStats(psRecord);
-	}
+	OSFreeMemNoStats(psRecord);
 #else /* defined(PVRSRV_ENABLE_MEMORY_STATS) */
 	PVR_UNREFERENCED_PARAMETER(eAllocType);
 	PVR_UNREFERENCED_PARAMETER(pvCpuVAddr);
@@ -3393,8 +3384,6 @@ int GlobalStatsPrintElements(OSDI_IMPL_ENTRY *psEntry, void *pvData)
 	IMG_UINT32 ui32StatNumber;
 	PVR_UNREFERENCED_PARAMETER(pvData);
 
-	OSLockAcquire(gsGlobalStats.hGlobalStatsLock);
-
 	for (ui32StatNumber = 0;
 	     ui32StatNumber < ARRAY_SIZE(pszDriverStatType);
 	     ui32StatNumber++)
@@ -3406,8 +3395,6 @@ int GlobalStatsPrintElements(OSDI_IMPL_ENTRY *psEntry, void *pvData)
 				    GET_GLOBAL_STAT_VALUE(ui32StatNumber));
 		}
 	}
-
-	OSLockRelease(gsGlobalStats.hGlobalStatsLock);
 
 	return 0;
 }
@@ -3446,14 +3433,10 @@ PVRSRV_ERROR PVRSRVFindProcessMemStats(IMG_PID pid,
 			"MemStats array size is incorrect",
 			PVRSRV_ERROR_INVALID_PARAMS);
 
-		OSLockAcquire(gsGlobalStats.hGlobalStatsLock);
-
 		for (i = 0; i < ui32ArrSize; i++)
 		{
 			pui64MemoryStats[i] = GET_GLOBAL_STAT_VALUE(i);
 		}
-
-		OSLockRelease(gsGlobalStats.hGlobalStatsLock);
 
 		return PVRSRV_OK;
 	}
@@ -3516,16 +3499,12 @@ PVRSRV_ERROR PVRSRVGetProcessMemUsage(IMG_UINT64 *pui64TotalMem,
 	PVRSRV_PER_PROCESS_MEM_USAGE* psPerProcessMemUsageData = NULL;
 	DLLIST_NODE *psNode, *psNext;
 
-	OSLockAcquire(gsGlobalStats.hGlobalStatsLock);
-
 	*pui64TotalMem = GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_KMALLOC) +
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_VMALLOC) +
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_LMA) +
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_GPUMEM_UMA) +
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_PT_MEMORY_UMA) +
 		GET_GLOBAL_STAT_VALUE(PVRSRV_DRIVER_STAT_TYPE_ALLOC_PT_MEMORY_LMA);
-
-	OSLockRelease(gsGlobalStats.hGlobalStatsLock);
 
 	OSLockAcquire(g_psLinkedListLock);
 
@@ -3579,3 +3558,5 @@ PVRSRV_ERROR PVRSRVGetProcessMemUsage(IMG_UINT64 *pui64TotalMem,
 	return eError;
 
 } /* PVRSRVGetProcessMemUsage */
+
+MODULE_SOFTDEP("pre: pixel_stat_sysfs");

@@ -17,6 +17,12 @@
 #include <iif/iif-shared.h>
 #include <iif/iif.h>
 
+#define TEST_NOTIFY_TASK_START()
+#define TEST_NOTIFY_FENCE_SIGNAL()
+#define TEST_SKIP_WAKE_UP_PROCESS() (false)
+#define TEST_INIT_SIGNALED_WAITQ(...)
+#define TEST_NOTIFY_SIGNALED_WAITQ(...)
+
 static void iif_dma_fence_release(struct kref *kref)
 {
 	struct iif_dma_fence *iif_dma_fence = container_of(kref, struct iif_dma_fence, kref);
@@ -150,6 +156,49 @@ static void dma_iif_fence_poll_cb(struct iif_fence *fence, struct iif_fence_poll
 }
 
 /*
+ * Will be called when @iif_dma_fence->task thread has stopped waiting on @iif_fence to be signaled.
+ * If the thread has been interrupted by the `iif_dma_fence_stop()` function before it executes,
+ * the stop function will call this function on behald of the thread.
+ *
+ * If @iif_fence hasn't been signaled (i.e., its bridged DMA fence hasn't been signaled), the fence
+ * will be signaled with @error error.
+ */
+static void iif_dma_fence_thread_waited(struct iif_dma_fence *iif_dma_fence, int error)
+{
+	struct iif_fence *iif_fence = &iif_dma_fence->bridged_fence.iif_fence;
+	struct dma_fence *dma_fence = iif_dma_fence->base_fence;
+
+	/*
+	 * When this function is called, the thread has stopped waiting on @iif_fence to be signaled
+	 * which means that:
+	 * 1. @iif_fence was actually signaled. Or,
+	 * 2. A timeout has occurred before the fence is signaled.
+	 *
+	 * If the case is the first one, it is safe to remove the callback registered to @dma_fence
+	 * since the fence was already signaled.
+	 *
+	 * If the case is the second one, the thread should take the responsibility of signaling
+	 * @iif_fence with an error, it should remove the registered callback first to prevent any
+	 * race conditions with @dma_fence.
+	 */
+	dma_fence_remove_callback(dma_fence, &iif_dma_fence->poll_cb.dma_cb);
+
+	/* If @iif_fence was already signaled, don't need to do anything. */
+	if (iif_fence_is_signaled(iif_fence))
+		goto out;
+
+	/*
+	 * If code reaches here, it is guaranteed that @iif_fence is not and will never be signaled.
+	 * Signals the fence with @error.
+	 */
+	iif_fence_signal_with_status(iif_fence, error);
+	iif_fence_signaler_completed(iif_fence);
+	TEST_NOTIFY_SIGNALED_WAITQ(iif_dma_fence);
+out:
+	iif_fence_put(iif_fence);
+}
+
+/*
  * The thread function which waits on the DMA fence to be signaled and will signal the inter-IP
  * fence once the DMA fence has been signaled.
  */
@@ -157,36 +206,25 @@ static int iif_dma_fence_thread_func(void *data)
 {
 	struct iif_dma_fence *iif_dma_fence = data;
 	struct iif_fence *iif_fence = &iif_dma_fence->bridged_fence.iif_fence;
-	struct dma_fence *dma_fence = iif_dma_fence->base_fence;
 	signed long wait_status;
+
+	TEST_NOTIFY_TASK_START();
 
 	wait_status = iif_fence_wait_timeout(iif_fence, true, iif_dma_fence->timeout_jiffies);
 
 	/*
-	 * This thread is designed to signal @iif_fence with an error if @wait_status is non-zero.
-	 * In that case, as the fence still can be signaled when @dma_fence is signaled after the
-	 * function above returns by the race condition, prevents @iif_fence from being signaled.
+	 * For testing the race condition that the IP driver is calling `iif_dma_fence_stop()` right
+	 * after the fence has been signaled. The thread should handle the fence signaled as usual
+	 * and the function call should wait for the thread termination properly.
 	 */
-	dma_fence_remove_callback(dma_fence, &iif_dma_fence->poll_cb.dma_cb);
+	TEST_NOTIFY_FENCE_SIGNAL();
 
-	/* If @iif_fence is already signaled, don't need to do anything. */
-	if (iif_fence_is_signaled(iif_fence))
-		goto out;
-
-	/*
-	 * If code reaches here, it is guaranteed that @iif_fence is not and will never be signaled,
-	 * but also @wait_status must be either 0 (timeout) or -ERESTARTSYS. If @wait_status > 0,
-	 * `iif_fence_is_signaled()` must have returned true above. We should signal the fence with
-	 * an error regardless of the status of @dma_fence here.
-	 */
-	if (!wait_status)
+	if (wait_status > 0)
+		wait_status = 0;
+	else if (!wait_status)
 		wait_status = -ETIMEDOUT;
 
-	/* Propagates @wait_status to @iif_fence. */
-	iif_fence_signal_with_status(iif_fence, wait_status);
-	iif_fence_signaler_completed(iif_fence);
-out:
-	iif_fence_put(iif_fence);
+	iif_dma_fence_thread_waited(iif_dma_fence, wait_status);
 
 	return 0;
 }
@@ -229,6 +267,7 @@ struct iif_fence *iif_dma_fence_wait_timeout(struct iif_manager *mgr, struct dma
 
 	/* The kthread should hold the refcount of @iif_fence to avoid UAF bug. */
 	iif_fence_get(iif_fence);
+	TEST_INIT_SIGNALED_WAITQ(iif_dma_fence);
 
 	/* Creates a thread waiting on @dma_fence. */
 	iif_dma_fence->task = kthread_create(iif_dma_fence_thread_func, iif_dma_fence,
@@ -246,7 +285,8 @@ struct iif_fence *iif_dma_fence_wait_timeout(struct iif_manager *mgr, struct dma
 	get_task_struct(iif_dma_fence->task);
 
 	/* Starts the thread. */
-	wake_up_process(iif_dma_fence->task);
+	if (!TEST_SKIP_WAKE_UP_PROCESS())
+		wake_up_process(iif_dma_fence->task);
 
 	return iif_fence;
 
@@ -273,37 +313,31 @@ EXPORT_SYMBOL_GPL(iif_dma_fence_wait_timeout);
 void iif_dma_fence_stop(struct iif_fence *iif_fence)
 {
 	struct iif_dma_fence *iif_dma_fence = iif_to_iif_dma_fence(iif_fence);
+	int ret;
 
 	/*
 	 * Interrupts the thread of @iif_dma_fence.
 	 *
-	 * - If the thread hasn't started execution, the thread will never be scheduled and
-	 *   @iif_fence won't be signaled by the thread.
-	 * - If the thread has been interrupted before the DMA fence is signaled, @iif_fence will
-	 *   be signaled with -ERESTARTSYS error.
-	 * - If the thread has been interrupted after the DMA fence is signaled, @iif_fence will
-	 *   be signaled with the DMA fence status.
+	 * - If the thread hasn't started execution, the `kthread_stop()` will return -EINTR error.
+	 *   In this case, this stop function will call the `iif_dma_fence_thread_waited()` function
+	 *   below on behalf of the thread to clean up resources held by the thread.
+	 *
+	 * - Otherwise, the function will always return 0 and it is guaranteed that the thread has
+	 *   executed and cleaned up its resources.
 	 *
 	 * Note that this function call waits the thread termination synchronously.
 	 */
-	kthread_stop(iif_dma_fence->task);
+	ret = kthread_stop(iif_dma_fence->task);
+	if (!ret)
+		return;
+
+	WARN_ON(ret != -EINTR);
 
 	/*
-	 * If @iif_fence was signaled (i.e., non-zero), the thread executed and it already signaled
-	 * @iif_fence and decremented the refcount of @iif_fence. There is nothing to do here.
-	 *
-	 * If @iif_fence wasn't signaled (i.e., zero), the thread has been interrupted before it
-	 * executes. We should let waiters know that the signaler has canceled waiting on the fence
-	 * on behalf of the thread.
-	 *
-	 * As `dma_fence_wait_timeout()` returns -ERESTARTSYS when the thread is interrupted, follow
+	 * As `iif_fence_wait_timeout()` returns -ERESTARTSYS when the thread is interrupted, follow
 	 * the same error code here.
 	 */
-	if (!iif_fence_get_signal_status(iif_fence)) {
-		iif_fence_signal_with_status(iif_fence, -ERESTARTSYS);
-		iif_fence_signaler_completed(iif_fence);
-		iif_fence_put(iif_fence);
-	}
+	iif_dma_fence_thread_waited(iif_dma_fence, -ERESTARTSYS);
 }
 EXPORT_SYMBOL_GPL(iif_dma_fence_stop);
 

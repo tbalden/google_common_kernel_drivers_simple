@@ -193,6 +193,14 @@ static void dptx_check_max_res(struct dptx *dptx)
 
 }
 
+void dptx_connection_result_update(struct dptx *dptx, bool success)
+{
+	if (success)
+		dptx->stats.connection_success++;
+	else
+		dptx->stats.connection_failure++;
+}
+
 static void dptx_work_hpd(struct dptx *dptx, enum hotplug_state state)
 {
 	int ret;
@@ -268,6 +276,8 @@ static void dptx_work_hpd(struct dptx *dptx, enum hotplug_state state)
 		if (ret)
 			dptx_err(dptx, "handle_hotplug() failed\n");
 
+		dptx_connection_result_update(dptx, !ret);
+
 		/* check for automated test request and schedule HPD_IRQ to handle it */
 		if (dptx->rx_caps[0] <= DP_DPCD_REV_12)
 			dptx_read_dpcd(dptx, DP_DEVICE_SERVICE_IRQ_VECTOR, &irq);
@@ -280,6 +290,7 @@ static void dptx_work_hpd(struct dptx *dptx, enum hotplug_state state)
 		dptx_info(dptx, "[HPD_PLUG done]\n");
 	} else if (state == HPD_UNPLUG) {
 		dptx_info(dptx, "[HPD_UNPLUG start]\n");
+		dptx->hpd_unplug_running = true;
 
 		if (!pm_runtime_get_if_in_use(dptx->pd_dev[HSION_DP_PD])) {
 			dptx_info(dptx, "DPTX is already powered off\n");
@@ -336,6 +347,7 @@ static void dptx_work_hpd(struct dptx *dptx, enum hotplug_state state)
 		dptx_check_max_res(dptx);
 
 hpd_unplug_done:
+		dptx->hpd_unplug_running = false;
 		dptx_info(dptx, "[HPD_UNPLUG done]\n");
 	}
 
@@ -362,6 +374,7 @@ hpd_plug_fail_clk:
 	if (ret)
 		dptx_err(dptx, "[HPD_PLUG fail] DPU: PM put failed (%d)\n", ret);
 hpd_plug_fail_dpu_pm:
+	dptx_connection_result_update(dptx, false);
 	pm_relax(dptx->dev);
 	device_init_wakeup(dptx->dev, false);
 	dptx_set_hpd_state(dptx, HPD_UNPLUG);
@@ -501,10 +514,14 @@ static int dptx_bridge_atomic_check(struct drm_bridge *br, struct drm_bridge_sta
 			__func__, cr_s->enable, cr_s->active, cr_s->active_changed,
 			cr_s->mode_changed, cr_s->connectors_changed);
 
-	/* if HPD_UNPLUG is pending, do not enable video or allow mode changes */
+	/*
+	 * If HPD_UNPLUG is pending/running or DP link is down,
+	 * do not enable video or allow mode changes.
+	 */
 	if (cr_s->active && drm_atomic_crtc_needs_modeset(cr_s) &&
-	    dptx_get_hpd_state(dptx) == HPD_UNPLUG) {
-		dptx_dbg_bridge(dptx, "ATOMIC CHECK: HPD_UNPLUG is pending");
+	    (dptx_get_hpd_state(dptx) == HPD_UNPLUG || dptx->hpd_unplug_running ||
+	     !dptx->link.trained)) {
+		dptx_dbg_bridge(dptx, "ATOMIC CHECK: HPD_UNPLUG pending/running or DP link down\n");
 		return -ENOTCONN;
 	}
 
@@ -642,7 +659,8 @@ static enum drm_connector_status dptx_bridge_detect(struct drm_bridge *br)
 	struct dptx *dptx = container_of(br, struct dptx, bridge);
 
 	dptx_dbg_bridge(dptx, "%s\n", __func__);
-	return (dptx_get_hpd_state(dptx) == HPD_PLUG && dptx->link.trained) ?
+	return (!dptx->hpd_unplug_running && dptx_get_hpd_state(dptx) == HPD_PLUG &&
+		dptx->link.trained) ?
 		connector_status_connected : connector_status_disconnected;
 }
 
@@ -654,7 +672,8 @@ static const struct drm_edid *dptx_bridge_edid_read(struct drm_bridge *br, struc
 
 	co->ycbcr_420_allowed = dptx->ycbcr_420_en;
 
-	return (dptx_get_hpd_state(dptx) == HPD_PLUG && dptx->link.trained) ?
+	return (!dptx->hpd_unplug_running && dptx_get_hpd_state(dptx) == HPD_PLUG &&
+		dptx->link.trained) ?
 		drm_edid_alloc(dptx->edid, dptx->edid_size) : NULL;
 }
 
@@ -666,7 +685,8 @@ static struct edid *dptx_bridge_get_edid(struct drm_bridge *br, struct drm_conne
 
 	co->ycbcr_420_allowed = dptx->ycbcr_420_en;
 
-	return (dptx_get_hpd_state(dptx) == HPD_PLUG && dptx->link.trained) ?
+	return (!dptx->hpd_unplug_running && dptx_get_hpd_state(dptx) == HPD_PLUG &&
+		dptx->link.trained) ?
 		kmemdup(dptx->edid, dptx->edid_size, GFP_KERNEL) : NULL;
 }
 
@@ -679,8 +699,11 @@ struct dptx_allowed_mode {
 static struct dptx_allowed_mode dptx_allowed_modes[] = {
 	{3840, 2160, 594000},  /* CEA-861 */
 	{3840, 2160, 533250},  /* CVT-RB */
+	{3840, 1600, 395000},  /* CVT-RB */
+	{3440, 1440, 319750},  /* CVT-RB */
 	{2560, 1600, 348500},  /* DMT 0x4D */
 	{2560, 1440, 241500},  /* CVT-RB */
+	{2560, 1080, 198000},  /* CEA-861 */
 	{1920, 1200, 193250},  /* DMT 0x45 */
 	{1920, 1080, 148500},  /* DMT 0x52 | CEA-861 */
 	{1600,  900, 108000},  /* DMT 0x53 */
@@ -954,8 +977,6 @@ static int dptx_probe(struct platform_device *pdev)
 	atomic_set(&dptx->shutdown, 0);
 	atomic_set(&dptx->c_connect, 0);
 
-	dptx->max_rate = DPTX_DEFAULT_LINK_RATE;
-	dptx->max_lanes = DPTX_DEFAULT_LINK_LANES;
 	dptx->bstatus = 0;
 	dptx->link_test_mode = false;
 	dptx->ycbcr_420_en = true;
@@ -1387,6 +1408,25 @@ static ssize_t fec_dsc_not_supported_show(struct device *dev, struct device_attr
 }
 static DEVICE_ATTR_RO(fec_dsc_not_supported);
 
+/* Connection Result Sysfs */
+static ssize_t connection_success_show(struct device *dev, struct device_attribute *attr,
+					  char *buf)
+{
+	struct dptx *dptx = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", dptx->stats.connection_success);
+}
+static DEVICE_ATTR_RO(connection_success);
+
+static ssize_t connection_failure_show(struct device *dev, struct device_attribute *attr,
+					  char *buf)
+{
+	struct dptx *dptx = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", dptx->stats.connection_failure);
+}
+static DEVICE_ATTR_RO(connection_failure);
+
 static struct attribute *dptx_stats_attrs[] = {
 						&dev_attr_link_negotiation_failures.attr,
 						&dev_attr_edid_read_failures.attr,
@@ -1407,6 +1447,8 @@ static struct attribute *dptx_stats_attrs[] = {
 						&dev_attr_max_res_other.attr,
 						&dev_attr_fec_dsc_supported.attr,
 						&dev_attr_fec_dsc_not_supported.attr,
+						&dev_attr_connection_success.attr,
+						&dev_attr_connection_failure.attr,
 					      NULL };
 
 static const struct attribute_group dptx_stats_group = {

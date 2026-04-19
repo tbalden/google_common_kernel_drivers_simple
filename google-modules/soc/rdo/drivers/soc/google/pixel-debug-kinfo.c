@@ -37,6 +37,8 @@ struct vendor_kernel_info {
 	u64 page_end;
 	u64 phys_offset;
 	u64 kimage_voffset;
+	u32 pgtable_levels;
+	u32 page_shift;
 } __packed;
 
 struct vendor_kernel_all_info {
@@ -100,6 +102,8 @@ static void update_vendor_kernel_all_info(void)
 	info->page_end = PAGE_END;
 	info->phys_offset = PHYS_OFFSET;
 	info->kimage_voffset = kimage_voffset;
+	info->pgtable_levels = CONFIG_PGTABLE_LEVELS;
+	info->page_shift = PAGE_SHIFT;
 
 	vendor_checksum_info = (u32 *)info;
 	for (index = 0; index < sizeof(*info) / sizeof(u32); index++)

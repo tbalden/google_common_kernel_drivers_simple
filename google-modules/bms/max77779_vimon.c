@@ -88,7 +88,7 @@ static struct vimon_client_callbacks debug_cb_impl = {
 static void bms_vimon_cb_on_sample(void *private, const enum vimon_trigger_source reason,
 				   const u16 *data, const size_t len)
 {
-	int tag = (int)(intptr_t)private;
+	int tag = (int)(uintptr_t)private;
 	const size_t count = len / sizeof(u16);
 	char temp[VIMON_LOGBUFFER_MAX_LEN];
 	size_t pos = 0, i;
@@ -657,7 +657,7 @@ static ssize_t bms_monitor_store(struct device *dev, struct device_attribute *at
 
 	client->mask = mask;
 	client->count = cnt;
-	client->private_data = (void *)(intptr_t)tag;
+	client->private_data = (void *)(uintptr_t)tag;
 	client->client_cb = &bms_monitor_cb;
 
 	vimon_add_client(data, client);
@@ -1048,7 +1048,7 @@ int max77779_vimon_init(struct max77779_vimon_data *data)
 	if (ret)
 		data->max_cnt = MAX77779_VIMON_DEFAULT_MAX_CNT;
 
-	ret = of_property_read_u32(dev->of_node, "max77779,max_triggers", &data->max_cnt);
+	ret = of_property_read_u32(dev->of_node, "max77779,max_triggers", &data->max_triggers);
 	if (ret)
 		data->max_triggers = MAX77779_VIMON_DEFAULT_MAX_TRIGGERS;
 

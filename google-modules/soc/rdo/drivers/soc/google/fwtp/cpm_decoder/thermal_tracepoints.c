@@ -66,3 +66,33 @@ struct client_tracepoint thermal_tj_pid_curr_state = {
 	.handler = curr_state_handler,
 	.exit = NULL
 };
+
+#define SENSOR_STR_LEN 16
+enum tracepoint_handle thermsen_handler(const char *tp_string, u32 payload,
+					u64 timestamp)
+{
+	char sensor_error_clock_name[SENSOR_STR_LEN];
+	char sensor_temp_clock_name[SENSOR_STR_LEN];
+
+	u16 temp = payload & 0xFFFF;
+	u8 id = (payload >> 16) & 0xFF;
+	u8 error = (payload >> 24) & 0xFF;
+
+	scnprintf(sensor_temp_clock_name, sizeof(sensor_temp_clock_name),
+		  "Sensor_%d", id);
+	scnprintf(sensor_error_clock_name, sizeof(sensor_error_clock_name),
+		  "SenErr_%d", id);
+
+	/* Set sensor error */
+	add_cpm_param_trace(sensor_error_clock_name, error != 0, timestamp);
+	/* Add sensor temperature */
+	add_cpm_param_trace(sensor_temp_clock_name, temp, timestamp);
+
+	return CLIENT_TP_HANDLING_COMPLETE;
+}
+
+struct client_tracepoint thermal_tj_sensors = { .enabled = true,
+						.tp_string = "thermSen %d",
+						.init = NULL,
+						.handler = thermsen_handler,
+						.exit = NULL };

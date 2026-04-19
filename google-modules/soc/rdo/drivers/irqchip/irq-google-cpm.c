@@ -2,6 +2,7 @@
 //
 #include <linux/device.h>
 #include <linux/bits.h>
+#include <linux/bitmap.h>
 #include <linux/irqdomain.h>
 #include <linux/irqchip.h>
 #include <linux/interrupt.h>
@@ -51,14 +52,18 @@ struct cpm_irq_info {
 	u32			remote_id;
 
 	struct irq_domain	*domain;
-	struct mutex		lock;		/* irq chip lock */
-	unsigned long		mask;		/* irq mask */
-	unsigned long		mask_bits_updated; /* pending mask updates */
-	u32			trig_type;	/* 4 bits per irq */
-	u32			trig_type_fields_updated; /* pending trig_type updates */
+	struct mutex		lock;				/* irq chip lock */
+	DECLARE_BITMAP(mask, CPM_IRQ_COUNT);			/* irq mask */
+	DECLARE_BITMAP(mask_bits_updated, CPM_IRQ_COUNT);	/* pending mask updates */
+	u8			trig_type[CPM_IRQ_COUNT];	/* 8 bits per irq */
+	DECLARE_BITMAP(trig_type_fields_updated,
+		       CPM_IRQ_COUNT);				/* pending trig_type updates */
 };
 
-#define TRIGGER_TYPE_BIT_SZ	4 /* bit width for trig_type value */
+#define TRIG_TYPE_TYPE typeof(((struct cpm_irq_info *)0)->trig_type[0])
+#define TRIG_TYPE_MASK GENMASK((sizeof(TRIG_TYPE_TYPE) * BITS_PER_BYTE) - 1, 0)
+static_assert((IRQF_TRIGGER_MASK & TRIG_TYPE_MASK) == IRQF_TRIGGER_MASK,
+	      "trig_type size is too small to represent all bits of IRQF_TRIGGER_MASK");
 #define MBA_CLIENT_TX_TOUT	3000 /* in ms */
 
 static void cpm_irq_process_irq_status(struct cpm_irq_info *info, u32 irq_number)
@@ -83,23 +88,22 @@ static void cpm_irq_mask(struct irq_data *d)
 {
 	struct cpm_irq_info *info = irq_data_get_irq_chip_data(d);
 
-	set_bit(d->hwirq, &info->mask);
-	set_bit(d->hwirq, &info->mask_bits_updated);
+	set_bit(d->hwirq, info->mask);
+	set_bit(d->hwirq, info->mask_bits_updated);
 }
 
 static void cpm_irq_unmask(struct irq_data *d)
 {
 	struct cpm_irq_info *info = irq_data_get_irq_chip_data(d);
 
-	clear_bit(d->hwirq, &info->mask);
-	set_bit(d->hwirq, &info->mask_bits_updated);
+	clear_bit(d->hwirq, info->mask);
+	set_bit(d->hwirq, info->mask_bits_updated);
 }
 
 static int cpm_set_irq_type(struct irq_data *d, unsigned int type)
 {
 	struct cpm_irq_info *info = irq_data_get_irq_chip_data(d);
-	size_t shift = d->hwirq * TRIGGER_TYPE_BIT_SZ;
-	u32 prev_type = info->trig_type >> shift & IRQF_TRIGGER_MASK;
+	u32 prev_type = info->trig_type[d->hwirq] & IRQF_TRIGGER_MASK;
 
 	if (prev_type == type)
 		return 0;
@@ -107,9 +111,8 @@ static int cpm_set_irq_type(struct irq_data *d, unsigned int type)
 	if (!FIELD_FIT(IRQF_TRIGGER_MASK, type))
 		return -EINVAL;
 
-	info->trig_type &= ~(IRQF_TRIGGER_MASK << shift);
-	info->trig_type |= (type << shift);
-	info->trig_type_fields_updated |= BIT(d->hwirq);
+	info->trig_type[d->hwirq] = type & IRQF_TRIGGER_MASK;
+	set_bit(d->hwirq, info->trig_type_fields_updated);
 
 	return 0;
 }
@@ -158,13 +161,16 @@ static void cpm_bus_sync_unlock(struct irq_data *d)
 	u32 req_data;
 	int ret = 0;
 
-	if (info->mask_bits_updated & BIT(d->hwirq)) {
-		clear_bit(d->hwirq, &info->mask_bits_updated); /* clear update flag */
+	if (test_bit(d->hwirq, info->mask_bits_updated)) {
+		clear_bit(d->hwirq,
+			  info->mask_bits_updated); /* clear update flag */
 
-		req_data = FIELD_PREP(CPM_IRQ_REQ_ARG_MASK, info->mask & BIT(d->hwirq)) |
-			   FIELD_PREP(CPM_IRQ_REQ_IRQ_MASK, d->hwirq) |
-			   FIELD_PREP(CPM_IRQ_REQ_PARAM_MASK, CPM_IRQ_MASK) |
-			   FIELD_PREP(CPM_IRQ_REQ_ACTION_MASK, CPM_IRQ_ACTION_SET);
+		req_data =
+			FIELD_PREP(CPM_IRQ_REQ_ARG_MASK,
+				   test_bit(d->hwirq, info->mask)) |
+			FIELD_PREP(CPM_IRQ_REQ_IRQ_MASK, d->hwirq) |
+			FIELD_PREP(CPM_IRQ_REQ_PARAM_MASK, CPM_IRQ_MASK) |
+			FIELD_PREP(CPM_IRQ_REQ_ACTION_MASK, CPM_IRQ_ACTION_SET);
 		ret = cpm_irq_send_pkg(info, req_data);
 		if (ret) {
 			mutex_unlock(&info->lock);
@@ -172,11 +178,11 @@ static void cpm_bus_sync_unlock(struct irq_data *d)
 		}
 	}
 
-	if (info->trig_type_fields_updated & BIT(d->hwirq)) {
-		size_t shift = d->hwirq * TRIGGER_TYPE_BIT_SZ;
-		u32 trig_type = (info->trig_type >> shift) & IRQF_TRIGGER_MASK;
+	if (test_bit(d->hwirq, info->trig_type_fields_updated)) {
+		u32 trig_type = info->trig_type[d->hwirq] & IRQF_TRIGGER_MASK;
 
-		info->trig_type_fields_updated &= ~BIT(d->hwirq); /* clear update */
+		clear_bit(d->hwirq,
+			  info->trig_type_fields_updated); /* clear update */
 
 		req_data = FIELD_PREP(CPM_IRQ_REQ_ARG_MASK, trig_type) |
 			   FIELD_PREP(CPM_IRQ_REQ_IRQ_MASK, d->hwirq) |
@@ -238,7 +244,7 @@ static int cpm_irq_irqchip_init(struct platform_device *pdev)
 
 	mutex_init(&info->lock);
 
-	info->trig_type = 0x00000000;
+	memset(info->trig_type, 0, sizeof(info->trig_type));
 	info->domain = irq_domain_add_linear(dev->of_node, CPM_IRQ_COUNT,
 					     &irq_domain_simple_ops, info);
 	if (!info->domain) {

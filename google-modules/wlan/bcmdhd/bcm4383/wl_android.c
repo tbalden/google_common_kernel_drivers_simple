@@ -2209,6 +2209,7 @@ wl_android_art_set_chan(struct net_device *dev, char *command, int total_len)
 }
 
 #define MAX_VHT_MCS	9u
+#define MAX_HE_MCS	11u
 static int
 wl_android_art_set_txrate(struct net_device *dev, char *command, int total_len)
 {
@@ -2220,6 +2221,7 @@ wl_android_art_set_txrate(struct net_device *dev, char *command, int total_len)
 	uint32 rspec = 0;
 	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(dev);
 	chanspec_t chanspec;
+	struct bcm_cfg80211 *cfg = wl_get_cfg(dev);
 
 	/* Accept: "TX_RATE <format> <mcs> <nss>", e.g. "TX_RATE HE 7 2" */
 	matched = sscanf(command + strlen(CMD_ART_TX_RATE), "%7s %d %d", format, &mcs, &nss);
@@ -2249,14 +2251,20 @@ wl_android_art_set_txrate(struct net_device *dev, char *command, int total_len)
 			return -EINVAL;
 		}
 	}
-#ifdef NOT_YET
 	/* to be enabled after validation */
 	else if (!strcmp(format, "HE")) {
 		rspec = WL_RSPEC_ENCODE_HE;	/* 11ax HE */
-	} else if (!strcmp(format, "EHT")) {
+		if (mcs > MAX_HE_MCS) {
+			WL_ERR(("HE supports only upto max:%d mcs\n", MAX_HE_MCS));
+			return -EINVAL;
+		}
+	}
+#ifdef NOT_YET
+	else if (!strcmp(format, "EHT")) {
 		rspec = WL_RSPEC_ENCODE_EHT;	/* 11be EHT */
 	}
 #endif /* NOT_YET */
+
 	if (ht_set) {
 		rspec |= mcs;
 	} else {
@@ -2269,6 +2277,11 @@ wl_android_art_set_txrate(struct net_device *dev, char *command, int total_len)
 		DHD_ERROR(("%s ART_SET_CHAN is not set\n", __FUNCTION__));
 		return -EINVAL;
 	}
+
+	/* abort any scan in progress */
+	DHD_ERROR(("%s Force aborting the scan\n", __FUNCTION__));
+	wl_cfgscan_scan_abort(cfg);
+
 	if (CHSPEC_BAND(chanspec) == WL_CHANSPEC_BAND_5G) {
 		rspec |= WL_RSPEC_LDPC;
 		error = wldev_iovar_setint(dev, "5g_rate", rspec);

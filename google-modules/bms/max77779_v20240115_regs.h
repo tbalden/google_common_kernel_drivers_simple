@@ -16,6 +16,7 @@
 
 /* needs linux/bits.h */
 
+/* set/get the value of a bit-field within a 8-bit register, e.g., charger */
 #define MAX77779_BFF(name, h, l) \
 static inline uint8_t _ ## name ## _set(uint8_t r, uint8_t v) \
 { \
@@ -27,8 +28,19 @@ static inline uint8_t _ ## name ## _get(uint8_t r) \
 	return ((r & GENMASK(h, l)) >> l); \
 }
 
+/* set/get the value of a bit-field within a 16-bit register, e.g., fg */
+#define MAX77779_BFF16(name, h, l) \
+static inline uint16_t _ ## name ## _set(uint16_t r, uint16_t v) \
+{ \
+	return (((r & ~GENMASK(h, l)) | v << l)); \
+} \
+\
+static inline uint16_t _ ## name ## _get(uint16_t r) \
+{ \
+	return (((r & GENMASK(h, l)) >> l)); \
+}
 
-#define FIELD2VALUE(field,value) \
+#define FIELD2VALUE(field, value) \
 	(((value) & field##_MASK) >> field##_SHIFT)
 #define VALUE2FIELD(field,       value) \
 	(((value) << field##_SHIFT) & field##_MASK)
@@ -71,8 +83,8 @@ max77779_pmic_revision_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_revision_rev,2,0)
-MAX77779_BFF(max77779_pmic_revision_ver,7,3)
+MAX77779_BFF(max77779_pmic_revision_rev, 2, 0)
+MAX77779_BFF(max77779_pmic_revision_ver, 7, 3)
 
 /*
  * MAX77779_PMIC_OTP_REVISION,0x02,0b00100001,0x21,OTP:SHADOW, Reset_Type:O
@@ -136,14 +148,14 @@ max77779_pmic_intsrc_sts_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_intsrc_sts_tcpc_int,0,0)
-MAX77779_BFF(max77779_pmic_intsrc_sts_fg_int,1,1)
-MAX77779_BFF(max77779_pmic_intsrc_sts_chgr_int,2,2)
-MAX77779_BFF(max77779_pmic_intsrc_sts_i2cm_int,3,3)
-MAX77779_BFF(max77779_pmic_intsrc_sts_battvimon_int,4,4)
-MAX77779_BFF(max77779_pmic_intsrc_sts_gpio_int,5,5)
-MAX77779_BFF(max77779_pmic_intsrc_sts_vdroop_int,6,6)
-MAX77779_BFF(max77779_pmic_intsrc_sts_pmictop_int,7,7)
+MAX77779_BFF(max77779_pmic_intsrc_sts_tcpc_int, 0, 0)
+MAX77779_BFF(max77779_pmic_intsrc_sts_fg_int, 1, 1)
+MAX77779_BFF(max77779_pmic_intsrc_sts_chgr_int, 2, 2)
+MAX77779_BFF(max77779_pmic_intsrc_sts_i2cm_int, 3, 3)
+MAX77779_BFF(max77779_pmic_intsrc_sts_battvimon_int, 4, 4)
+MAX77779_BFF(max77779_pmic_intsrc_sts_gpio_int, 5, 5)
+MAX77779_BFF(max77779_pmic_intsrc_sts_vdroop_int, 6, 6)
+MAX77779_BFF(max77779_pmic_intsrc_sts_pmictop_int, 7, 7)
 
 /*
  * MAX77779_PMIC_VDROOP_INT,0x23,0b00000000,0x0,Reset_Type:S
@@ -203,14 +215,14 @@ max77779_pmic_vdroop_int_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_vdroop_int_oilo2_cnt_int,0,0)
-MAX77779_BFF(max77779_pmic_vdroop_int_oilo1_cnt_int,1,1)
-MAX77779_BFF(max77779_pmic_vdroop_int_uvlo2_cnt_int,2,2)
-MAX77779_BFF(max77779_pmic_vdroop_int_uvlo1_cnt_int,3,3)
-MAX77779_BFF(max77779_pmic_vdroop_int_bat_oilo2_int,4,4)
-MAX77779_BFF(max77779_pmic_vdroop_int_bat_oilo1_int,5,5)
-MAX77779_BFF(max77779_pmic_vdroop_int_sys_uvlo2_int,6,6)
-MAX77779_BFF(max77779_pmic_vdroop_int_sys_uvlo1_int,7,7)
+MAX77779_BFF(max77779_pmic_vdroop_int_oilo2_cnt_int, 0, 0)
+MAX77779_BFF(max77779_pmic_vdroop_int_oilo1_cnt_int, 1, 1)
+MAX77779_BFF(max77779_pmic_vdroop_int_uvlo2_cnt_int, 2, 2)
+MAX77779_BFF(max77779_pmic_vdroop_int_uvlo1_cnt_int, 3, 3)
+MAX77779_BFF(max77779_pmic_vdroop_int_bat_oilo2_int, 4, 4)
+MAX77779_BFF(max77779_pmic_vdroop_int_bat_oilo1_int, 5, 5)
+MAX77779_BFF(max77779_pmic_vdroop_int_sys_uvlo2_int, 6, 6)
+MAX77779_BFF(max77779_pmic_vdroop_int_sys_uvlo1_int, 7, 7)
 
 /*
  * MAX77779_PMIC_INTB_MASK,0x24,0b11111111,0xff,OTP:SHADOW, Reset_Type:S
@@ -270,14 +282,14 @@ max77779_pmic_intb_mask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_intb_mask_tcpc_int_m,0,0)
-MAX77779_BFF(max77779_pmic_intb_mask_fg_int_m,1,1)
-MAX77779_BFF(max77779_pmic_intb_mask_chgr_int_m,2,2)
-MAX77779_BFF(max77779_pmic_intb_mask_i2cm_int_m,3,3)
-MAX77779_BFF(max77779_pmic_intb_mask_battvimon_int_m,4,4)
-MAX77779_BFF(max77779_pmic_intb_mask_gpio_int_m,5,5)
-MAX77779_BFF(max77779_pmic_intb_mask_vdroop_int_m,6,6)
-MAX77779_BFF(max77779_pmic_intb_mask_pmictop_int_m,7,7)
+MAX77779_BFF(max77779_pmic_intb_mask_tcpc_int_m, 0, 0)
+MAX77779_BFF(max77779_pmic_intb_mask_fg_int_m, 1, 1)
+MAX77779_BFF(max77779_pmic_intb_mask_chgr_int_m, 2, 2)
+MAX77779_BFF(max77779_pmic_intb_mask_i2cm_int_m, 3, 3)
+MAX77779_BFF(max77779_pmic_intb_mask_battvimon_int_m, 4, 4)
+MAX77779_BFF(max77779_pmic_intb_mask_gpio_int_m, 5, 5)
+MAX77779_BFF(max77779_pmic_intb_mask_vdroop_int_m, 6, 6)
+MAX77779_BFF(max77779_pmic_intb_mask_pmictop_int_m, 7, 7)
 
 /*
  * MAX77779_PMIC_SPMI_INT_MASK,0x25,0b11111111,0xff,Reset_Type:S
@@ -337,14 +349,14 @@ max77779_pmic_spmi_int_mask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_spmi_int_mask_tcpc_int_sm,0,0)
-MAX77779_BFF(max77779_pmic_spmi_int_mask_fg_int_sm,1,1)
-MAX77779_BFF(max77779_pmic_spmi_int_mask_chgr_int_sm,2,2)
-MAX77779_BFF(max77779_pmic_spmi_int_mask_i2cm_int_sm,3,3)
-MAX77779_BFF(max77779_pmic_spmi_int_mask_battvimon_int_sm,4,4)
-MAX77779_BFF(max77779_pmic_spmi_int_mask_gpio_int_sm,5,5)
-MAX77779_BFF(max77779_pmic_spmi_int_mask_vdroop_int_sm,6,6)
-MAX77779_BFF(max77779_pmic_spmi_int_mask_pmictop_int_sm,7,7)
+MAX77779_BFF(max77779_pmic_spmi_int_mask_tcpc_int_sm, 0, 0)
+MAX77779_BFF(max77779_pmic_spmi_int_mask_fg_int_sm, 1, 1)
+MAX77779_BFF(max77779_pmic_spmi_int_mask_chgr_int_sm, 2, 2)
+MAX77779_BFF(max77779_pmic_spmi_int_mask_i2cm_int_sm, 3, 3)
+MAX77779_BFF(max77779_pmic_spmi_int_mask_battvimon_int_sm, 4, 4)
+MAX77779_BFF(max77779_pmic_spmi_int_mask_gpio_int_sm, 5, 5)
+MAX77779_BFF(max77779_pmic_spmi_int_mask_vdroop_int_sm, 6, 6)
+MAX77779_BFF(max77779_pmic_spmi_int_mask_pmictop_int_sm, 7, 7)
 
 /*
  * MAX77779_PMIC_SPMI_INT_PRIORITY,0x26,0b00000001,0x1,Reset_Type:S
@@ -373,8 +385,8 @@ max77779_pmic_spmi_int_priority_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_spmi_int_priority_spmi_int_pr,0,0)
-MAX77779_BFF(max77779_pmic_spmi_int_priority_spr_7_1,7,1)
+MAX77779_BFF(max77779_pmic_spmi_int_priority_spmi_int_pr, 0, 0)
+MAX77779_BFF(max77779_pmic_spmi_int_priority_spr_7_1, 7, 1)
 
 /*
  * MAX77779_PMIC_VDROOP_INT_MASK,0x27,0b11111111,0xff,OTP:SHADOW, Reset_Type:O
@@ -434,14 +446,14 @@ max77779_pmic_vdroop_int_mask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_vdroop_int_mask_oilo2_cnt_m,0,0)
-MAX77779_BFF(max77779_pmic_vdroop_int_mask_oilo1_cnt_m,1,1)
-MAX77779_BFF(max77779_pmic_vdroop_int_mask_uvlo2_cnt_m,2,2)
-MAX77779_BFF(max77779_pmic_vdroop_int_mask_uvlo1_cnt_m,3,3)
-MAX77779_BFF(max77779_pmic_vdroop_int_mask_bat_oilo2_m,4,4)
-MAX77779_BFF(max77779_pmic_vdroop_int_mask_bat_oilo1_m,5,5)
-MAX77779_BFF(max77779_pmic_vdroop_int_mask_sys_uvlo2_m,6,6)
-MAX77779_BFF(max77779_pmic_vdroop_int_mask_sys_uvlo1_m,7,7)
+MAX77779_BFF(max77779_pmic_vdroop_int_mask_oilo2_cnt_m, 0, 0)
+MAX77779_BFF(max77779_pmic_vdroop_int_mask_oilo1_cnt_m, 1, 1)
+MAX77779_BFF(max77779_pmic_vdroop_int_mask_uvlo2_cnt_m, 2, 2)
+MAX77779_BFF(max77779_pmic_vdroop_int_mask_uvlo1_cnt_m, 3, 3)
+MAX77779_BFF(max77779_pmic_vdroop_int_mask_bat_oilo2_m, 4, 4)
+MAX77779_BFF(max77779_pmic_vdroop_int_mask_bat_oilo1_m, 5, 5)
+MAX77779_BFF(max77779_pmic_vdroop_int_mask_sys_uvlo2_m, 6, 6)
+MAX77779_BFF(max77779_pmic_vdroop_int_mask_sys_uvlo1_m, 7, 7)
 
 /*
  * MAX77779_PMIC_VDROOP_INT_SPMI_MASK,0x28,0b11111111,0xff,Reset_Type:O
@@ -501,14 +513,14 @@ max77779_pmic_vdroop_int_spmi_mask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_oilo2_cnt_sm,0,0)
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_oilo1_cnt_sm,1,1)
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_uvlo2_cnt_sm,2,2)
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_uvlo1_cnt_sm,3,3)
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_bat_oilo2_sm,4,4)
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_bat_oilo1_sm,5,5)
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_sys_uvlo2_sm,6,6)
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_sys_uvlo1_sm,7,7)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_oilo2_cnt_sm, 0, 0)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_oilo1_cnt_sm, 1, 1)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_uvlo2_cnt_sm, 2, 2)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_uvlo1_cnt_sm, 3, 3)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_bat_oilo2_sm, 4, 4)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_bat_oilo1_sm, 5, 5)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_sys_uvlo2_sm, 6, 6)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_mask_sys_uvlo1_sm, 7, 7)
 
 /*
  * MAX77779_PMIC_VDROOP_INT_SPMI_PRIORITY,0x29,0b00000001,0x1,Reset_Type:O
@@ -537,8 +549,8 @@ max77779_pmic_vdroop_int_spmi_priority_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_priority_vdroop_int_pr,0,0)
-MAX77779_BFF(max77779_pmic_vdroop_int_spmi_priority_spr_7_1,7,1)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_priority_vdroop_int_pr, 0, 0)
+MAX77779_BFF(max77779_pmic_vdroop_int_spmi_priority_spr_7_1, 7, 1)
 
 /*
  * MAX77779_PMIC_INT_STS,0x2A,0b00000000,0x0,Reset_Type:S
@@ -598,14 +610,14 @@ max77779_pmic_int_sts_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_int_sts_spr_0,0,0)
-MAX77779_BFF(max77779_pmic_int_sts_spmierr_int,1,1)
-MAX77779_BFF(max77779_pmic_int_sts_vddpor_int,2,2)
-MAX77779_BFF(max77779_pmic_int_sts_sysmsgi_int,3,3)
-MAX77779_BFF(max77779_pmic_int_sts_sysuvlo_int,4,4)
-MAX77779_BFF(max77779_pmic_int_sts_sysovlo_int,5,5)
-MAX77779_BFF(max77779_pmic_int_sts_tshdn_int,6,6)
-MAX77779_BFF(max77779_pmic_int_sts_apcmdresi_int,7,7)
+MAX77779_BFF(max77779_pmic_int_sts_spr_0, 0, 0)
+MAX77779_BFF(max77779_pmic_int_sts_spmierr_int, 1, 1)
+MAX77779_BFF(max77779_pmic_int_sts_vddpor_int, 2, 2)
+MAX77779_BFF(max77779_pmic_int_sts_sysmsgi_int, 3, 3)
+MAX77779_BFF(max77779_pmic_int_sts_sysuvlo_int, 4, 4)
+MAX77779_BFF(max77779_pmic_int_sts_sysovlo_int, 5, 5)
+MAX77779_BFF(max77779_pmic_int_sts_tshdn_int, 6, 6)
+MAX77779_BFF(max77779_pmic_int_sts_apcmdresi_int, 7, 7)
 
 /*
  * MAX77779_PMIC_INT_MASK,0x2B,0b11111111,0xff,OTP:SHADOW, Reset_Type:S
@@ -665,14 +677,14 @@ max77779_pmic_int_mask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_int_mask_fship_not_rd,0,0)
-MAX77779_BFF(max77779_pmic_int_mask_spmierr_m,1,1)
-MAX77779_BFF(max77779_pmic_int_mask_vddpor_m,2,2)
-MAX77779_BFF(max77779_pmic_int_mask_sysmsg_m,3,3)
-MAX77779_BFF(max77779_pmic_int_mask_sysuvlo_int_m,4,4)
-MAX77779_BFF(max77779_pmic_int_mask_sysovlo_int_m,5,5)
-MAX77779_BFF(max77779_pmic_int_mask_tshdn_int_m,6,6)
-MAX77779_BFF(max77779_pmic_int_mask_apcmdres_m,7,7)
+MAX77779_BFF(max77779_pmic_int_mask_fship_not_rd, 0, 0)
+MAX77779_BFF(max77779_pmic_int_mask_spmierr_m, 1, 1)
+MAX77779_BFF(max77779_pmic_int_mask_vddpor_m, 2, 2)
+MAX77779_BFF(max77779_pmic_int_mask_sysmsg_m, 3, 3)
+MAX77779_BFF(max77779_pmic_int_mask_sysuvlo_int_m, 4, 4)
+MAX77779_BFF(max77779_pmic_int_mask_sysovlo_int_m, 5, 5)
+MAX77779_BFF(max77779_pmic_int_mask_tshdn_int_m, 6, 6)
+MAX77779_BFF(max77779_pmic_int_mask_apcmdres_m, 7, 7)
 
 /*
  * MAX77779_PMIC_EVENT_CNT_CFG,0x30,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -706,9 +718,9 @@ max77779_pmic_event_cnt_cfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_event_cnt_cfg_enable,0,0)
-MAX77779_BFF(max77779_pmic_event_cnt_cfg_sample_rate,2,1)
-MAX77779_BFF(max77779_pmic_event_cnt_cfg_spr_7_3,7,3)
+MAX77779_BFF(max77779_pmic_event_cnt_cfg_enable, 0, 0)
+MAX77779_BFF(max77779_pmic_event_cnt_cfg_sample_rate, 2, 1)
+MAX77779_BFF(max77779_pmic_event_cnt_cfg_spr_7_3, 7, 3)
 
 /*
  * MAX77779_PMIC_EVENT_CNT_OILO0_THR,0x31,0b00000000,0x0,Reset_Type:S
@@ -787,10 +799,10 @@ max77779_pmic_i2c_cnfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_i2c_cnfg_hs_ext_en,0,0)
-MAX77779_BFF(max77779_pmic_i2c_cnfg_spr_3_1,3,1)
-MAX77779_BFF(max77779_pmic_i2c_cnfg_pair,6,4)
-MAX77779_BFF(max77779_pmic_i2c_cnfg_spr_7,7,7)
+MAX77779_BFF(max77779_pmic_i2c_cnfg_hs_ext_en, 0, 0)
+MAX77779_BFF(max77779_pmic_i2c_cnfg_spr_3_1, 3, 1)
+MAX77779_BFF(max77779_pmic_i2c_cnfg_pair, 6, 4)
+MAX77779_BFF(max77779_pmic_i2c_cnfg_spr_7, 7, 7)
 
 /*
  * MAX77779_PMIC_SPMI_CNFG,0x41,0b00001101,0xd,OTP:SHADOW, Reset_Type:SPMI
@@ -839,12 +851,12 @@ max77779_pmic_spmi_cnfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_spmi_cnfg_cload,1,0)
-MAX77779_BFF(max77779_pmic_spmi_cnfg_sda_pulldown,2,2)
-MAX77779_BFF(max77779_pmic_spmi_cnfg_scl_pulldown,3,3)
-MAX77779_BFF(max77779_pmic_spmi_cnfg_vio_high,4,4)
-MAX77779_BFF(max77779_pmic_spmi_cnfg_internal_clk_on,6,6)
-MAX77779_BFF(max77779_pmic_spmi_cnfg_spmi_hold_clk_on,7,7)
+MAX77779_BFF(max77779_pmic_spmi_cnfg_cload, 1, 0)
+MAX77779_BFF(max77779_pmic_spmi_cnfg_sda_pulldown, 2, 2)
+MAX77779_BFF(max77779_pmic_spmi_cnfg_scl_pulldown, 3, 3)
+MAX77779_BFF(max77779_pmic_spmi_cnfg_vio_high, 4, 4)
+MAX77779_BFF(max77779_pmic_spmi_cnfg_internal_clk_on, 6, 6)
+MAX77779_BFF(max77779_pmic_spmi_cnfg_spmi_hold_clk_on, 7, 7)
 
 /*
  * MAX77779_PMIC_SPMI_MID,0x42,0b00010110,0x16,Reset_Type:SPMI
@@ -893,12 +905,12 @@ max77779_pmic_spmi_mid_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_spmi_mid_spmi_mid,1,0)
-MAX77779_BFF(max77779_pmic_spmi_mid_spmi_mw_enable,2,2)
-MAX77779_BFF(max77779_pmic_spmi_mid_spr_3,3,3)
-MAX77779_BFF(max77779_pmic_spmi_mid_spmi_arb_mode,4,4)
-MAX77779_BFF(max77779_pmic_spmi_mid_spr_6_5,6,5)
-MAX77779_BFF(max77779_pmic_spmi_mid_spmi_msg_repeat,7,7)
+MAX77779_BFF(max77779_pmic_spmi_mid_spmi_mid, 1, 0)
+MAX77779_BFF(max77779_pmic_spmi_mid_spmi_mw_enable, 2, 2)
+MAX77779_BFF(max77779_pmic_spmi_mid_spr_3, 3, 3)
+MAX77779_BFF(max77779_pmic_spmi_mid_spmi_arb_mode, 4, 4)
+MAX77779_BFF(max77779_pmic_spmi_mid_spr_6_5, 6, 5)
+MAX77779_BFF(max77779_pmic_spmi_mid_spmi_msg_repeat, 7, 7)
 
 /*
  * MAX77779_PMIC_SPMI_MADDR,0x43,0b00000000,0x0,Reset_Type:SPMI
@@ -932,8 +944,8 @@ max77779_pmic_spmi_sts_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_spmi_sts_spmi_arb_err,0,0)
-MAX77779_BFF(max77779_pmic_spmi_sts_rsvd_6_1,6,1)
+MAX77779_BFF(max77779_pmic_spmi_sts_spmi_arb_err, 0, 0)
+MAX77779_BFF(max77779_pmic_spmi_sts_rsvd_6_1, 6, 1)
 
 /*
  * MAX77779_PMIC_SWRESET,0x50,0b00000000,0x0,Reset_Type:S, (Exception: SWR_RST bits are not register type which can retain data)
@@ -967,9 +979,9 @@ max77779_pmic_swreset_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_swreset_swr_rst,5,0)
-MAX77779_BFF(max77779_pmic_swreset_ic_rst_mask,6,6)
-MAX77779_BFF(max77779_pmic_swreset_vio_ok_mask,7,7)
+MAX77779_BFF(max77779_pmic_swreset_swr_rst, 5, 0)
+MAX77779_BFF(max77779_pmic_swreset_ic_rst_mask, 6, 6)
+MAX77779_BFF(max77779_pmic_swreset_vio_ok_mask, 7, 7)
 
 /*
  * MAX77779_PMIC_CONTROL_FG,0x51,0b00010000,0x10,Reset_Type:F
@@ -993,7 +1005,7 @@ max77779_pmic_control_fg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_control_fg_tshdn_dis,4,4)
+MAX77779_BFF(max77779_pmic_control_fg_tshdn_dis, 4, 4)
 
 /*******************************************************
  * Section: RISCV_FUNC 0x60 8
@@ -1191,14 +1203,14 @@ max77779_pmic_gpio_sgpio_int_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio0_sts,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio1_sts,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio2_sts,2,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio3_sts,3,3)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio4_sts,4,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio5_sts,5,5)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio6_sts,6,6)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio7_sts,7,7)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio0_sts, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio1_sts, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio2_sts, 2, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio3_sts, 3, 3)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio4_sts, 4, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio5_sts, 5, 5)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio6_sts, 6, 6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_int_sgpio7_sts, 7, 7)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_PU,0x01,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1257,14 +1269,14 @@ max77779_pmic_gpio_sgpio_pu_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu0,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu2,2,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu3,3,3)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu4,4,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu5,5,5)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu6,6,6)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu7,7,7)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu0, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu2, 2, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu3, 3, 3)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu4, 4, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu5, 5, 5)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu6, 6, 6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pu_pu7, 7, 7)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_PD,0x02,0b01011110,0x5e,OTP:SHADOW, Reset_Type:O
@@ -1323,14 +1335,14 @@ max77779_pmic_gpio_sgpio_pd_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd0,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd2,2,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd3,3,3)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd4,4,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd5,5,5)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd6,6,6)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd7,7,7)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd0, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd2, 2, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd3, 3, 3)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd4, 4, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd5, 5, 5)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd6, 6, 6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_pd_pd7, 7, 7)
 
 /*
  * MAX77779_PMIC_GPIO_AGPIO_PU,0x03,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1374,11 +1386,11 @@ max77779_pmic_gpio_agpio_pu_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_agpio_pu_pu0,0,0)
-MAX77779_BFF(max77779_pmic_gpio_agpio_pu_pu1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_agpio_pu_pu2,2,2)
-MAX77779_BFF(max77779_pmic_gpio_agpio_pu_pu3,3,3)
-MAX77779_BFF(max77779_pmic_gpio_agpio_pu_spr_7_4,7,4)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pu_pu0, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pu_pu1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pu_pu2, 2, 2)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pu_pu3, 3, 3)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pu_spr_7_4, 7, 4)
 
 /*
  * MAX77779_PMIC_GPIO_AGPIO_PD,0x04,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1422,11 +1434,11 @@ max77779_pmic_gpio_agpio_pd_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_agpio_pd_pd0,0,0)
-MAX77779_BFF(max77779_pmic_gpio_agpio_pd_pd1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_agpio_pd_pd2,2,2)
-MAX77779_BFF(max77779_pmic_gpio_agpio_pd_pd3,3,3)
-MAX77779_BFF(max77779_pmic_gpio_agpio_pd_spr_7_4,7,4)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pd_pd0, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pd_pd1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pd_pd2, 2, 2)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pd_pd3, 3, 3)
+MAX77779_BFF(max77779_pmic_gpio_agpio_pd_spr_7_4, 7, 4)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_CNFG0,0x05,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1470,11 +1482,11 @@ max77779_pmic_gpio_sgpio_cnfg0_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_vgpi_en,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_irq_sel,7,6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_vgpi_en, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg0_irq_sel, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_CNFG1,0x06,0b00000100,0x4,OTP:SHADOW, Reset_Type:O
@@ -1518,11 +1530,11 @@ max77779_pmic_gpio_sgpio_cnfg1_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_vgpi_en,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_irq_sel,7,6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_vgpi_en, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg1_irq_sel, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_CNFG2,0x07,0b00000100,0x4,OTP:SHADOW, Reset_Type:O
@@ -1566,11 +1578,11 @@ max77779_pmic_gpio_sgpio_cnfg2_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_vgpi_en,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_irq_sel,7,6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_vgpi_en, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg2_irq_sel, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_CNFG3,0x08,0b00000100,0x4,OTP:SHADOW, Reset_Type:O
@@ -1614,11 +1626,11 @@ max77779_pmic_gpio_sgpio_cnfg3_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_vgpi_en,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_irq_sel,7,6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_vgpi_en, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg3_irq_sel, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_CNFG4,0x09,0b00000100,0x4,OTP:SHADOW, Reset_Type:O
@@ -1662,11 +1674,11 @@ max77779_pmic_gpio_sgpio_cnfg4_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_vgpi_en,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_irq_sel,7,6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_vgpi_en, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg4_irq_sel, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_CNFG5,0x0A,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1710,11 +1722,11 @@ max77779_pmic_gpio_sgpio_cnfg5_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_vgpi_en,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_irq_sel,7,6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_vgpi_en, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg5_irq_sel, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_CNFG6,0x0B,0b00000100,0x4,OTP:SHADOW, Reset_Type:O
@@ -1758,11 +1770,11 @@ max77779_pmic_gpio_sgpio_cnfg6_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_vgpi_en,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_irq_sel,7,6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_vgpi_en, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg6_irq_sel, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_SGPIO_CNFG7,0x0C,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1806,11 +1818,11 @@ max77779_pmic_gpio_sgpio_cnfg7_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_vgpi_en,1,1)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_irq_sel,7,6)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_vgpi_en, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_sgpio_cnfg7_irq_sel, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_AGPIO_CNFG0,0x0D,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1854,11 +1866,11 @@ max77779_pmic_gpio_agpio_cnfg0_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_spr_1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_rsvd_7_6,7,6)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_spr_1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg0_rsvd_7_6, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_AGPIO_CNFG1,0x0E,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1902,11 +1914,11 @@ max77779_pmic_gpio_agpio_cnfg1_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_spr_1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_rsvd_7_6,7,6)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_spr_1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg1_rsvd_7_6, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_AGPIO_CNFG2,0x0F,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1950,11 +1962,11 @@ max77779_pmic_gpio_agpio_cnfg2_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_spr_1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_rsvd_7_6,7,6)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_spr_1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg2_rsvd_7_6, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_AGPIO_CNFG3,0x10,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -1998,11 +2010,11 @@ max77779_pmic_gpio_agpio_cnfg3_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_spr_1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_dbnc_sel,5,4)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_rsvd_7_6,7,6)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_spr_1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_dbnc_sel, 5, 4)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg3_rsvd_7_6, 7, 6)
 
 /*
  * MAX77779_PMIC_GPIO_AGPIO_CNFG4,0x11,0b00001000,0x8,OTP:SHADOW, Reset_Type:O
@@ -2041,10 +2053,10 @@ max77779_pmic_gpio_agpio_cnfg4_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg4_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg4_spr_1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg4_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg4_rsvd_7_4,7,4)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg4_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg4_spr_1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg4_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg4_rsvd_7_4, 7, 4)
 
 /*
  * MAX77779_PMIC_GPIO_AGPIO_CNFG5,0x12,0b00001000,0x8,OTP:SHADOW, Reset_Type:O
@@ -2083,10 +2095,10 @@ max77779_pmic_gpio_agpio_cnfg5_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg5_data,0,0)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg5_spr_1,1,1)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg5_mode,3,2)
-MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg5_rsvd_7_4,7,4)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg5_data, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg5_spr_1, 1, 1)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg5_mode, 3, 2)
+MAX77779_BFF(max77779_pmic_gpio_agpio_cnfg5_rsvd_7_4, 7, 4)
 
 /*
  * MAX77779_PMIC_GPIO_VGPI_CNFG,0x13,0b00000001,0x1,Reset_Type:O
@@ -2115,8 +2127,8 @@ max77779_pmic_gpio_vgpi_cnfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_pmic_gpio_vgpi_cnfg_vgpi_pr,0,0)
-MAX77779_BFF(max77779_pmic_gpio_vgpi_cnfg_spr_7_1,7,1)
+MAX77779_BFF(max77779_pmic_gpio_vgpi_cnfg_vgpi_pr, 0, 0)
+MAX77779_BFF(max77779_pmic_gpio_vgpi_cnfg_spr_7_1, 7, 1)
 
 /*******************************************************
  * Section: JEITA_FUNC 0x00 8
@@ -2254,11 +2266,11 @@ max77779_chg_jeita_ctrl_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_jeita_ctrl_in_adc_force,0,0)
-MAX77779_BFF(max77779_chg_jeita_ctrl_thm2_temp_force,1,1)
-MAX77779_BFF(max77779_chg_jeita_ctrl_thm3_check_en,2,2)
-MAX77779_BFF(max77779_chg_jeita_ctrl_batt_id1_do,3,3)
-MAX77779_BFF(max77779_chg_jeita_ctrl_batt_id2_do,4,4)
+MAX77779_BFF(max77779_chg_jeita_ctrl_in_adc_force, 0, 0)
+MAX77779_BFF(max77779_chg_jeita_ctrl_thm2_temp_force, 1, 1)
+MAX77779_BFF(max77779_chg_jeita_ctrl_thm3_check_en, 2, 2)
+MAX77779_BFF(max77779_chg_jeita_ctrl_batt_id1_do, 3, 3)
+MAX77779_BFF(max77779_chg_jeita_ctrl_batt_id2_do, 4, 4)
 
 /*
  * MAX77779_CHG_JEITA_FLAGS,0x13,0b00000000,0x0,Reset_Type:S
@@ -2313,13 +2325,13 @@ max77779_chg_jeita_flags_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_jeita_flags_chgin_adc_on,0,0)
-MAX77779_BFF(max77779_chg_jeita_flags_wcin_adc_on,1,1)
-MAX77779_BFF(max77779_chg_jeita_flags_thm3_temp_on,2,2)
-MAX77779_BFF(max77779_chg_jeita_flags_thm2_temp_on,3,3)
-MAX77779_BFF(max77779_chg_jeita_flags_thm1_temp_on,4,4)
-MAX77779_BFF(max77779_chg_jeita_flags_batt_id2_adc_ok,5,5)
-MAX77779_BFF(max77779_chg_jeita_flags_batt_id1_adc_ok,6,6)
+MAX77779_BFF(max77779_chg_jeita_flags_chgin_adc_on, 0, 0)
+MAX77779_BFF(max77779_chg_jeita_flags_wcin_adc_on, 1, 1)
+MAX77779_BFF(max77779_chg_jeita_flags_thm3_temp_on, 2, 2)
+MAX77779_BFF(max77779_chg_jeita_flags_thm2_temp_on, 3, 3)
+MAX77779_BFF(max77779_chg_jeita_flags_thm1_temp_on, 4, 4)
+MAX77779_BFF(max77779_chg_jeita_flags_batt_id2_adc_ok, 5, 5)
+MAX77779_BFF(max77779_chg_jeita_flags_batt_id1_adc_ok, 6, 6)
 
 /*
  * MAX77779_CHG_COP_CTRL,0x20,0b00000000,0x0,Reset_Type:S
@@ -2358,10 +2370,10 @@ max77779_chg_cop_ctrl_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cop_ctrl_cop_en,0,0)
-MAX77779_BFF(max77779_chg_cop_ctrl_cop_limit_wd_en,1,1)
-MAX77779_BFF(max77779_chg_cop_ctrl_cop_warn_sts,6,6)
-MAX77779_BFF(max77779_chg_cop_ctrl_cop_alert_sts,7,7)
+MAX77779_BFF(max77779_chg_cop_ctrl_cop_en, 0, 0)
+MAX77779_BFF(max77779_chg_cop_ctrl_cop_limit_wd_en, 1, 1)
+MAX77779_BFF(max77779_chg_cop_ctrl_cop_warn_sts, 6, 6)
+MAX77779_BFF(max77779_chg_cop_ctrl_cop_alert_sts, 7, 7)
 
 /*
  * MAX77779_CHG_COP_DEBOUNCE,0x21,0b00000000,0x0,Reset_Type:S
@@ -2385,7 +2397,7 @@ max77779_chg_cop_debounce_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cop_debounce_cop_db_time,2,0)
+MAX77779_BFF(max77779_chg_cop_debounce_cop_db_time, 2, 0)
 
 /*
  * MAX77779_CHG_COP_WARN_L,0x22,0b00000000,0x0,Reset_Type:S
@@ -2468,14 +2480,14 @@ max77779_chg_int_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_int_byp_i,0,0)
-MAX77779_BFF(max77779_chg_int_thm2_i,1,1)
-MAX77779_BFF(max77779_chg_int_inlim_i,2,2)
-MAX77779_BFF(max77779_chg_int_bat_i,3,3)
-MAX77779_BFF(max77779_chg_int_chg_i,4,4)
-MAX77779_BFF(max77779_chg_int_wcin_i,5,5)
-MAX77779_BFF(max77779_chg_int_chgin_i,6,6)
-MAX77779_BFF(max77779_chg_int_aicl_i,7,7)
+MAX77779_BFF(max77779_chg_int_byp_i, 0, 0)
+MAX77779_BFF(max77779_chg_int_thm2_i, 1, 1)
+MAX77779_BFF(max77779_chg_int_inlim_i, 2, 2)
+MAX77779_BFF(max77779_chg_int_bat_i, 3, 3)
+MAX77779_BFF(max77779_chg_int_chg_i, 4, 4)
+MAX77779_BFF(max77779_chg_int_wcin_i, 5, 5)
+MAX77779_BFF(max77779_chg_int_chgin_i, 6, 6)
+MAX77779_BFF(max77779_chg_int_aicl_i, 7, 7)
 
 /*
  * MAX77779_CHG_INT2,0x01,0b00000000,0x0,Reset_Type:S
@@ -2535,14 +2547,14 @@ max77779_chg_int2_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_int2_chg_sta_done_i,0,0)
-MAX77779_BFF(max77779_chg_int2_chg_sta_to_i,1,1)
-MAX77779_BFF(max77779_chg_int2_chg_sta_cv_i,2,2)
-MAX77779_BFF(max77779_chg_int2_chg_sta_cc_i,3,3)
-MAX77779_BFF(max77779_chg_int2_cop_warn_i,4,4)
-MAX77779_BFF(max77779_chg_int2_cop_alert_i,5,5)
-MAX77779_BFF(max77779_chg_int2_cop_limit_wd_i,6,6)
-MAX77779_BFF(max77779_chg_int2_insel_i,7,7)
+MAX77779_BFF(max77779_chg_int2_chg_sta_done_i, 0, 0)
+MAX77779_BFF(max77779_chg_int2_chg_sta_to_i, 1, 1)
+MAX77779_BFF(max77779_chg_int2_chg_sta_cv_i, 2, 2)
+MAX77779_BFF(max77779_chg_int2_chg_sta_cc_i, 3, 3)
+MAX77779_BFF(max77779_chg_int2_cop_warn_i, 4, 4)
+MAX77779_BFF(max77779_chg_int2_cop_alert_i, 5, 5)
+MAX77779_BFF(max77779_chg_int2_cop_limit_wd_i, 6, 6)
+MAX77779_BFF(max77779_chg_int2_insel_i, 7, 7)
 
 /*
  * MAX77779_CHG_INT_MASK,0x03,0b11111111,0xff,OTP:SHADOW, Reset_Type:O
@@ -2601,14 +2613,14 @@ max77779_chg_int_mask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_int_mask_byp_m,0,0)
-MAX77779_BFF(max77779_chg_int_mask_thm2_m,1,1)
-MAX77779_BFF(max77779_chg_int_mask_inlim_m,2,2)
-MAX77779_BFF(max77779_chg_int_mask_bat_m,3,3)
-MAX77779_BFF(max77779_chg_int_mask_chg_m,4,4)
-MAX77779_BFF(max77779_chg_int_mask_wcin_m,5,5)
-MAX77779_BFF(max77779_chg_int_mask_chgin_m,6,6)
-MAX77779_BFF(max77779_chg_int_mask_aicl_m,7,7)
+MAX77779_BFF(max77779_chg_int_mask_byp_m, 0, 0)
+MAX77779_BFF(max77779_chg_int_mask_thm2_m, 1, 1)
+MAX77779_BFF(max77779_chg_int_mask_inlim_m, 2, 2)
+MAX77779_BFF(max77779_chg_int_mask_bat_m, 3, 3)
+MAX77779_BFF(max77779_chg_int_mask_chg_m, 4, 4)
+MAX77779_BFF(max77779_chg_int_mask_wcin_m, 5, 5)
+MAX77779_BFF(max77779_chg_int_mask_chgin_m, 6, 6)
+MAX77779_BFF(max77779_chg_int_mask_aicl_m, 7, 7)
 
 /*
  * MAX77779_CHG_INT2_MASK,0x04,0b11111111,0xff,OTP:SHADOW, Reset_Type:O
@@ -2668,14 +2680,14 @@ max77779_chg_int2_mask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_int2_mask_chg_sta_done_m,0,0)
-MAX77779_BFF(max77779_chg_int2_mask_chg_sta_to_m,1,1)
-MAX77779_BFF(max77779_chg_int2_mask_chg_sta_cv_m,2,2)
-MAX77779_BFF(max77779_chg_int2_mask_chg_sta_cc_m,3,3)
-MAX77779_BFF(max77779_chg_int2_mask_cop_warn_m,4,4)
-MAX77779_BFF(max77779_chg_int2_mask_cop_alert_m,5,5)
-MAX77779_BFF(max77779_chg_int2_mask_cop_limit_wd_m,6,6)
-MAX77779_BFF(max77779_chg_int2_mask_insel_m,7,7)
+MAX77779_BFF(max77779_chg_int2_mask_chg_sta_done_m, 0, 0)
+MAX77779_BFF(max77779_chg_int2_mask_chg_sta_to_m, 1, 1)
+MAX77779_BFF(max77779_chg_int2_mask_chg_sta_cv_m, 2, 2)
+MAX77779_BFF(max77779_chg_int2_mask_chg_sta_cc_m, 3, 3)
+MAX77779_BFF(max77779_chg_int2_mask_cop_warn_m, 4, 4)
+MAX77779_BFF(max77779_chg_int2_mask_cop_alert_m, 5, 5)
+MAX77779_BFF(max77779_chg_int2_mask_cop_limit_wd_m, 6, 6)
+MAX77779_BFF(max77779_chg_int2_mask_insel_m, 7, 7)
 
 /*
  * MAX77779_CHG_INT_OK,0x06,0b10011111,0x9f,Reset_Type:S
@@ -2734,14 +2746,14 @@ max77779_chg_int_ok_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_int_ok_byp_ok,0,0)
-MAX77779_BFF(max77779_chg_int_ok_thm2_ok,1,1)
-MAX77779_BFF(max77779_chg_int_ok_inlim_ok,2,2)
-MAX77779_BFF(max77779_chg_int_ok_bat_ok,3,3)
-MAX77779_BFF(max77779_chg_int_ok_chg_ok,4,4)
-MAX77779_BFF(max77779_chg_int_ok_wcin_ok,5,5)
-MAX77779_BFF(max77779_chg_int_ok_chgin_ok,6,6)
-MAX77779_BFF(max77779_chg_int_ok_aicl_ok,7,7)
+MAX77779_BFF(max77779_chg_int_ok_byp_ok, 0, 0)
+MAX77779_BFF(max77779_chg_int_ok_thm2_ok, 1, 1)
+MAX77779_BFF(max77779_chg_int_ok_inlim_ok, 2, 2)
+MAX77779_BFF(max77779_chg_int_ok_bat_ok, 3, 3)
+MAX77779_BFF(max77779_chg_int_ok_chg_ok, 4, 4)
+MAX77779_BFF(max77779_chg_int_ok_wcin_ok, 5, 5)
+MAX77779_BFF(max77779_chg_int_ok_chgin_ok, 6, 6)
+MAX77779_BFF(max77779_chg_int_ok_aicl_ok, 7, 7)
 
 /*
  * MAX77779_CHG_DETAILS_00,0x07,0b10000000,0x80,Reset_Type:S
@@ -2785,11 +2797,11 @@ max77779_chg_details_00_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_details_00_treg,0,0)
-MAX77779_BFF(max77779_chg_details_00_spsn_dtls,2,1)
-MAX77779_BFF(max77779_chg_details_00_wcin_dtls,4,3)
-MAX77779_BFF(max77779_chg_details_00_chgin_dtls,6,5)
-MAX77779_BFF(max77779_chg_details_00_vdroop1_ok,7,7)
+MAX77779_BFF(max77779_chg_details_00_treg, 0, 0)
+MAX77779_BFF(max77779_chg_details_00_spsn_dtls, 2, 1)
+MAX77779_BFF(max77779_chg_details_00_wcin_dtls, 4, 3)
+MAX77779_BFF(max77779_chg_details_00_chgin_dtls, 6, 5)
+MAX77779_BFF(max77779_chg_details_00_vdroop1_ok, 7, 7)
 
 /*
  * MAX77779_CHG_DETAILS_01,0x08,0b11111000,0xf8,Reset_Type:S
@@ -2823,9 +2835,9 @@ max77779_chg_details_01_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_details_01_chg_dtls,3,0)
-MAX77779_BFF(max77779_chg_details_01_bat_dtls,6,4)
-MAX77779_BFF(max77779_chg_details_01_vdroop2_ok,7,7)
+MAX77779_BFF(max77779_chg_details_01_chg_dtls, 3, 0)
+MAX77779_BFF(max77779_chg_details_01_bat_dtls, 6, 4)
+MAX77779_BFF(max77779_chg_details_01_vdroop2_ok, 7, 7)
 
 /*
  * MAX77779_CHG_DETAILS_02,0x09,0b00000000,0x0,Reset_Type:S
@@ -2864,10 +2876,10 @@ max77779_chg_details_02_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_details_02_byp_dtls,3,0)
-MAX77779_BFF(max77779_chg_details_02_wcin_sts,4,4)
-MAX77779_BFF(max77779_chg_details_02_chgin_sts,5,5)
-MAX77779_BFF(max77779_chg_details_02_nxt_bck_input,7,6)
+MAX77779_BFF(max77779_chg_details_02_byp_dtls, 3, 0)
+MAX77779_BFF(max77779_chg_details_02_wcin_sts, 4, 4)
+MAX77779_BFF(max77779_chg_details_02_chgin_sts, 5, 5)
+MAX77779_BFF(max77779_chg_details_02_nxt_bck_input, 7, 6)
 
 /*
  * MAX77779_CHG_DETAILS_03,0x0A,0b00010010,0x12,Reset_Type:S
@@ -2901,9 +2913,9 @@ max77779_chg_details_03_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_details_03_thm1_dtls,2,0)
-MAX77779_BFF(max77779_chg_details_03_thm3_dtls,5,3)
-MAX77779_BFF(max77779_chg_details_03_jeita_aux_dtls,7,6)
+MAX77779_BFF(max77779_chg_details_03_thm1_dtls, 2, 0)
+MAX77779_BFF(max77779_chg_details_03_thm3_dtls, 5, 3)
+MAX77779_BFF(max77779_chg_details_03_jeita_aux_dtls, 7, 6)
 
 /*
  * MAX77779_CHG_DETAILS_04,0x0B,0b00000000,0x0,Reset_Type:S
@@ -2947,11 +2959,11 @@ max77779_chg_details_04_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_details_04_fship_exit_dtls,1,0)
-MAX77779_BFF(max77779_chg_details_04_pd_dtls,3,2)
-MAX77779_BFF(max77779_chg_details_04_bat_oilo1_open,4,4)
-MAX77779_BFF(max77779_chg_details_04_bat_oilo2_open,5,5)
-MAX77779_BFF(max77779_chg_details_04_bck_maxval_sts,6,6)
+MAX77779_BFF(max77779_chg_details_04_fship_exit_dtls, 1, 0)
+MAX77779_BFF(max77779_chg_details_04_pd_dtls, 3, 2)
+MAX77779_BFF(max77779_chg_details_04_bat_oilo1_open, 4, 4)
+MAX77779_BFF(max77779_chg_details_04_bat_oilo2_open, 5, 5)
+MAX77779_BFF(max77779_chg_details_04_bck_maxval_sts, 6, 6)
 
 /*
  * MAX77779_CHG_CNFG_00,0x0C,0b00000100,0x4,OTP:SHADOW, Reset_Type:O
@@ -2990,10 +3002,10 @@ max77779_chg_cnfg_00_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_00_mode,3,0)
-MAX77779_BFF(max77779_chg_cnfg_00_bypv_ramp_bypass,4,4)
-MAX77779_BFF(max77779_chg_cnfg_00_cp_en,5,5)
-MAX77779_BFF(max77779_chg_cnfg_00_wdtclr,7,6)
+MAX77779_BFF(max77779_chg_cnfg_00_mode, 3, 0)
+MAX77779_BFF(max77779_chg_cnfg_00_bypv_ramp_bypass, 4, 4)
+MAX77779_BFF(max77779_chg_cnfg_00_cp_en, 5, 5)
+MAX77779_BFF(max77779_chg_cnfg_00_wdtclr, 7, 6)
 
 /*
  * MAX77779_CHG_CNFG_01,0x0D,0b10011001,0x99,OTP:SHADOW, Reset_Type:O
@@ -3037,11 +3049,11 @@ max77779_chg_cnfg_01_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_01_fchgtime,2,0)
-MAX77779_BFF(max77779_chg_cnfg_01_recycle_en,3,3)
-MAX77779_BFF(max77779_chg_cnfg_01_chg_rstrt,5,4)
-MAX77779_BFF(max77779_chg_cnfg_01_lsel,6,6)
-MAX77779_BFF(max77779_chg_cnfg_01_pqen,7,7)
+MAX77779_BFF(max77779_chg_cnfg_01_fchgtime, 2, 0)
+MAX77779_BFF(max77779_chg_cnfg_01_recycle_en, 3, 3)
+MAX77779_BFF(max77779_chg_cnfg_01_chg_rstrt, 5, 4)
+MAX77779_BFF(max77779_chg_cnfg_01_lsel, 6, 6)
+MAX77779_BFF(max77779_chg_cnfg_01_pqen, 7, 7)
 
 /*
  * MAX77779_CHG_CNFG_02,0x0E,0b00000111,0x7,OTP:SHADOW, Reset_Type:O
@@ -3065,7 +3077,7 @@ max77779_chg_cnfg_02_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_02_chgcc,5,0)
+MAX77779_BFF(max77779_chg_cnfg_02_chgcc, 5, 0)
 
 /*
  * MAX77779_CHG_CNFG_03,0x0F,0b11011001,0xd9,OTP:SHADOW, Reset_Type:O
@@ -3104,10 +3116,10 @@ max77779_chg_cnfg_03_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_03_to_ith,2,0)
-MAX77779_BFF(max77779_chg_cnfg_03_to_time,5,3)
-MAX77779_BFF(max77779_chg_cnfg_03_auto_fship_mode_en,6,6)
-MAX77779_BFF(max77779_chg_cnfg_03_sys_track_dis,7,7)
+MAX77779_BFF(max77779_chg_cnfg_03_to_ith, 2, 0)
+MAX77779_BFF(max77779_chg_cnfg_03_to_time, 5, 3)
+MAX77779_BFF(max77779_chg_cnfg_03_auto_fship_mode_en, 6, 6)
+MAX77779_BFF(max77779_chg_cnfg_03_sys_track_dis, 7, 7)
 
 /*
  * MAX77779_CHG_CNFG_04,0x10,0b00010100,0x14,OTP:SHADOW, Reset_Type:O
@@ -3131,7 +3143,7 @@ max77779_chg_cnfg_04_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_04_chg_cv_prm,5,0)
+MAX77779_BFF(max77779_chg_cnfg_04_chg_cv_prm, 5, 0)
 
 /*
  * MAX77779_CHG_CNFG_05,0x11,0b00110110,0x36,OTP:SHADOW, Reset_Type:O
@@ -3160,8 +3172,8 @@ max77779_chg_cnfg_05_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_05_otg_ilim,3,0)
-MAX77779_BFF(max77779_chg_cnfg_05_wcsm_ilim,7,4)
+MAX77779_BFF(max77779_chg_cnfg_05_otg_ilim, 3, 0)
+MAX77779_BFF(max77779_chg_cnfg_05_wcsm_ilim, 7, 4)
 
 /*
  * MAX77779_CHG_CNFG_06,0x12,0b00000001,0x1,OTP:SHADOW, Reset_Type:O
@@ -3195,9 +3207,9 @@ max77779_chg_cnfg_06_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_06_wcin_pd_dis,0,0)
-MAX77779_BFF(max77779_chg_cnfg_06_chgprot,3,2)
-MAX77779_BFF(max77779_chg_cnfg_06_chg_ctm_key,7,4)
+MAX77779_BFF(max77779_chg_cnfg_06_wcin_pd_dis, 0, 0)
+MAX77779_BFF(max77779_chg_cnfg_06_chgprot, 3, 2)
+MAX77779_BFF(max77779_chg_cnfg_06_chg_ctm_key, 7, 4)
 
 /*
  * MAX77779_CHG_CNFG_07,0x13,0b00110000,0x30,OTP:SHADOW, Reset_Type:O
@@ -3226,8 +3238,8 @@ max77779_chg_cnfg_07_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_07_fship_mode,0,0)
-MAX77779_BFF(max77779_chg_cnfg_07_regtemp,6,3)
+MAX77779_BFF(max77779_chg_cnfg_07_fship_mode, 0, 0)
+MAX77779_BFF(max77779_chg_cnfg_07_regtemp, 6, 3)
 
 /*
  * MAX77779_CHG_CNFG_08,0x14,0b00000101,0x5,OTP:SHADOW, Reset_Type:O
@@ -3276,12 +3288,12 @@ max77779_chg_cnfg_08_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_08_fsw,1,0)
-MAX77779_BFF(max77779_chg_cnfg_08_thm1_jeita_en,2,2)
-MAX77779_BFF(max77779_chg_cnfg_08_ichgcc_cool,3,3)
-MAX77779_BFF(max77779_chg_cnfg_08_vchgcv_cool,4,4)
-MAX77779_BFF(max77779_chg_cnfg_08_ichgcc_warm,5,5)
-MAX77779_BFF(max77779_chg_cnfg_08_vchgcv_warm,6,6)
+MAX77779_BFF(max77779_chg_cnfg_08_fsw, 1, 0)
+MAX77779_BFF(max77779_chg_cnfg_08_thm1_jeita_en, 2, 2)
+MAX77779_BFF(max77779_chg_cnfg_08_ichgcc_cool, 3, 3)
+MAX77779_BFF(max77779_chg_cnfg_08_vchgcv_cool, 4, 4)
+MAX77779_BFF(max77779_chg_cnfg_08_ichgcc_warm, 5, 5)
+MAX77779_BFF(max77779_chg_cnfg_08_vchgcv_warm, 6, 6)
 
 /*
  * MAX77779_CHG_CNFG_09,0x15,0b00010011,0x13,OTP:SHADOW, Reset_Type:O
@@ -3310,8 +3322,8 @@ max77779_chg_cnfg_09_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_09_chgin_ilim,6,0)
-MAX77779_BFF(max77779_chg_cnfg_09_no_autoibus,7,7)
+MAX77779_BFF(max77779_chg_cnfg_09_chgin_ilim, 6, 0)
+MAX77779_BFF(max77779_chg_cnfg_09_no_autoibus, 7, 7)
 
 /*
  * MAX77779_CHG_CNFG_10,0x16,0b00010011,0x13,OTP:SHADOW, Reset_Type:O
@@ -3340,8 +3352,8 @@ max77779_chg_cnfg_10_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_10_wcin_ilim,6,0)
-MAX77779_BFF(max77779_chg_cnfg_10_chgin_ilim_speed,7,7)
+MAX77779_BFF(max77779_chg_cnfg_10_wcin_ilim, 6, 0)
+MAX77779_BFF(max77779_chg_cnfg_10_chgin_ilim_speed, 7, 7)
 
 /*
  * MAX77779_CHG_CNFG_11,0x17,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -3395,12 +3407,12 @@ max77779_chg_cnfg_12_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_12_diskip,0,0)
-MAX77779_BFF(max77779_chg_cnfg_12_wcin_reg,2,1)
-MAX77779_BFF(max77779_chg_cnfg_12_vchgin_reg,4,3)
-MAX77779_BFF(max77779_chg_cnfg_12_chginsel,5,5)
-MAX77779_BFF(max77779_chg_cnfg_12_wcinsel,6,6)
-MAX77779_BFF(max77779_chg_cnfg_12_chg_en,7,7)
+MAX77779_BFF(max77779_chg_cnfg_12_diskip, 0, 0)
+MAX77779_BFF(max77779_chg_cnfg_12_wcin_reg, 2, 1)
+MAX77779_BFF(max77779_chg_cnfg_12_vchgin_reg, 4, 3)
+MAX77779_BFF(max77779_chg_cnfg_12_chginsel, 5, 5)
+MAX77779_BFF(max77779_chg_cnfg_12_wcinsel, 6, 6)
+MAX77779_BFF(max77779_chg_cnfg_12_chg_en, 7, 7)
 
 /*
  * MAX77779_CHG_CNFG_13,0x19,0b00110011,0x33,OTP:SHADOW, Reset_Type:O
@@ -3439,10 +3451,10 @@ max77779_chg_cnfg_13_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_13_usb_temp_thr,2,0)
-MAX77779_BFF(max77779_chg_cnfg_13_thm2_hw_ctrl,3,3)
-MAX77779_BFF(max77779_chg_cnfg_13_wcin_ss_en,4,4)
-MAX77779_BFF(max77779_chg_cnfg_13_chgin_ss_en,5,5)
+MAX77779_BFF(max77779_chg_cnfg_13_usb_temp_thr, 2, 0)
+MAX77779_BFF(max77779_chg_cnfg_13_thm2_hw_ctrl, 3, 3)
+MAX77779_BFF(max77779_chg_cnfg_13_wcin_ss_en, 4, 4)
+MAX77779_BFF(max77779_chg_cnfg_13_chgin_ss_en, 5, 5)
 
 /*
  * MAX77779_CHG_CNFG_14,0x1A,0b01100000,0x60,OTP:SHADOW, Reset_Type:O
@@ -3471,8 +3483,8 @@ max77779_chg_cnfg_14_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_14_tpwrout,5,3)
-MAX77779_BFF(max77779_chg_cnfg_14_aicl,7,6)
+MAX77779_BFF(max77779_chg_cnfg_14_tpwrout, 5, 3)
+MAX77779_BFF(max77779_chg_cnfg_14_aicl, 7, 6)
 
 /*
  * MAX77779_CHG_CNFG_15,0x1B,0b00000000,0x0,OTP:SHADOW, Reset_Type:O
@@ -3516,11 +3528,11 @@ max77779_chg_cnfg_15_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_15_wdten,0,0)
-MAX77779_BFF(max77779_chg_cnfg_15_primary_dc,1,1)
-MAX77779_BFF(max77779_chg_cnfg_15_spsn_det_en,2,2)
-MAX77779_BFF(max77779_chg_cnfg_15_otg_v_pgm,3,3)
-MAX77779_BFF(max77779_chg_cnfg_15_minvsys,5,4)
+MAX77779_BFF(max77779_chg_cnfg_15_wdten, 0, 0)
+MAX77779_BFF(max77779_chg_cnfg_15_primary_dc, 1, 1)
+MAX77779_BFF(max77779_chg_cnfg_15_spsn_det_en, 2, 2)
+MAX77779_BFF(max77779_chg_cnfg_15_otg_v_pgm, 3, 3)
+MAX77779_BFF(max77779_chg_cnfg_15_minvsys, 5, 4)
 
 /*
  * MAX77779_CHG_CNFG_16,0x1C,0b11110000,0xf0,OTP:SHADOW, Reset_Type:O
@@ -3559,10 +3571,10 @@ max77779_chg_cnfg_16_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_16_slowlx,1,0)
-MAX77779_BFF(max77779_chg_cnfg_16_dis_ir_ctrl,2,2)
-MAX77779_BFF(max77779_chg_cnfg_16_inlim_clk,4,3)
-MAX77779_BFF(max77779_chg_cnfg_16_auto_fship_time,7,5)
+MAX77779_BFF(max77779_chg_cnfg_16_slowlx, 1, 0)
+MAX77779_BFF(max77779_chg_cnfg_16_dis_ir_ctrl, 2, 2)
+MAX77779_BFF(max77779_chg_cnfg_16_inlim_clk, 4, 3)
+MAX77779_BFF(max77779_chg_cnfg_16_auto_fship_time, 7, 5)
 
 /*
  * MAX77779_CHG_CNFG_17,0x1D,0b00000011,0x3,OTP:SHADOW, Reset_Type:O
@@ -3617,13 +3629,13 @@ max77779_chg_cnfg_17_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cnfg_17_thm3_jeita_en,0,0)
-MAX77779_BFF(max77779_chg_cnfg_17_jeita_aux_en,1,1)
-MAX77779_BFF(max77779_chg_cnfg_17_jeita_aux_zone,2,2)
-MAX77779_BFF(max77779_chg_cnfg_17_ichgcc_jaux,3,3)
-MAX77779_BFF(max77779_chg_cnfg_17_vchgcv_jaux,4,4)
-MAX77779_BFF(max77779_chg_cnfg_17_vdp1_stp_bst,6,6)
-MAX77779_BFF(max77779_chg_cnfg_17_vdp2_stp_bst,7,7)
+MAX77779_BFF(max77779_chg_cnfg_17_thm3_jeita_en, 0, 0)
+MAX77779_BFF(max77779_chg_cnfg_17_jeita_aux_en, 1, 1)
+MAX77779_BFF(max77779_chg_cnfg_17_jeita_aux_zone, 2, 2)
+MAX77779_BFF(max77779_chg_cnfg_17_ichgcc_jaux, 3, 3)
+MAX77779_BFF(max77779_chg_cnfg_17_vchgcv_jaux, 4, 4)
+MAX77779_BFF(max77779_chg_cnfg_17_vdp1_stp_bst, 6, 6)
+MAX77779_BFF(max77779_chg_cnfg_17_vdp2_stp_bst, 7, 7)
 
 /*
  * MAX77779_SYS_UVLO1_CNFG_0,0x1E,0b00001100,0xc,OTP:SHADOW, Reset_Type:O
@@ -3652,8 +3664,8 @@ max77779_sys_uvlo1_cnfg_0_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_sys_uvlo1_cnfg_0_sys_uvlo1,3,0)
-MAX77779_BFF(max77779_sys_uvlo1_cnfg_0_sys_uvlo1_hyst,5,4)
+MAX77779_BFF(max77779_sys_uvlo1_cnfg_0_sys_uvlo1, 3, 0)
+MAX77779_BFF(max77779_sys_uvlo1_cnfg_0_sys_uvlo1_hyst, 5, 4)
 
 /*
  * MAX77779_SYS_UVLO1_CNFG_1,0x1F,0b10000000,0x80,OTP:SHADOW, Reset_Type:O
@@ -3687,9 +3699,9 @@ max77779_sys_uvlo1_cnfg_1_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_sys_uvlo1_cnfg_1_sys_uvlo1_rel,1,0)
-MAX77779_BFF(max77779_sys_uvlo1_cnfg_1_sys_uvlo1_det,4,4)
-MAX77779_BFF(max77779_sys_uvlo1_cnfg_1_sys_uvlo1_vdrp1_en,7,7)
+MAX77779_BFF(max77779_sys_uvlo1_cnfg_1_sys_uvlo1_rel, 1, 0)
+MAX77779_BFF(max77779_sys_uvlo1_cnfg_1_sys_uvlo1_det, 4, 4)
+MAX77779_BFF(max77779_sys_uvlo1_cnfg_1_sys_uvlo1_vdrp1_en, 7, 7)
 
 /*
  * MAX77779_SYS_UVLO2_CNFG_0,0x20,0b00001000,0x8,OTP:SHADOW, Reset_Type:O
@@ -3718,8 +3730,8 @@ max77779_sys_uvlo2_cnfg_0_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_sys_uvlo2_cnfg_0_sys_uvlo2,3,0)
-MAX77779_BFF(max77779_sys_uvlo2_cnfg_0_sys_uvlo2_hyst,5,4)
+MAX77779_BFF(max77779_sys_uvlo2_cnfg_0_sys_uvlo2, 3, 0)
+MAX77779_BFF(max77779_sys_uvlo2_cnfg_0_sys_uvlo2_hyst, 5, 4)
 
 /*
  * MAX77779_SYS_UVLO2_CNFG_1,0x21,0b10000000,0x80,OTP:SHADOW, Reset_Type:O
@@ -3753,9 +3765,9 @@ max77779_sys_uvlo2_cnfg_1_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_sys_uvlo2_cnfg_1_sys_uvlo2_rel,1,0)
-MAX77779_BFF(max77779_sys_uvlo2_cnfg_1_sys_uvlo2_det,4,4)
-MAX77779_BFF(max77779_sys_uvlo2_cnfg_1_sys_uvlo2_vdrp2_en,7,7)
+MAX77779_BFF(max77779_sys_uvlo2_cnfg_1_sys_uvlo2_rel, 1, 0)
+MAX77779_BFF(max77779_sys_uvlo2_cnfg_1_sys_uvlo2_det, 4, 4)
+MAX77779_BFF(max77779_sys_uvlo2_cnfg_1_sys_uvlo2_vdrp2_en, 7, 7)
 
 /*
  * MAX77779_BAT_OILO1_CNFG_0,0x22,0b00010000,0x10,OTP:SHADOW, Reset_Type:O
@@ -3779,7 +3791,7 @@ max77779_bat_oilo1_cnfg_0_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bat_oilo1_cnfg_0_bat_oilo1,4,0)
+MAX77779_BFF(max77779_bat_oilo1_cnfg_0_bat_oilo1, 4, 0)
 
 /*
  * MAX77779_BAT_OILO1_CNFG_1,0x23,0b00100000,0x20,OTP:SHADOW, Reset_Type:O
@@ -3808,8 +3820,8 @@ max77779_bat_oilo1_cnfg_1_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bat_oilo1_cnfg_1_bat_oilo1_det,4,0)
-MAX77779_BFF(max77779_bat_oilo1_cnfg_1_bat_oilo1_rel,7,5)
+MAX77779_BFF(max77779_bat_oilo1_cnfg_1_bat_oilo1_det, 4, 0)
+MAX77779_BFF(max77779_bat_oilo1_cnfg_1_bat_oilo1_rel, 7, 5)
 
 /*
  * MAX77779_BAT_OILO1_CNFG_2,0x24,0b00100000,0x20,OTP:SHADOW, Reset_Type:O
@@ -3838,8 +3850,8 @@ max77779_bat_oilo1_cnfg_2_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bat_oilo1_cnfg_2_bat_oilo1_int_det,4,0)
-MAX77779_BFF(max77779_bat_oilo1_cnfg_2_bat_oilo1_int_rel,7,5)
+MAX77779_BFF(max77779_bat_oilo1_cnfg_2_bat_oilo1_int_det, 4, 0)
+MAX77779_BFF(max77779_bat_oilo1_cnfg_2_bat_oilo1_int_rel, 7, 5)
 
 /*
  * MAX77779_BAT_OILO1_CNFG_3,0x25,0b01000000,0x40,OTP:SHADOW, Reset_Type:O
@@ -3878,10 +3890,10 @@ max77779_bat_oilo1_cnfg_3_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bat_oilo1_cnfg_3_bat_open_to_1,3,0)
-MAX77779_BFF(max77779_bat_oilo1_cnfg_3_bat_oilo_int_clr,5,5)
-MAX77779_BFF(max77779_bat_oilo1_cnfg_3_bat_oilo1_vdrp1_en,6,6)
-MAX77779_BFF(max77779_bat_oilo1_cnfg_3_bat_oilo1_vdrp2_en,7,7)
+MAX77779_BFF(max77779_bat_oilo1_cnfg_3_bat_open_to_1, 3, 0)
+MAX77779_BFF(max77779_bat_oilo1_cnfg_3_bat_oilo_int_clr, 5, 5)
+MAX77779_BFF(max77779_bat_oilo1_cnfg_3_bat_oilo1_vdrp1_en, 6, 6)
+MAX77779_BFF(max77779_bat_oilo1_cnfg_3_bat_oilo1_vdrp2_en, 7, 7)
 
 /*
  * MAX77779_BAT_OILO2_CNFG_0,0x26,0b00000110,0x6,OTP:SHADOW, Reset_Type:O
@@ -3905,7 +3917,7 @@ max77779_bat_oilo2_cnfg_0_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bat_oilo2_cnfg_0_bat_oilo2,4,0)
+MAX77779_BFF(max77779_bat_oilo2_cnfg_0_bat_oilo2, 4, 0)
 
 /*
  * MAX77779_BAT_OILO2_CNFG_1,0x27,0b00100000,0x20,OTP:SHADOW, Reset_Type:O
@@ -3934,8 +3946,8 @@ max77779_bat_oilo2_cnfg_1_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bat_oilo2_cnfg_1_bat_oilo2_det,4,0)
-MAX77779_BFF(max77779_bat_oilo2_cnfg_1_bat_oilo2_rel,7,5)
+MAX77779_BFF(max77779_bat_oilo2_cnfg_1_bat_oilo2_det, 4, 0)
+MAX77779_BFF(max77779_bat_oilo2_cnfg_1_bat_oilo2_rel, 7, 5)
 
 /*
  * MAX77779_BAT_OILO2_CNFG_2,0x28,0b00100000,0x20,OTP:SHADOW, Reset_Type:O
@@ -3964,8 +3976,8 @@ max77779_bat_oilo2_cnfg_2_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bat_oilo2_cnfg_2_bat_oilo2_int_det,4,0)
-MAX77779_BFF(max77779_bat_oilo2_cnfg_2_bat_oilo2_int_rel,7,5)
+MAX77779_BFF(max77779_bat_oilo2_cnfg_2_bat_oilo2_int_det, 4, 0)
+MAX77779_BFF(max77779_bat_oilo2_cnfg_2_bat_oilo2_int_rel, 7, 5)
 
 /*
  * MAX77779_BAT_OILO2_CNFG_3,0x29,0b10001000,0x88,OTP:SHADOW, Reset_Type:O
@@ -3999,9 +4011,9 @@ max77779_bat_oilo2_cnfg_3_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bat_oilo2_cnfg_3_bat_open_to_2,3,0)
-MAX77779_BFF(max77779_bat_oilo2_cnfg_3_bat_oilo2_vdrp1_en,6,6)
-MAX77779_BFF(max77779_bat_oilo2_cnfg_3_bat_oilo2_vdrp2_en,7,7)
+MAX77779_BFF(max77779_bat_oilo2_cnfg_3_bat_open_to_2, 3, 0)
+MAX77779_BFF(max77779_bat_oilo2_cnfg_3_bat_oilo2_vdrp1_en, 6, 6)
+MAX77779_BFF(max77779_bat_oilo2_cnfg_3_bat_oilo2_vdrp2_en, 7, 7)
 
 /*
  * MAX77779_CHG_CUST_TM,0x2E,0b00000000,0x0,Reset_Type:O
@@ -4040,10 +4052,10 @@ max77779_chg_cust_tm_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_chg_cust_tm_bat_oilo2_ctm,0,0)
-MAX77779_BFF(max77779_chg_cust_tm_bat_oilo1_ctm,1,1)
-MAX77779_BFF(max77779_chg_cust_tm_sys_uvlo2_ctm,2,2)
-MAX77779_BFF(max77779_chg_cust_tm_sys_uvlo1_ctm,3,3)
+MAX77779_BFF(max77779_chg_cust_tm_bat_oilo2_ctm, 0, 0)
+MAX77779_BFF(max77779_chg_cust_tm_bat_oilo1_ctm, 1, 1)
+MAX77779_BFF(max77779_chg_cust_tm_sys_uvlo2_ctm, 2, 2)
+MAX77779_BFF(max77779_chg_cust_tm_sys_uvlo1_ctm, 3, 3)
 
 /*******************************************************
  * Section: FG_RAM 0x00 16
@@ -4136,20 +4148,20 @@ max77779_fg_status_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_status_ponr,1,1)
-MAX77779_BFF(max77779_fg_status_imn,2,2)
-MAX77779_BFF(max77779_fg_status_bst,3,3)
-MAX77779_BFF(max77779_fg_status_cmdfwdone,4,4)
-MAX77779_BFF(max77779_fg_status_imx,6,6)
-MAX77779_BFF(max77779_fg_status_dsoci,7,7)
-MAX77779_BFF(max77779_fg_status_vmn,8,8)
-MAX77779_BFF(max77779_fg_status_tmn,9,9)
-MAX77779_BFF(max77779_fg_status_smn,10,10)
-MAX77779_BFF(max77779_fg_status_bi,11,11)
-MAX77779_BFF(max77779_fg_status_vmx,12,12)
-MAX77779_BFF(max77779_fg_status_tmx,13,13)
-MAX77779_BFF(max77779_fg_status_smx,14,14)
-MAX77779_BFF(max77779_fg_status_br,15,15)
+MAX77779_BFF16(max77779_fg_status_ponr, 1, 1)
+MAX77779_BFF16(max77779_fg_status_imn, 2, 2)
+MAX77779_BFF16(max77779_fg_status_bst, 3, 3)
+MAX77779_BFF16(max77779_fg_status_cmdfwdone, 4, 4)
+MAX77779_BFF16(max77779_fg_status_imx, 6, 6)
+MAX77779_BFF16(max77779_fg_status_dsoci, 7, 7)
+MAX77779_BFF16(max77779_fg_status_vmn, 8, 8)
+MAX77779_BFF16(max77779_fg_status_tmn, 9, 9)
+MAX77779_BFF16(max77779_fg_status_smn, 10, 10)
+MAX77779_BFF16(max77779_fg_status_bi, 11, 11)
+MAX77779_BFF16(max77779_fg_status_vmx, 12, 12)
+MAX77779_BFF16(max77779_fg_status_tmx, 13, 13)
+MAX77779_BFF16(max77779_fg_status_smx, 14, 14)
+MAX77779_BFF16(max77779_fg_status_br, 15, 15)
 
 /*
  * MAX77779_FG_ConfigPWR,0x01,0b00000000,0x0,Reset_Type:S
@@ -4188,10 +4200,10 @@ max77779_fg_configpwr_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_configpwr_vio_shdn,0,0)
-MAX77779_BFF(max77779_fg_configpwr_cwin_wk,1,1)
-MAX77779_BFF(max77779_fg_configpwr_pwronb1_wk,2,2)
-MAX77779_BFF(max77779_fg_configpwr_pwronb2_wk,3,3)
+MAX77779_BFF16(max77779_fg_configpwr_vio_shdn, 0, 0)
+MAX77779_BFF16(max77779_fg_configpwr_cwin_wk, 1, 1)
+MAX77779_BFF16(max77779_fg_configpwr_pwronb1_wk, 2, 2)
+MAX77779_BFF16(max77779_fg_configpwr_pwronb2_wk, 3, 3)
 
 /*
  * MAX77779_FG_HibCfg,0x02,0b00000000,0x0,Reset_Type:S
@@ -4241,12 +4253,12 @@ max77779_fg_hibcfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_hibcfg_hibscalar,2,0)
-MAX77779_BFF(max77779_fg_hibcfg_hibexittime,4,3)
-MAX77779_BFF(max77779_fg_hibcfg_inusefixed5to7,7,5)
-MAX77779_BFF(max77779_fg_hibcfg_hibthreshold,11,8)
-MAX77779_BFF(max77779_fg_hibcfg_hibentertime,14,12)
-MAX77779_BFF(max77779_fg_hibcfg_enhib,15,15)
+MAX77779_BFF16(max77779_fg_hibcfg_hibscalar, 2, 0)
+MAX77779_BFF16(max77779_fg_hibcfg_hibexittime, 4, 3)
+MAX77779_BFF16(max77779_fg_hibcfg_inusefixed5to7, 7, 5)
+MAX77779_BFF16(max77779_fg_hibcfg_hibthreshold, 11, 8)
+MAX77779_BFF16(max77779_fg_hibcfg_hibentertime, 14, 12)
+MAX77779_BFF16(max77779_fg_hibcfg_enhib, 15, 15)
 
 /*
  * MAX77779_FG_VAlrtTh,0x03,0b1111111100000000,0xff00,Reset_Type:S
@@ -4275,8 +4287,8 @@ max77779_fg_valrtth_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_valrtth_vmin,7,0)
-MAX77779_BFF(max77779_fg_valrtth_vmax,15,8)
+MAX77779_BFF16(max77779_fg_valrtth_vmin, 7, 0)
+MAX77779_BFF16(max77779_fg_valrtth_vmax, 15, 8)
 
 /*
  * MAX77779_FG_TAlrtTh,0x04,0b111111110000000,0x7f80,Reset_Type:S
@@ -4305,8 +4317,8 @@ max77779_fg_talrtth_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_talrtth_tmin,7,0)
-MAX77779_BFF(max77779_fg_talrtth_tmax,15,8)
+MAX77779_BFF16(max77779_fg_talrtth_tmin, 7, 0)
+MAX77779_BFF16(max77779_fg_talrtth_tmax, 15, 8)
 
 /*
  * MAX77779_FG_SAlrtTh,0x05,0b1111111100000000,0xff00,Reset_Type:S
@@ -4335,8 +4347,8 @@ max77779_fg_salrtth_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_salrtth_smin,7,0)
-MAX77779_BFF(max77779_fg_salrtth_smax,15,8)
+MAX77779_BFF16(max77779_fg_salrtth_smin, 7, 0)
+MAX77779_BFF16(max77779_fg_salrtth_smax, 15, 8)
 
 /*
  * MAX77779_FG_RepCap,0x06,0b1010011100,0x29c,Reset_Type:S
@@ -4375,8 +4387,8 @@ max77779_fg_shdntimer_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_shdntimer_ctr,12,0)
-MAX77779_BFF(max77779_fg_shdntimer_thr,15,13)
+MAX77779_BFF16(max77779_fg_shdntimer_ctr, 12, 0)
+MAX77779_BFF16(max77779_fg_shdntimer_thr, 15, 13)
 
 /*
  * MAX77779_FG_MaxMinTemp,0x09,0b1111001111110011,0xf3f3,Reset_Type:S
@@ -4405,8 +4417,8 @@ max77779_fg_maxmintemp_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_maxmintemp_mintemp,7,0)
-MAX77779_BFF(max77779_fg_maxmintemp_maxtemp,15,8)
+MAX77779_BFF16(max77779_fg_maxmintemp_mintemp, 7, 0)
+MAX77779_BFF16(max77779_fg_maxmintemp_maxtemp, 15, 8)
 
 /*
  * MAX77779_FG_MaxMinCurr,0x0A,0b1111111111111111,0xffff,Reset_Type:S
@@ -4435,8 +4447,8 @@ max77779_fg_maxmincurr_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_maxmincurr_mincurr,7,0)
-MAX77779_BFF(max77779_fg_maxmincurr_maxcurr,15,8)
+MAX77779_BFF16(max77779_fg_maxmincurr_mincurr, 7, 0)
+MAX77779_BFF16(max77779_fg_maxmincurr_maxcurr, 15, 8)
 
 /*
  * MAX77779_FG_MaxMinVolt,0x0B,0b1011110110111101,0xbdbd,Reset_Type:S
@@ -4465,8 +4477,8 @@ max77779_fg_maxminvolt_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_maxminvolt_minvolt,7,0)
-MAX77779_BFF(max77779_fg_maxminvolt_maxvolt,15,8)
+MAX77779_BFF16(max77779_fg_maxminvolt_minvolt, 7, 0)
+MAX77779_BFF16(max77779_fg_maxminvolt_maxvolt, 15, 8)
 
 /*
  * MAX77779_FG_Config,0x0C,0b10000001010000,0x2050,Reset_Type:S
@@ -4540,17 +4552,17 @@ max77779_fg_config_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_config_ber,0,0)
-MAX77779_BFF(max77779_fg_config_bei,1,1)
-MAX77779_BFF(max77779_fg_config_aen,2,2)
-MAX77779_BFF(max77779_fg_config_alrtedge,5,5)
-MAX77779_BFF(max77779_fg_config_shdn,7,7)
-MAX77779_BFF(max77779_fg_config_tex,8,8)
-MAX77779_BFF(max77779_fg_config_ten,9,9)
-MAX77779_BFF(max77779_fg_config_is,11,11)
-MAX77779_BFF(max77779_fg_config_vs,12,12)
-MAX77779_BFF(max77779_fg_config_ts,13,13)
-MAX77779_BFF(max77779_fg_config_ss,14,14)
+MAX77779_BFF16(max77779_fg_config_ber, 0, 0)
+MAX77779_BFF16(max77779_fg_config_bei, 1, 1)
+MAX77779_BFF16(max77779_fg_config_aen, 2, 2)
+MAX77779_BFF16(max77779_fg_config_alrtedge, 5, 5)
+MAX77779_BFF16(max77779_fg_config_shdn, 7, 7)
+MAX77779_BFF16(max77779_fg_config_tex, 8, 8)
+MAX77779_BFF16(max77779_fg_config_ten, 9, 9)
+MAX77779_BFF16(max77779_fg_config_is, 11, 11)
+MAX77779_BFF16(max77779_fg_config_vs, 12, 12)
+MAX77779_BFF16(max77779_fg_config_ts, 13, 13)
+MAX77779_BFF16(max77779_fg_config_ss, 14, 14)
 
 /*
  * MAX77779_FG_MixSOC,0x0D,0b10110100100001,0x2d21,Reset_Type:S
@@ -4614,13 +4626,13 @@ max77779_fg_misccfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_misccfg_sacfg,1,0)
-MAX77779_BFF(max77779_fg_misccfg_enbi1,2,2)
-MAX77779_BFF(max77779_fg_misccfg_bit3,3,3)
-MAX77779_BFF(max77779_fg_misccfg_mixrate,9,5)
-MAX77779_BFF(max77779_fg_misccfg_initvfg,10,10)
-MAX77779_BFF(max77779_fg_misccfg_bit11,11,11)
-MAX77779_BFF(max77779_fg_misccfg_fus,15,12)
+MAX77779_BFF16(max77779_fg_misccfg_sacfg, 1, 0)
+MAX77779_BFF16(max77779_fg_misccfg_enbi1, 2, 2)
+MAX77779_BFF16(max77779_fg_misccfg_bit3, 3, 3)
+MAX77779_BFF16(max77779_fg_misccfg_mixrate, 9, 5)
+MAX77779_BFF16(max77779_fg_misccfg_initvfg, 10, 10)
+MAX77779_BFF16(max77779_fg_misccfg_bit11, 11, 11)
+MAX77779_BFF16(max77779_fg_misccfg_fus, 15, 12)
 
 /*
  * MAX77779_FG_FullCapRep,0x10,0b10111011100,0x5dc,Reset_Type:S
@@ -4714,8 +4726,8 @@ max77779_fg_vempty_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_vempty_vr,6,0)
-MAX77779_BFF(max77779_fg_vempty_ve,15,7)
+MAX77779_BFF16(max77779_fg_vempty_vr, 6, 0)
+MAX77779_BFF16(max77779_fg_vempty_ve, 15, 7)
 
 /*
  * MAX77779_FG_TTF,0x20,0b00000000,0x0,Reset_Type:S
@@ -4809,10 +4821,10 @@ max77779_fg_learncfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_learncfg_rcx,2,2)
-MAX77779_BFF(max77779_fg_learncfg_filtempty,3,3)
-MAX77779_BFF(max77779_fg_learncfg_learnstage,6,4)
-MAX77779_BFF(max77779_fg_learncfg_fclm,9,8)
+MAX77779_BFF16(max77779_fg_learncfg_rcx, 2, 2)
+MAX77779_BFF16(max77779_fg_learncfg_filtempty, 3, 3)
+MAX77779_BFF16(max77779_fg_learncfg_learnstage, 6, 4)
+MAX77779_BFF16(max77779_fg_learncfg_fclm, 9, 8)
 
 /*
  * MAX77779_FG_QRTable20,0x32,0b101100000100,0xb04,Reset_Type:S
@@ -4881,11 +4893,11 @@ max77779_fg_sochold_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_sochold_emptysochold,4,0)
-MAX77779_BFF(max77779_fg_sochold_emptyvolthold,11,5)
-MAX77779_BFF(max77779_fg_sochold_holden99,12,12)
-MAX77779_BFF(max77779_fg_sochold_inputsochold,13,13)
-MAX77779_BFF(max77779_fg_sochold_ibattnoload,15,14)
+MAX77779_BFF16(max77779_fg_sochold_emptysochold, 4, 0)
+MAX77779_BFF16(max77779_fg_sochold_emptyvolthold, 11, 5)
+MAX77779_BFF16(max77779_fg_sochold_holden99, 12, 12)
+MAX77779_BFF16(max77779_fg_sochold_inputsochold, 13, 13)
+MAX77779_BFF16(max77779_fg_sochold_ibattnoload, 15, 14)
 
 /*
  * MAX77779_FG_FStat,0x3D,0b100000000,0x100,Reset_Type:S
@@ -4944,14 +4956,14 @@ max77779_fg_fstat_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_fstat_dnr,0,0)
-MAX77779_BFF(max77779_fg_fstat_ldmdl,1,1)
-MAX77779_BFF(max77779_fg_fstat_timer_start,5,5)
-MAX77779_BFF(max77779_fg_fstat_reldt2,6,6)
-MAX77779_BFF(max77779_fg_fstat_fq,7,7)
-MAX77779_BFF(max77779_fg_fstat_edet,8,8)
-MAX77779_BFF(max77779_fg_fstat_reldt,9,9)
-MAX77779_BFF(max77779_fg_fstat_debn,12,12)
+MAX77779_BFF16(max77779_fg_fstat_dnr, 0, 0)
+MAX77779_BFF16(max77779_fg_fstat_ldmdl, 1, 1)
+MAX77779_BFF16(max77779_fg_fstat_timer_start, 5, 5)
+MAX77779_BFF16(max77779_fg_fstat_reldt2, 6, 6)
+MAX77779_BFF16(max77779_fg_fstat_fq, 7, 7)
+MAX77779_BFF16(max77779_fg_fstat_edet, 8, 8)
+MAX77779_BFF16(max77779_fg_fstat_reldt, 9, 9)
+MAX77779_BFF16(max77779_fg_fstat_debn, 12, 12)
 
 /*
  * MAX77779_FG_InputSoCHoldSts,0x3E,0b10001000000111100000,0x881e0,Reset_Type:S
@@ -5001,12 +5013,12 @@ max77779_fg_inputsocholdsts_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_inputsocholdsts_inputsocholdnow,0,0)
-MAX77779_BFF(max77779_fg_inputsocholdsts_fdet_triggered_flag,1,1)
-MAX77779_BFF(max77779_fg_inputsocholdsts_isha,2,2)
-MAX77779_BFF(max77779_fg_inputsocholdsts_inputsocholdto,9,3)
-MAX77779_BFF(max77779_fg_inputsocholdsts_inputshistory,13,10)
-MAX77779_BFF(max77779_fg_inputsocholdsts_inputssts,14,14)
+MAX77779_BFF16(max77779_fg_inputsocholdsts_inputsocholdnow, 0, 0)
+MAX77779_BFF16(max77779_fg_inputsocholdsts_fdet_triggered_flag, 1, 1)
+MAX77779_BFF16(max77779_fg_inputsocholdsts_isha, 2, 2)
+MAX77779_BFF16(max77779_fg_inputsocholdsts_inputsocholdto, 9, 3)
+MAX77779_BFF16(max77779_fg_inputsocholdsts_inputshistory, 13, 10)
+MAX77779_BFF16(max77779_fg_inputsocholdsts_inputssts, 14, 14)
 
 /*
  * MAX77779_FG_Timer,0x3F,0b00100000,0x20,Reset_Type:S
@@ -5111,12 +5123,12 @@ max77779_fg_currentoffsetcal_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_currentoffsetcal_fdet_done,0,0)
-MAX77779_BFF(max77779_fg_currentoffsetcal_startaccumulating,1,1)
-MAX77779_BFF(max77779_fg_currentoffsetcal_has256cyclesreached,2,2)
-MAX77779_BFF(max77779_fg_currentoffsetcal_learningoffsetsts,4,3)
-MAX77779_BFF(max77779_fg_currentoffsetcal_offsetqcdone,5,5)
-MAX77779_BFF(max77779_fg_currentoffsetcal_learnedoffsetvalue,15,6)
+MAX77779_BFF16(max77779_fg_currentoffsetcal_fdet_done, 0, 0)
+MAX77779_BFF16(max77779_fg_currentoffsetcal_startaccumulating, 1, 1)
+MAX77779_BFF16(max77779_fg_currentoffsetcal_has256cyclesreached, 2, 2)
+MAX77779_BFF16(max77779_fg_currentoffsetcal_learningoffsetsts, 4, 3)
+MAX77779_BFF16(max77779_fg_currentoffsetcal_offsetqcdone, 5, 5)
+MAX77779_BFF16(max77779_fg_currentoffsetcal_learnedoffsetvalue, 15, 6)
 
 /*
  * MAX77779_FG_AccumulatedCurrent,0x63,0b00000000,0x0,Reset_Type:S
@@ -5145,7 +5157,7 @@ max77779_fg_debuginfo_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_debuginfo_patchuse,1,0)
+MAX77779_BFF16(max77779_fg_debuginfo_patchuse, 1, 0)
 
 /*
  * MAX77779_FG_OCV0,0x80,0b1001011101100000,0x9760,Reset_Type:S
@@ -5334,8 +5346,8 @@ max77779_fg_cgain_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_cgain_c_offset,5,0)
-MAX77779_BFF(max77779_fg_cgain_c_gain,15,6)
+MAX77779_BFF16(max77779_fg_cgain_c_offset, 5, 0)
+MAX77779_BFF16(max77779_fg_cgain_c_gain, 15, 6)
 
 /*
  * MAX77779_FG_ModelCfg,0xA3,0b00000000,0x0,Reset_Type:S
@@ -5369,9 +5381,9 @@ max77779_fg_modelcfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_modelcfg_modelid,7,4)
-MAX77779_BFF(max77779_fg_modelcfg_vchg,10,10)
-MAX77779_BFF(max77779_fg_modelcfg_refresh,15,15)
+MAX77779_BFF16(max77779_fg_modelcfg_modelid, 7, 4)
+MAX77779_BFF16(max77779_fg_modelcfg_vchg, 10, 10)
+MAX77779_BFF16(max77779_fg_modelcfg_refresh, 15, 15)
 
 /*
  * MAX77779_FG_Config2,0xAB,0b00000000,0x0,Reset_Type:S
@@ -5420,12 +5432,12 @@ max77779_fg_config2_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_config2_reset_vfocv,0,0)
-MAX77779_BFF(max77779_fg_config2_talrten,6,6)
-MAX77779_BFF(max77779_fg_config2_dsocen,7,7)
-MAX77779_BFF(max77779_fg_config2_fcnblock,11,11)
-MAX77779_BFF(max77779_fg_config2_nrld,14,14)
-MAX77779_BFF(max77779_fg_config2_ldmdl,15,15)
+MAX77779_BFF16(max77779_fg_config2_reset_vfocv, 0, 0)
+MAX77779_BFF16(max77779_fg_config2_talrten, 6, 6)
+MAX77779_BFF16(max77779_fg_config2_dsocen, 7, 7)
+MAX77779_BFF16(max77779_fg_config2_fcnblock, 11, 11)
+MAX77779_BFF16(max77779_fg_config2_nrld, 14, 14)
+MAX77779_BFF16(max77779_fg_config2_ldmdl, 15, 15)
 
 /*
  * MAX77779_FG_Status2,0xB0,0b00000000,0x0,Reset_Type:S
@@ -5454,8 +5466,8 @@ max77779_fg_status2_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_status2_hib,1,1)
-MAX77779_BFF(max77779_fg_status2_fulldet,5,5)
+MAX77779_BFF16(max77779_fg_status2_hib, 1, 1)
+MAX77779_BFF16(max77779_fg_status2_fulldet, 5, 5)
 
 /*
  * MAX77779_FG_VRipple,0xB2,0b00000000,0x0,Reset_Type:S
@@ -5489,8 +5501,8 @@ max77779_fg_ialrtth_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_ialrtth_imin,7,0)
-MAX77779_BFF(max77779_fg_ialrtth_imax,15,8)
+MAX77779_BFF16(max77779_fg_ialrtth_imin, 7, 0)
+MAX77779_BFF16(max77779_fg_ialrtth_imax, 15, 8)
 
 /*
  * MAX77779_FG_ic_info,0xBA,0b10000000001,0x401,Reset_Type:S
@@ -5514,7 +5526,7 @@ max77779_fg_ic_info_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_ic_info_testprogramrev,15,8)
+MAX77779_BFF16(max77779_fg_ic_info_testprogramrev, 15, 8)
 
 /*
  * MAX77779_FG_TimerH,0xBE,0b00000000,0x0,Reset_Type:S
@@ -5588,7 +5600,7 @@ max77779_fg_trimvbattgain_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_trimvbattgain_vbattgtrim,11,0)
+MAX77779_BFF16(max77779_fg_trimvbattgain_vbattgtrim, 11, 0)
 
 /*
  * MAX77779_FG_TrimIbattGain,0xDA,0b01010111,0x57,Reset_Type:S
@@ -5612,7 +5624,7 @@ max77779_fg_trimibattgain_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_trimibattgain_ibattgtrim,11,0)
+MAX77779_BFF16(max77779_fg_trimibattgain_ibattgtrim, 11, 0)
 
 /*
  * MAX77779_FG_TrimBattOffset,0xDB,0b1100011110101,0x18f5,Reset_Type:S
@@ -5641,8 +5653,8 @@ max77779_fg_trimbattoffset_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_trimbattoffset_ibattotrim,7,0)
-MAX77779_BFF(max77779_fg_trimbattoffset_vbattotrim,15,8)
+MAX77779_BFF16(max77779_fg_trimbattoffset_ibattotrim, 7, 0)
+MAX77779_BFF16(max77779_fg_trimbattoffset_vbattotrim, 15, 8)
 
 /*******************************************************
  * Section: FG_FUNC 0xE0 16
@@ -5730,19 +5742,19 @@ max77779_fg_fg_int_sts_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_fg_int_sts_ponr,1,1)
-MAX77779_BFF(max77779_fg_fg_int_sts_imn,2,2)
-MAX77779_BFF(max77779_fg_fg_int_sts_bst,3,3)
-MAX77779_BFF(max77779_fg_fg_int_sts_imx,6,6)
-MAX77779_BFF(max77779_fg_fg_int_sts_dsoci,7,7)
-MAX77779_BFF(max77779_fg_fg_int_sts_vmn,8,8)
-MAX77779_BFF(max77779_fg_fg_int_sts_tmn,9,9)
-MAX77779_BFF(max77779_fg_fg_int_sts_smn,10,10)
-MAX77779_BFF(max77779_fg_fg_int_sts_bi,11,11)
-MAX77779_BFF(max77779_fg_fg_int_sts_vmx,12,12)
-MAX77779_BFF(max77779_fg_fg_int_sts_tmx,13,13)
-MAX77779_BFF(max77779_fg_fg_int_sts_smx,14,14)
-MAX77779_BFF(max77779_fg_fg_int_sts_br,15,15)
+MAX77779_BFF16(max77779_fg_fg_int_sts_ponr, 1, 1)
+MAX77779_BFF16(max77779_fg_fg_int_sts_imn, 2, 2)
+MAX77779_BFF16(max77779_fg_fg_int_sts_bst, 3, 3)
+MAX77779_BFF16(max77779_fg_fg_int_sts_imx, 6, 6)
+MAX77779_BFF16(max77779_fg_fg_int_sts_dsoci, 7, 7)
+MAX77779_BFF16(max77779_fg_fg_int_sts_vmn, 8, 8)
+MAX77779_BFF16(max77779_fg_fg_int_sts_tmn, 9, 9)
+MAX77779_BFF16(max77779_fg_fg_int_sts_smn, 10, 10)
+MAX77779_BFF16(max77779_fg_fg_int_sts_bi, 11, 11)
+MAX77779_BFF16(max77779_fg_fg_int_sts_vmx, 12, 12)
+MAX77779_BFF16(max77779_fg_fg_int_sts_tmx, 13, 13)
+MAX77779_BFF16(max77779_fg_fg_int_sts_smx, 14, 14)
+MAX77779_BFF16(max77779_fg_fg_int_sts_br, 15, 15)
 
 /*
  * MAX77779_FG_FG_INT_MASK,0x01,0b00000010,0x2,Reset_Type:F
@@ -5826,19 +5838,19 @@ max77779_fg_fg_int_mask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_fg_int_mask_por_m,1,1)
-MAX77779_BFF(max77779_fg_fg_int_mask_imn_m,2,2)
-MAX77779_BFF(max77779_fg_fg_int_mask_bst_m,3,3)
-MAX77779_BFF(max77779_fg_fg_int_mask_imx_m,6,6)
-MAX77779_BFF(max77779_fg_fg_int_mask_dsoci_m,7,7)
-MAX77779_BFF(max77779_fg_fg_int_mask_vmn_m,8,8)
-MAX77779_BFF(max77779_fg_fg_int_mask_tmn_m,9,9)
-MAX77779_BFF(max77779_fg_fg_int_mask_smn_m,10,10)
-MAX77779_BFF(max77779_fg_fg_int_mask_bi_m,11,11)
-MAX77779_BFF(max77779_fg_fg_int_mask_vmx_m,12,12)
-MAX77779_BFF(max77779_fg_fg_int_mask_tmx_m,13,13)
-MAX77779_BFF(max77779_fg_fg_int_mask_smx_m,14,14)
-MAX77779_BFF(max77779_fg_fg_int_mask_br_m,15,15)
+MAX77779_BFF16(max77779_fg_fg_int_mask_por_m, 1, 1)
+MAX77779_BFF16(max77779_fg_fg_int_mask_imn_m, 2, 2)
+MAX77779_BFF16(max77779_fg_fg_int_mask_bst_m, 3, 3)
+MAX77779_BFF16(max77779_fg_fg_int_mask_imx_m, 6, 6)
+MAX77779_BFF16(max77779_fg_fg_int_mask_dsoci_m, 7, 7)
+MAX77779_BFF16(max77779_fg_fg_int_mask_vmn_m, 8, 8)
+MAX77779_BFF16(max77779_fg_fg_int_mask_tmn_m, 9, 9)
+MAX77779_BFF16(max77779_fg_fg_int_mask_smn_m, 10, 10)
+MAX77779_BFF16(max77779_fg_fg_int_mask_bi_m, 11, 11)
+MAX77779_BFF16(max77779_fg_fg_int_mask_vmx_m, 12, 12)
+MAX77779_BFF16(max77779_fg_fg_int_mask_tmx_m, 13, 13)
+MAX77779_BFF16(max77779_fg_fg_int_mask_smx_m, 14, 14)
+MAX77779_BFF16(max77779_fg_fg_int_mask_br_m, 15, 15)
 
 /*
  * MAX77779_FG_Command_fw,0x09,0b00000000,0x0,Reset_Type:F
@@ -5862,7 +5874,7 @@ max77779_fg_command_fw_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_command_fw_cmd_fw,11,0)
+MAX77779_BFF16(max77779_fg_command_fw_cmd_fw, 11, 0)
 
 /*
  * MAX77779_FG_Command_ack,0x0A,0b00000000,0x0,Reset_Type:F
@@ -5886,7 +5898,7 @@ max77779_fg_command_ack_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_command_ack_cmd_fw_busy,0,0)
+MAX77779_BFF16(max77779_fg_command_ack_cmd_fw_busy, 0, 0)
 
 /*
  * MAX77779_FG_USR,0x1F,0b00001110,0xe,Reset_Type:F
@@ -5920,9 +5932,9 @@ max77779_fg_usr_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_usr_nlock,1,1)
-MAX77779_BFF(max77779_fg_usr_vlock,2,2)
-MAX77779_BFF(max77779_fg_usr_rlock,3,3)
+MAX77779_BFF16(max77779_fg_usr_nlock, 1, 1)
+MAX77779_BFF16(max77779_fg_usr_vlock, 2, 2)
+MAX77779_BFF16(max77779_fg_usr_rlock, 3, 3)
 
 /*******************************************************
  * Section: FG_NVM 0x00 16
@@ -5955,8 +5967,8 @@ max77779_fg_nvm_nvalrtth_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_nvalrtth_nvmin,7,0)
-MAX77779_BFF(max77779_fg_nvm_nvalrtth_nvmax,15,8)
+MAX77779_BFF16(max77779_fg_nvm_nvalrtth_nvmin, 7, 0)
+MAX77779_BFF16(max77779_fg_nvm_nvalrtth_nvmax, 15, 8)
 
 /*
  * MAX77779_FG_NVM_nTAlrtTh,0x8D,0b111111110000000,0x7f80,Reset_Type:S
@@ -5985,8 +5997,8 @@ max77779_fg_nvm_ntalrtth_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_ntalrtth_ntmin,7,0)
-MAX77779_BFF(max77779_fg_nvm_ntalrtth_ntmax,15,8)
+MAX77779_BFF16(max77779_fg_nvm_ntalrtth_ntmin, 7, 0)
+MAX77779_BFF16(max77779_fg_nvm_ntalrtth_ntmax, 15, 8)
 
 /*
  * MAX77779_FG_NVM_nIAlrtTh,0x8E,0b111111110000000,0x7f80,Reset_Type:S
@@ -6015,8 +6027,8 @@ max77779_fg_nvm_nialrtth_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_nialrtth_nimin,7,0)
-MAX77779_BFF(max77779_fg_nvm_nialrtth_nimax,15,8)
+MAX77779_BFF16(max77779_fg_nvm_nialrtth_nimin, 7, 0)
+MAX77779_BFF16(max77779_fg_nvm_nialrtth_nimax, 15, 8)
 
 /*
  * MAX77779_FG_NVM_nSAlrtTh,0x8F,0b1111111100000000,0xff00,Reset_Type:S
@@ -6045,8 +6057,8 @@ max77779_fg_nvm_nsalrtth_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_nsalrtth_nsmin,7,0)
-MAX77779_BFF(max77779_fg_nvm_nsalrtth_nsmax,15,8)
+MAX77779_BFF16(max77779_fg_nvm_nsalrtth_nsmin, 7, 0)
+MAX77779_BFF16(max77779_fg_nvm_nsalrtth_nsmax, 15, 8)
 
 /*
  * MAX77779_FG_NVM_nIChgTerm,0x9C,0b1010000000,0x280,Reset_Type:S
@@ -6095,9 +6107,9 @@ max77779_fg_nvm_nlearncfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_nlearncfg_rcx,2,2)
-MAX77779_BFF(max77779_fg_nvm_nlearncfg_filtempty,3,3)
-MAX77779_BFF(max77779_fg_nvm_nlearncfg_learnstage,6,4)
+MAX77779_BFF16(max77779_fg_nvm_nlearncfg_rcx, 2, 2)
+MAX77779_BFF16(max77779_fg_nvm_nlearncfg_filtempty, 3, 3)
+MAX77779_BFF16(max77779_fg_nvm_nlearncfg_learnstage, 6, 4)
 
 /*
  * MAX77779_FG_NVM_nQRTable00,0xA0,0b1000010000000,0x1080,Reset_Type:S
@@ -6196,9 +6208,9 @@ max77779_fg_nvm_relaxcfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_relaxcfg_dt,3,0)
-MAX77779_BFF(max77779_fg_nvm_relaxcfg_dv,8,4)
-MAX77779_BFF(max77779_fg_nvm_relaxcfg_load,15,9)
+MAX77779_BFF16(max77779_fg_nvm_relaxcfg_dt, 3, 0)
+MAX77779_BFF16(max77779_fg_nvm_relaxcfg_dv, 8, 4)
+MAX77779_BFF16(max77779_fg_nvm_relaxcfg_load, 15, 9)
 
 /*
  * MAX77779_FG_NVM_nConvgCfg,0xB7,0b10001001000001,0x2241,Reset_Type:S
@@ -6227,8 +6239,8 @@ max77779_fg_nvm_nconvgcfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_nconvgcfg_voltlowoff,11,7)
-MAX77779_BFF(max77779_fg_nvm_nconvgcfg_replow,15,12)
+MAX77779_BFF16(max77779_fg_nvm_nconvgcfg_voltlowoff, 11, 7)
+MAX77779_BFF16(max77779_fg_nvm_nconvgcfg_replow, 15, 12)
 
 /*
  * MAX77779_FG_NVM_nHibCfg,0xBB,0b00000000,0x0,Reset_Type:S
@@ -6278,12 +6290,12 @@ max77779_fg_nvm_nhibcfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_nhibcfg_hibscalar,2,0)
-MAX77779_BFF(max77779_fg_nvm_nhibcfg_hibexittime,4,3)
-MAX77779_BFF(max77779_fg_nvm_nhibcfg_inusefixed5to7,7,5)
-MAX77779_BFF(max77779_fg_nvm_nhibcfg_hibthreshold,11,8)
-MAX77779_BFF(max77779_fg_nvm_nhibcfg_hibentertime,14,12)
-MAX77779_BFF(max77779_fg_nvm_nhibcfg_enhib,15,15)
+MAX77779_BFF16(max77779_fg_nvm_nhibcfg_hibscalar, 2, 0)
+MAX77779_BFF16(max77779_fg_nvm_nhibcfg_hibexittime, 4, 3)
+MAX77779_BFF16(max77779_fg_nvm_nhibcfg_inusefixed5to7, 7, 5)
+MAX77779_BFF16(max77779_fg_nvm_nhibcfg_hibthreshold, 11, 8)
+MAX77779_BFF16(max77779_fg_nvm_nhibcfg_hibentertime, 14, 12)
+MAX77779_BFF16(max77779_fg_nvm_nhibcfg_enhib, 15, 15)
 
 /*
  * MAX77779_FG_NVM_nFullSOCThr,0xBC,0b101000000000101,0x5005,Reset_Type:S
@@ -6322,9 +6334,9 @@ max77779_fg_nvm_nnvcfg0_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_nnvcfg0_reserved_2_0,2,0)
-MAX77779_BFF(max77779_fg_nvm_nnvcfg0_enaf,3,3)
-MAX77779_BFF(max77779_fg_nvm_nnvcfg0_reserved_15_4,15,4)
+MAX77779_BFF16(max77779_fg_nvm_nnvcfg0_reserved_2_0, 2, 0)
+MAX77779_BFF16(max77779_fg_nvm_nnvcfg0_enaf, 3, 3)
+MAX77779_BFF16(max77779_fg_nvm_nnvcfg0_reserved_15_4, 15, 4)
 
 /*
  * MAX77779_FG_NVM_nVEmpty,0xC6,0b1010010101100001,0xa561,Reset_Type:S
@@ -6353,8 +6365,8 @@ max77779_fg_nvm_nvempty_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_nvempty_vr,6,0)
-MAX77779_BFF(max77779_fg_nvm_nvempty_ve,15,7)
+MAX77779_BFF16(max77779_fg_nvm_nvempty_vr, 6, 0)
+MAX77779_BFF16(max77779_fg_nvm_nvempty_ve, 15, 7)
 
 /*
  * MAX77779_FG_NVM_nThermCfg3,0xC8,0b111000110111110,0x71be,Reset_Type:S
@@ -6403,9 +6415,9 @@ max77779_fg_nvm_nprotmiscth_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_fg_nvm_nprotmiscth_currentoffcalen,0,0)
-MAX77779_BFF(max77779_fg_nvm_nprotmiscth_applylearnedoffen,1,1)
-MAX77779_BFF(max77779_fg_nvm_nprotmiscth_learnedoffnoqc,2,2)
+MAX77779_BFF16(max77779_fg_nvm_nprotmiscth_currentoffcalen, 0, 0)
+MAX77779_BFF16(max77779_fg_nvm_nprotmiscth_applylearnedoffen, 1, 1)
+MAX77779_BFF16(max77779_fg_nvm_nprotmiscth_learnedoffnoqc, 2, 2)
 
 /*******************************************************
  * Section: I2C_Master 0x00 8
@@ -6443,9 +6455,9 @@ max77779_i2cm_interrupt_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_i2cm_interrupt_donei,0,0)
-MAX77779_BFF(max77779_i2cm_interrupt_spr_6_1,6,1)
-MAX77779_BFF(max77779_i2cm_interrupt_erri,7,7)
+MAX77779_BFF(max77779_i2cm_interrupt_donei, 0, 0)
+MAX77779_BFF(max77779_i2cm_interrupt_spr_6_1, 6, 1)
+MAX77779_BFF(max77779_i2cm_interrupt_erri, 7, 7)
 
 /*
  * MAX77779_I2CM_INTMASK,0x01,0b11111111,0xff,Reset_Type:IM
@@ -6479,9 +6491,9 @@ max77779_i2cm_intmask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_i2cm_intmask_doneim,0,0)
-MAX77779_BFF(max77779_i2cm_intmask_spr_6_1,6,1)
-MAX77779_BFF(max77779_i2cm_intmask_errim,7,7)
+MAX77779_BFF(max77779_i2cm_intmask_doneim, 0, 0)
+MAX77779_BFF(max77779_i2cm_intmask_spr_6_1, 6, 1)
+MAX77779_BFF(max77779_i2cm_intmask_errim, 7, 7)
 
 /*
  * MAX77779_I2CM_STATUS,0x02,0b00000000,0x0,Reset_Type:IM
@@ -6510,8 +6522,8 @@ max77779_i2cm_status_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_i2cm_status_error,6,0)
-MAX77779_BFF(max77779_i2cm_status_bus,7,7)
+MAX77779_BFF(max77779_i2cm_status_error, 6, 0)
+MAX77779_BFF(max77779_i2cm_status_bus, 7, 7)
 
 /*
  * MAX77779_I2CM_TIMEOUT,0x03,0b00000000,0x0,Reset_Type:IM
@@ -6570,13 +6582,13 @@ max77779_i2cm_control_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_i2cm_control_i2cen,0,0)
-MAX77779_BFF(max77779_i2cm_control_clock_speed,2,1)
-MAX77779_BFF(max77779_i2cm_control_oen,3,3)
-MAX77779_BFF(max77779_i2cm_control_sda,4,4)
-MAX77779_BFF(max77779_i2cm_control_scl,5,5)
-MAX77779_BFF(max77779_i2cm_control_sclo,6,6)
-MAX77779_BFF(max77779_i2cm_control_sdao,7,7)
+MAX77779_BFF(max77779_i2cm_control_i2cen, 0, 0)
+MAX77779_BFF(max77779_i2cm_control_clock_speed, 2, 1)
+MAX77779_BFF(max77779_i2cm_control_oen, 3, 3)
+MAX77779_BFF(max77779_i2cm_control_sda, 4, 4)
+MAX77779_BFF(max77779_i2cm_control_scl, 5, 5)
+MAX77779_BFF(max77779_i2cm_control_sclo, 6, 6)
+MAX77779_BFF(max77779_i2cm_control_sdao, 7, 7)
 
 /*
  * MAX77779_I2CM_SLADD,0x05,0b00000000,0x0,Reset_Type:IM
@@ -6605,8 +6617,8 @@ max77779_i2cm_sladd_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_i2cm_sladd_to_src,0,0)
-MAX77779_BFF(max77779_i2cm_sladd_slave_id,7,1)
+MAX77779_BFF(max77779_i2cm_sladd_to_src, 0, 0)
+MAX77779_BFF(max77779_i2cm_sladd_slave_id, 7, 1)
 
 /*
  * MAX77779_I2CM_TXDATA_CNT,0x06,0b00000000,0x0,Reset_Type:IM
@@ -6635,8 +6647,8 @@ max77779_i2cm_txdata_cnt_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_i2cm_txdata_cnt_txcnt,5,0)
-MAX77779_BFF(max77779_i2cm_txdata_cnt_spr_7_6,7,6)
+MAX77779_BFF(max77779_i2cm_txdata_cnt_txcnt, 5, 0)
+MAX77779_BFF(max77779_i2cm_txdata_cnt_spr_7_6, 7, 6)
 
 /*
  * MAX77779_I2CM_TX_BUFFER_0,0x07,0b00000000,0x0,Reset_Type:IM
@@ -6835,8 +6847,8 @@ max77779_i2cm_rxdata_cnt_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_i2cm_rxdata_cnt_rxcnt,4,0)
-MAX77779_BFF(max77779_i2cm_rxdata_cnt_spr_7_5,7,5)
+MAX77779_BFF(max77779_i2cm_rxdata_cnt_rxcnt, 4, 0)
+MAX77779_BFF(max77779_i2cm_rxdata_cnt_spr_7_5, 7, 5)
 
 /*
  * MAX77779_I2CM_CMD,0x2A,0b00000000,0x0,Reset_Type:IM
@@ -6870,9 +6882,9 @@ max77779_i2cm_cmd_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_i2cm_cmd_i2cmwrite,0,0)
-MAX77779_BFF(max77779_i2cm_cmd_i2cmread,1,1)
-MAX77779_BFF(max77779_i2cm_cmd_spr_7_2,7,2)
+MAX77779_BFF(max77779_i2cm_cmd_i2cmwrite, 0, 0)
+MAX77779_BFF(max77779_i2cm_cmd_i2cmread, 1, 1)
+MAX77779_BFF(max77779_i2cm_cmd_spr_7_2, 7, 2)
 
 /*
  * MAX77779_I2CM_RX_BUFFER_0,0x2B,0b00000000,0x0,Reset_Type:IM
@@ -7060,7 +7072,7 @@ max77779_bvim_int_sts_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_int_sts_bvim_samples_rdy,0,0)
+MAX77779_BFF(max77779_bvim_int_sts_bvim_samples_rdy, 0, 0)
 
 /*
  * MAX77779_BVIM_MASK,0x01,0b00000001,0x1,Reset_Type:F
@@ -7084,7 +7096,7 @@ max77779_bvim_mask_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_mask_bvim_samples_rdy_m,0,0)
+MAX77779_BFF(max77779_bvim_mask_bvim_samples_rdy_m, 0, 0)
 
 /*
  * MAX77779_BVIM_CTRL,0x10,0b00000000,0x0,Reset_Type:F
@@ -7108,7 +7120,7 @@ max77779_bvim_ctrl_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_ctrl_bvimon_trig,0,0)
+MAX77779_BFF(max77779_bvim_ctrl_bvimon_trig, 0, 0)
 
 /*******************************************************
  * Section: BVIM_CONTROL 0x60 16
@@ -7167,13 +7179,13 @@ max77779_bvim_bvim_cfg_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_bvim_cfg_smpl_n,7,0)
-MAX77779_BFF(max77779_bvim_bvim_cfg_smpl_m,10,8)
-MAX77779_BFF(max77779_bvim_bvim_cfg_cnt_run,11,11)
-MAX77779_BFF(max77779_bvim_bvim_cfg_batoiolo1_stop,12,12)
-MAX77779_BFF(max77779_bvim_bvim_cfg_batoiolo2_stop,13,13)
-MAX77779_BFF(max77779_bvim_bvim_cfg_top_fault_stop,14,14)
-MAX77779_BFF(max77779_bvim_bvim_cfg_vioaok_stop,15,15)
+MAX77779_BFF(max77779_bvim_bvim_cfg_smpl_n, 7, 0)
+MAX77779_BFF(max77779_bvim_bvim_cfg_smpl_m, 10, 8)
+MAX77779_BFF(max77779_bvim_bvim_cfg_cnt_run, 11, 11)
+MAX77779_BFF(max77779_bvim_bvim_cfg_batoiolo1_stop, 12, 12)
+MAX77779_BFF(max77779_bvim_bvim_cfg_batoiolo2_stop, 13, 13)
+MAX77779_BFF(max77779_bvim_bvim_cfg_top_fault_stop, 14, 14)
+MAX77779_BFF(max77779_bvim_bvim_cfg_vioaok_stop, 15, 15)
 
 /*
  * MAX77779_BVIM_smpl_math,0x01,0b00000000,0x0,Reset_Type:S
@@ -7217,11 +7229,11 @@ max77779_bvim_smpl_math_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_smpl_math_math_avg,0,0)
-MAX77779_BFF(max77779_bvim_smpl_math_math_min,1,1)
-MAX77779_BFF(max77779_bvim_smpl_math_math_max,2,2)
-MAX77779_BFF(max77779_bvim_smpl_math_spr_6_3,6,3)
-MAX77779_BFF(max77779_bvim_smpl_math_smpl_start_add,15,7)
+MAX77779_BFF(max77779_bvim_smpl_math_math_avg, 0, 0)
+MAX77779_BFF(max77779_bvim_smpl_math_math_min, 1, 1)
+MAX77779_BFF(max77779_bvim_smpl_math_math_max, 2, 2)
+MAX77779_BFF(max77779_bvim_smpl_math_spr_6_3, 6, 3)
+MAX77779_BFF(max77779_bvim_smpl_math_smpl_start_add, 15, 7)
 
 /*
  * MAX77779_BVIM_bvim_trig,0x02,0b00000000,0x0,Reset_Type:S
@@ -7321,22 +7333,22 @@ max77779_bvim_bvim_trig_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_bvim_trig_trig_now,0,0)
-MAX77779_BFF(max77779_bvim_bvim_trig_batoilo1_tr,1,1)
-MAX77779_BFF(max77779_bvim_bvim_trig_batoilo2_tr,2,2)
-MAX77779_BFF(max77779_bvim_bvim_trig_sysuvlo1_tr,3,3)
-MAX77779_BFF(max77779_bvim_bvim_trig_sysuvlo2_tr,4,4)
-MAX77779_BFF(max77779_bvim_bvim_trig_vbatt_tr,5,5)
-MAX77779_BFF(max77779_bvim_bvim_trig_ibatt_tr,6,6)
-MAX77779_BFF(max77779_bvim_bvim_trig_spr_7,7,7)
-MAX77779_BFF(max77779_bvim_bvim_trig_vbatt_avg_tr,8,8)
-MAX77779_BFF(max77779_bvim_bvim_trig_vbatt_min_tr,9,9)
-MAX77779_BFF(max77779_bvim_bvim_trig_vbatt_max_tr,10,10)
-MAX77779_BFF(max77779_bvim_bvim_trig_ibatt_avg_tr,11,11)
-MAX77779_BFF(max77779_bvim_bvim_trig_ibatt_min_tr,12,12)
-MAX77779_BFF(max77779_bvim_bvim_trig_ibatt_max_tr,13,13)
-MAX77779_BFF(max77779_bvim_bvim_trig_oilo_start_source,14,14)
-MAX77779_BFF(max77779_bvim_bvim_trig_oilo_stop_source,15,15)
+MAX77779_BFF(max77779_bvim_bvim_trig_trig_now, 0, 0)
+MAX77779_BFF(max77779_bvim_bvim_trig_batoilo1_tr, 1, 1)
+MAX77779_BFF(max77779_bvim_bvim_trig_batoilo2_tr, 2, 2)
+MAX77779_BFF(max77779_bvim_bvim_trig_sysuvlo1_tr, 3, 3)
+MAX77779_BFF(max77779_bvim_bvim_trig_sysuvlo2_tr, 4, 4)
+MAX77779_BFF(max77779_bvim_bvim_trig_vbatt_tr, 5, 5)
+MAX77779_BFF(max77779_bvim_bvim_trig_ibatt_tr, 6, 6)
+MAX77779_BFF(max77779_bvim_bvim_trig_spr_7, 7, 7)
+MAX77779_BFF(max77779_bvim_bvim_trig_vbatt_avg_tr, 8, 8)
+MAX77779_BFF(max77779_bvim_bvim_trig_vbatt_min_tr, 9, 9)
+MAX77779_BFF(max77779_bvim_bvim_trig_vbatt_max_tr, 10, 10)
+MAX77779_BFF(max77779_bvim_bvim_trig_ibatt_avg_tr, 11, 11)
+MAX77779_BFF(max77779_bvim_bvim_trig_ibatt_min_tr, 12, 12)
+MAX77779_BFF(max77779_bvim_bvim_trig_ibatt_max_tr, 13, 13)
+MAX77779_BFF(max77779_bvim_bvim_trig_oilo_start_source, 14, 14)
+MAX77779_BFF(max77779_bvim_bvim_trig_oilo_stop_source, 15, 15)
 
 /*
  * MAX77779_BVIM_bvimtr,0x03,0b00000000,0x0,Reset_Type:S
@@ -7396,14 +7408,14 @@ max77779_bvim_bvimtr_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_bvimtr_v_md,1,0)
-MAX77779_BFF(max77779_bvim_bvimtr_i_md,3,2)
-MAX77779_BFF(max77779_bvim_bvimtr_v_savg_md,5,4)
-MAX77779_BFF(max77779_bvim_bvimtr_v_smin_md,7,6)
-MAX77779_BFF(max77779_bvim_bvimtr_v_smax_md,9,8)
-MAX77779_BFF(max77779_bvim_bvimtr_i_savg_md,11,10)
-MAX77779_BFF(max77779_bvim_bvimtr_i_smin_md,13,12)
-MAX77779_BFF(max77779_bvim_bvimtr_i_smax_md,15,14)
+MAX77779_BFF(max77779_bvim_bvimtr_v_md, 1, 0)
+MAX77779_BFF(max77779_bvim_bvimtr_i_md, 3, 2)
+MAX77779_BFF(max77779_bvim_bvimtr_v_savg_md, 5, 4)
+MAX77779_BFF(max77779_bvim_bvimtr_v_smin_md, 7, 6)
+MAX77779_BFF(max77779_bvim_bvimtr_v_smax_md, 9, 8)
+MAX77779_BFF(max77779_bvim_bvimtr_i_savg_md, 11, 10)
+MAX77779_BFF(max77779_bvim_bvimtr_i_smin_md, 13, 12)
+MAX77779_BFF(max77779_bvim_bvimtr_i_smax_md, 15, 14)
 
 /*
  * MAX77779_BVIM_bvim_vtr_mth,0x04,0b00000000,0x0,Reset_Type:S
@@ -7498,13 +7510,13 @@ max77779_bvim_bvim_sts_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_bvim_sts_bvim_osc,8,0)
-MAX77779_BFF(max77779_bvim_bvim_sts_tr_sts,10,9)
-MAX77779_BFF(max77779_bvim_bvim_sts_bvim_stopped,11,11)
-MAX77779_BFF(max77779_bvim_bvim_sts_stop_sts_oilo1,12,12)
-MAX77779_BFF(max77779_bvim_bvim_sts_stop_sts_oilo2,13,13)
-MAX77779_BFF(max77779_bvim_bvim_sts_stop_sts_fault,14,14)
-MAX77779_BFF(max77779_bvim_bvim_sts_stop_sts_vioaok,15,15)
+MAX77779_BFF(max77779_bvim_bvim_sts_bvim_osc, 8, 0)
+MAX77779_BFF(max77779_bvim_bvim_sts_tr_sts, 10, 9)
+MAX77779_BFF(max77779_bvim_bvim_sts_bvim_stopped, 11, 11)
+MAX77779_BFF(max77779_bvim_bvim_sts_stop_sts_oilo1, 12, 12)
+MAX77779_BFF(max77779_bvim_bvim_sts_stop_sts_oilo2, 13, 13)
+MAX77779_BFF(max77779_bvim_bvim_sts_stop_sts_fault, 14, 14)
+MAX77779_BFF(max77779_bvim_bvim_sts_stop_sts_vioaok, 15, 15)
 
 /*
  * MAX77779_BVIM_bvim_rs,0x0D,0b00000000,0x0,Reset_Type:S
@@ -7538,9 +7550,9 @@ max77779_bvim_bvim_rs_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_bvim_rs_rsc,8,0)
-MAX77779_BFF(max77779_bvim_bvim_rs_bvim_rts,12,9)
-MAX77779_BFF(max77779_bvim_bvim_rs_spr_15_13,15,13)
+MAX77779_BFF(max77779_bvim_bvim_rs_rsc, 8, 0)
+MAX77779_BFF(max77779_bvim_bvim_rs_bvim_rts, 12, 9)
+MAX77779_BFF(max77779_bvim_bvim_rs_spr_15_13, 15, 13)
 
 /*
  * MAX77779_BVIM_bvim_rlap,0x0E,0b00000000,0x0,Reset_Type:S
@@ -7578,7 +7590,7 @@ max77779_bvim_page_ctrl_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_bvim_page_ctrl_bvim_data_page,1,0)
+MAX77779_BFF(max77779_bvim_page_ctrl_bvim_data_page, 1, 0)
 
 /*******************************************************
  * Section: BVIM_DATA 0x80 16
@@ -7610,7 +7622,7 @@ max77779_sp_page_ctrl_cstr(char *buff, size_t len, int val)
 	return buff;
 }
 
-MAX77779_BFF(max77779_sp_page_ctrl_sp_data_page,1,0)
+MAX77779_BFF(max77779_sp_page_ctrl_sp_data_page, 1, 0)
 
 /*
  * MAX77779_SP_TST,0x0F,0b00000000,0x0,Reset_Type:SP

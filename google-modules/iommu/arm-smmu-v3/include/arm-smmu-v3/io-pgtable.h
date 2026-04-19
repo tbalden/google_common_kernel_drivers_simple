@@ -5,6 +5,8 @@
 #include <linux/bitops.h>
 #include <linux/iommu.h>
 
+#include "arm-smmu-v3-telemetry-callbacks.h"
+
 #define IOMMU_PASSTHROUGH	(1 << 6) /* Pass through memory attributes like shareability */
 
 /*
@@ -108,6 +110,7 @@ struct io_pgtable_cfg {
 	const struct iommu_flush_ops	*tlb;
 	struct device			*iommu_dev;
 
+	const struct arm_smmu_v3_telemetry_cb *telemetry_cb;
 	/* Low-level data specific to the table format */
 	union {
 		struct {

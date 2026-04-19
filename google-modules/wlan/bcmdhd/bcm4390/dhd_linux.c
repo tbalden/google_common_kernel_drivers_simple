@@ -5571,13 +5571,20 @@ dhd_monitor_open(struct net_device *net)
 #ifdef DHD_ART
 	else {
 		DHD_PRINT(("dhd_monitor_open: ART mode\n"));
-		u8 random_mac_addr[ETH_ALEN];
-		RANDOM_BYTES(random_mac_addr, ETHER_ADDR_LEN);
-		ETHER_SET_UNICAST(random_mac_addr);
-		ETHER_SET_LOCALADDR(random_mac_addr);
+		/* If art_mac_addr is not initialized, use random macaddr */
+		if (ETHER_ISNULLADDR(dhdp->art_mac_addr)) {
+			u8 random_mac_addr[ETH_ALEN];
+			DHD_PRINT(("dhd_monitor_open: ART mode\n"));
+			RANDOM_BYTES(random_mac_addr, ETHER_ADDR_LEN);
+			ETHER_SET_UNICAST(random_mac_addr);
+			ETHER_SET_LOCALADDR(random_mac_addr);
+			wdev = wl_cfg80211_add_if(cfg, primary_ndev,
+				WL_IF_TYPE_ART, net->name, random_mac_addr);
+		} else {
+			wdev = wl_cfg80211_add_if(cfg, primary_ndev,
+				WL_IF_TYPE_ART, net->name, dhdp->art_mac_addr);
+		}
 
-		wdev = wl_cfg80211_add_if(cfg, primary_ndev,
-			WL_IF_TYPE_ART, net->name, random_mac_addr);
 		if (!wdev) {
 			ret = -ENODEV;
 			goto exit;
@@ -5698,6 +5705,7 @@ dhd_monitor_stop(struct net_device *net)
 	DHD_ART_WAKE_UNLOCK(&dhd->pub);
 	/* clear filter bssid after use */
 	bzero(&cfg->art_bssid, ETH_ALEN);
+	bzero(&dhd->pub.art_bssid, ETH_ALEN);
 #endif /* DHD_ART */
 exit:
 	return ret;
@@ -6077,7 +6085,11 @@ dhd_add_monitor_if(dhd_info_t *dhd)
 		return;
 	}
 
-	devname = "radiotap";
+	if (!(dhdp->op_mode & DHD_FLAG_MONITOR_MODE)) {
+		devname = "wondertap";
+	} else {
+		devname = "radiotap";
+	}
 
 #ifdef DHD_ART
 	RANDOM_BYTES(ea_addr.octet, ETHER_ADDR_LEN);

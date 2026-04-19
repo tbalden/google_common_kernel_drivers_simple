@@ -15,18 +15,23 @@
 
 #define DEFAULT_TEMP_PAGE_ORDER (1)
 
+struct TouchOffloadFrameHeader;
+
 struct touch_sim {
 	struct cdev cdev;
 	struct device *dev;
 	dev_t devt;
 	atomic_t device_is_locked;
 	struct kfifo fifo;
+	wait_queue_head_t event_wait_queue;
 	unsigned long temp_page;
+	struct TouchOffloadFrameHeader *temp_frame_header;
 	u8 *temp_frame;
 	u32 frame_size;
 	struct task_struct *sw_thread;
 	ktime_t first_frame_timestamp;
 	ktime_t start_timestamp;
+	atomic_t reported_frame_count;
 	int (*pop_data_cb)(void *private_data, char *buf, size_t count, ktime_t timestamp);
 	void *private_data;
 };

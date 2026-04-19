@@ -12,6 +12,7 @@
 #include <linux/pm_qos.h>
 #include <linux/device.h>
 #include <linux/dma-buf.h>
+#include <linux/kref.h>
 #include <linux/kfifo.h>
 #include <linux/platform_device.h>
 #include <linux/platform_data/sscoredump.h>
@@ -126,6 +127,7 @@ struct vpu_inst {
 	struct vpu_core *core;
 	uint32_t idx;
 	struct vpu_intr_queue intr_queue;
+	struct kref refcount;
 };
 
 #endif //_VPU_PRIV_H_

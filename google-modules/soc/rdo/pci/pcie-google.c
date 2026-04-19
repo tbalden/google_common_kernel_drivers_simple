@@ -8,7 +8,6 @@
 #include "pcie-designware-host-customized.h"
 
 #include <linux/version.h>
-#include <perf/core/gs_domain_idle.h>
 
 #define CREATE_TRACE_POINTS
 #include "pcie_trace.h"
@@ -1110,8 +1109,6 @@ int google_pcie_rc_poweron(int num)
 		}
 	}
 
-	gs_domain_c4_disable();
-
 	ret = pm_runtime_get_sync(gpcie->dev);
 	if (ret < 0) {
 		dev_err(gpcie->dev, "Failed to power on PCIe\n");
@@ -1265,7 +1262,6 @@ clkreq_idle:
 pm_put:
 	if (gpcie->aux_clk)
 		clk_disable_unprepare(gpcie->aux_clk);
-	gs_domain_c4_enable();
 	gpcie->current_link_speed = 0;
 	gpcie->current_link_width = 0;
 	spin_lock_irqsave(&gpcie->power_on_lock, flags);
@@ -1454,8 +1450,6 @@ int google_pcie_rc_poweroff(int num)
 		enable_irq(gpcie->link_down_irq);
 		need_enable_link_down--;
 	}
-
-	gs_domain_c4_enable();
 
 	mutex_unlock(&gpcie->link_lock);
 	return 0;
@@ -2579,6 +2573,7 @@ static int google_pcie_probe(struct platform_device *pdev)
 	struct pcie_port *pp;
 #endif
 	int ret;
+	struct of_phandle_args pd_args, additional_parent_pd_args;
 
 	gpcie = devm_kzalloc(dev, sizeof(*gpcie), GFP_KERNEL);
 	if (!gpcie)
@@ -2717,6 +2712,29 @@ static int google_pcie_probe(struct platform_device *pdev)
 	}
 
 	google_pcie_init_genpd(gpcie);
+
+	additional_parent_pd_args.args_count = 0;
+	additional_parent_pd_args.np = of_parse_phandle(np, "additional-parent-domain", 0);
+	if (additional_parent_pd_args.np) {
+		ret = of_parse_phandle_with_args(np, "power-domains", "#power-domain-cells", 0,
+				&pd_args);
+		if (ret) {
+			dev_err(dev, "Unable to parse the power domain\n");
+			of_node_put(additional_parent_pd_args.np);
+			return ret;
+		}
+
+		ret = of_genpd_add_subdomain(&additional_parent_pd_args, &pd_args);
+		if (ret) {
+			dev_err(dev, "Failed to add subdomain to additional parent %s\n",
+					additional_parent_pd_args.np->name);
+			of_node_put(additional_parent_pd_args.np);
+			of_node_put(pd_args.np);
+			return ret;
+		}
+		of_node_put(additional_parent_pd_args.np);
+		of_node_put(pd_args.np);
+	}
 
 	gpcie->allow_suspend_in_linkup =
 		device_property_read_bool(dev, "google,allow-suspend-in-linkup");

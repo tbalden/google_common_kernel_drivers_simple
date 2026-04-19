@@ -5,7 +5,7 @@
  * Copyright 2025 Google LLC
  *
  * These pinctrl mappings are generated based on the Platform IO pin definitions.
- * Build id: 13133772
+ * Build id: 14538277
  */
 
 #include <dt-bindings/gpio/google,lga.h>
@@ -806,6 +806,7 @@
 		drive-strength = <1>;
 		input-enable;
 		output-enable;
+		output-high;
 		function = "aoc_i2c2";
 	};
 
@@ -825,6 +826,7 @@
 		drive-strength = <1>;
 		input-enable;
 		output-enable;
+		output-high;
 		function = "aoc_i2c2";
 	};
 
@@ -2016,57 +2018,57 @@
 
 	pmic_m_gpio0_tp: pmic_m_gpio0_tp {
 		/* Dev - Spare */
-		pins = "DA9188_MAIN_GPIO_0";
+		pins = "gpio0";
 	};
 
 	pmic_s_gpio10_tp: pmic_s_gpio10_tp {
 		/* Dev - Spare */
-		pins = "DA9188_SUB_GPIO_10";
+		pins = "gpio10";
 	};
 
 	pmicm2rcam_ois_vm_en: pmicm2rcam_ois_vm_en {
 		/* Imagers - Rear Wide */
-		pins = "DA9188_MAIN_GPIO_1";
+		pins = "gpio1";
 	};
 
 	pmicm2rcam_vana_en: pmicm2rcam_vana_en {
 		/* Imagers - Rear Wide */
-		pins = "DA9188_MAIN_GPIO_2";
+		pins = "gpio2";
 	};
 
 	pmicm2rcam_vdig_en: pmicm2rcam_vdig_en {
 		/* Imagers - Rear Wide */
-		pins = "DA9188_MAIN_GPIO_5";
+		pins = "gpio5";
 	};
 
 	pmics2cam_bb_en: pmics2cam_bb_en {
 		/* Imagers - Imagers */
-		pins = "DA9188_SUB_GPIO_9";
+		pins = "gpio9";
 	};
 
 	pmics2cam_mvbuck_en: pmics2cam_mvbuck_en {
 		/* Imagers - Imagers */
-		pins = "DA9188_SUB_GPIO_15";
+		pins = "gpio15";
 	};
 
 	pmics2cam_pmic_en: pmics2cam_pmic_en {
 		/* Imagers - Imagers */
-		pins = "DA9188_SUB_GPIO_8";
+		pins = "gpio8";
 	};
 
 	pmics2disp0_reset_l: pmics2disp0_reset_l {
 		/* Display - Display */
-		pins = "DA9188_SUB_GPIO_11";
+		pins = "gpio11";
 	};
 
 	pmics2hac_amp_en: pmics2hac_amp_en {
 		/* Audio - Amp */
-		pins = "DA9188_SUB_GPIO_14";
+		pins = "gpio14";
 	};
 
 	pmics2ts0_reset_l_1v2: pmics2ts0_reset_l_1v2 {
 		/* Display - Touch */
-		pins = "DA9188_SUB_GPIO_17";
+		pins = "gpio17";
 	};
 };
 
@@ -2203,6 +2205,14 @@
 		function = "gdmc_int";
 	};
 
+	cp_ps_hold_1v2_sleep: cp_ps_hold_1v2_sleep {
+		/* Connectivity - Modem - Sleep */
+		pins = "XGDMC_IN_DEBUG_1";
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
+	};
+
 	dbg2ap_uart_sda: dbg2ap_uart_sda {
 		/* Debug - UART */
 		pins = "XGDMC_SOC_DEBUG_UART_RXD";
@@ -2221,8 +2231,26 @@
 		function = "gdmc_int";
 	};
 
+	disp0_2_ap_err_fg_sleep: disp0_2_ap_err_fg_sleep {
+		/* Display - Display - Sleep */
+		pins = "XGDMC_CTI_0";
+		bias-pull-down;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
+	};
+
 	ese2ap_irq_l_1v2: ese2ap_irq_l_1v2 {
 		/* Security - ESE */
+		pins = "XGDMC_UART0_RXD";
+		bias-pull-up;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
+	};
+
+	ese2ap_irq_l_1v2_sleep: ese2ap_irq_l_1v2_sleep {
+		/* Security - ESE - Sleep */
 		pins = "XGDMC_UART0_RXD";
 		bias-pull-up;
 		input-enable;
@@ -2257,6 +2285,15 @@
 		function = "gdmc_int";
 	};
 
+	nfc2ap_host_irq_1v2_sleep: nfc2ap_host_irq_1v2_sleep {
+		/* Connectivity - NFC - Sleep */
+		pins = "XGDMC_DEBUG_DEFAULT_1";
+		bias-pull-down;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
+	};
+
 	xgdmc_uart_gsc_rxd: xgdmc_uart_gsc_rxd {
 		/* Debug - UART */
 		pins = "XGDMC_UART_GSC_RXD";
@@ -2264,6 +2301,15 @@
 		input-enable;
 		output-disable;
 		function = "gdmc_uart";
+	};
+
+	xgdmc_uart_gsc_rxd_sleep: xgdmc_uart_gsc_rxd_sleep {
+		/* Debug - UART - Sleep */
+		pins = "XGDMC_UART_GSC_RXD";
+		bias-pull-up;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
 	};
 
 	xgdmc_uart_gsc_txd: xgdmc_uart_gsc_txd {
@@ -2276,6 +2322,14 @@
 		function = "gdmc_uart";
 	};
 
+	xgdmc_uart_gsc_txd_sleep: xgdmc_uart_gsc_txd_sleep {
+		/* Debug - UART - Sleep */
+		pins = "XGDMC_UART_GSC_TXD";
+		input-enable;
+		output-high;
+		function = "gdmc_int";
+	};
+
 	xgdmc_uart_modem_rxd: xgdmc_uart_modem_rxd {
 		/* Connectivity - Modem */
 		pins = "XGDMC_UART_MODEM_RXD";
@@ -2283,6 +2337,15 @@
 		input-enable;
 		output-disable;
 		function = "gdmc_uart";
+	};
+
+	xgdmc_uart_modem_rxd_sleep: xgdmc_uart_modem_rxd_sleep {
+		/* Connectivity - Modem - Sleep */
+		pins = "XGDMC_UART_MODEM_RXD";
+		bias-pull-up;
+		input-enable;
+		output-disable;
+		function = "gdmc_int";
 	};
 
 	xgdmc_uart_modem_txd: xgdmc_uart_modem_txd {
@@ -2293,6 +2356,14 @@
 		input-enable;
 		output-enable;
 		function = "gdmc_uart";
+	};
+
+	xgdmc_uart_modem_txd_sleep: xgdmc_uart_modem_txd_sleep {
+		/* Connectivity - Modem - Sleep */
+		pins = "XGDMC_UART_MODEM_TXD";
+		input-enable;
+		output-high;
+		function = "gdmc_int";
 	};
 };
 
@@ -2486,7 +2557,7 @@
 &hsios_pinctrl {
 	gpio-line-names =
 		"AP2UFS_RESET_L_1V2",
-		"UWB2AP_POWER_STATE_1V2",
+		"UWB2AP_PWR_STATE_1V2",
 		"AP2CP_NRESET_L_1V2",
 		"AP2CP_DUMP_NOTI_1V2",
 		"AP2CP_ACTIVE_1V2",
@@ -2683,7 +2754,7 @@
 		function = "hsios_gpio";
 	};
 
-	uwb2ap_power_state_1v2: uwb2ap_power_state_1v2 {
+	uwb2ap_pwr_state_1v2: uwb2ap_pwr_state_1v2 {
 		/* Connectivity - UWB */
 		pins = "XHSIOS_GPIO7";
 		bias-pull-down;
@@ -2692,7 +2763,7 @@
 		function = "hsios_gpio";
 	};
 
-	uwb2ap_power_state_1v2_sleep: uwb2ap_power_state_1v2_sleep {
+	uwb2ap_pwr_state_1v2_sleep: uwb2ap_pwr_state_1v2_sleep {
 		/* Connectivity - UWB - Sleep */
 		pins = "XHSIOS_GPIO7";
 		bias-pull-down;
@@ -3536,7 +3607,7 @@
 	};
 
 	ap2flash_en: ap2flash_en {
-		/* Imagers - Flash */
+		/* Imagers - Imagers */
 		pins = "XLSIOS_CLI3_PIN3";
 		bias-disable;
 		drive-strength = <0>;
@@ -3546,7 +3617,7 @@
 	};
 
 	ap2flash_en_sleep: ap2flash_en_sleep {
-		/* Imagers - Flash - Sleep */
+		/* Imagers - Imagers - Sleep */
 		pins = "XLSIOS_CLI3_PIN3";
 		input-enable;
 		output-low;
@@ -3554,7 +3625,7 @@
 	};
 
 	ap2flash_strobe: ap2flash_strobe {
-		/* Imagers - Flash */
+		/* Imagers - Imagers */
 		pins = "XLSIOS_PWM_0";
 		bias-disable;
 		drive-strength = <1>;
@@ -3564,7 +3635,7 @@
 	};
 
 	ap2flash_strobe_sleep: ap2flash_strobe_sleep {
-		/* Imagers - Flash - Sleep */
+		/* Imagers - Imagers - Sleep */
 		pins = "XLSIOS_PWM_0";
 		input-enable;
 		output-low;
@@ -4133,17 +4204,17 @@
 #define VSYS_VDROOP2_1V2_AV6(x) &cpm_pinctrl XCPM_VDROOP2 x
 #define WLAN2AP_HOST_WAKE_1V2(x) &cpm_pinctrl XCPM_EINT_8 x
 #define XCPM_SPI0_SSB_AJ5(x) &cpm_pinctrl XCPM_SPI0_SSB x
-#define PMIC_M_GPIO0_TP(x) &da9188_gpio DA9188_MAIN_GPIO_0 x
-#define PMIC_S_GPIO10_TP(x) &da9188_gpio DA9188_SUB_GPIO_10 x
-#define PMICM2RCAM_OIS_VM_EN(x) &da9188_gpio DA9188_MAIN_GPIO_1 x
-#define PMICM2RCAM_VANA_EN(x) &da9188_gpio DA9188_MAIN_GPIO_2 x
-#define PMICM2RCAM_VDIG_EN(x) &da9188_gpio DA9188_MAIN_GPIO_5 x
-#define PMICS2CAM_BB_EN(x) &da9188_gpio DA9188_SUB_GPIO_9 x
-#define PMICS2CAM_MVBUCK_EN(x) &da9188_gpio DA9188_SUB_GPIO_15 x
-#define PMICS2CAM_PMIC_EN(x) &da9188_gpio DA9188_SUB_GPIO_8 x
-#define PMICS2DISP0_RESET_L(x) &da9188_gpio DA9188_SUB_GPIO_11 x
-#define PMICS2HAC_AMP_EN(x) &da9188_gpio DA9188_SUB_GPIO_14 x
-#define PMICS2TS0_RESET_L_1V2(x) &da9188_gpio DA9188_SUB_GPIO_17 x
+#define PMIC_M_GPIO0_TP(x) &da9188_gpio GPIO_0 x
+#define PMIC_S_GPIO10_TP(x) &da9188_gpio GPIO_10 x
+#define PMICM2RCAM_OIS_VM_EN(x) &da9188_gpio GPIO_1 x
+#define PMICM2RCAM_VANA_EN(x) &da9188_gpio GPIO_2 x
+#define PMICM2RCAM_VDIG_EN(x) &da9188_gpio GPIO_5 x
+#define PMICS2CAM_BB_EN(x) &da9188_gpio GPIO_9 x
+#define PMICS2CAM_MVBUCK_EN(x) &da9188_gpio GPIO_15 x
+#define PMICS2CAM_PMIC_EN(x) &da9188_gpio GPIO_8 x
+#define PMICS2DISP0_RESET_L(x) &da9188_gpio GPIO_11 x
+#define PMICS2HAC_AMP_EN(x) &da9188_gpio GPIO_14 x
+#define PMICS2TS0_RESET_L_1V2(x) &da9188_gpio GPIO_17 x
 #define DISP0_2_AP_TE(x) &dpu_pinctrl XDPU_TE0 x
 #define AP2DBG_UART_SDA(x) &gdmc_pinctrl XGDMC_SOC_DEBUG_UART_TXD x
 #define AP_JTAG_DBGSEL(x) &gdmc_pinctrl XGDMC_DBGSEL x
@@ -4181,7 +4252,7 @@
 #define AP2WLAN_DEV_WAKE_1V2(x) &hsios_pinctrl XHSIOS_GPIO5 x
 #define AP2WLAN_PCIE_PERST0_L_1V2(x) &hsios_pinctrl XHSIOS_PCIE1_PERSTN0 x
 #define AP2WLAN_REG_ON_1V2(x) &hsios_pinctrl XHSIOS_GPIO6 x
-#define UWB2AP_POWER_STATE_1V2(x) &hsios_pinctrl XHSIOS_GPIO7 x
+#define UWB2AP_PWR_STATE_1V2(x) &hsios_pinctrl XHSIOS_GPIO7 x
 #define WLAN2AP_PCIE_CLKREQ0_L_1V2(x) &hsios_pinctrl XHSIOS_PCIE1_CLKREQN0 x
 #define WLAN2AP_SYNC_1V2(x) &hsios_pinctrl XHSIOS_VSYNC4 x
 #define AP2UFS_REF_CLK_38P4MHZ_1V2(x) &hsios_stby_pinctrl XHSIOS_UFS_REFCLK x

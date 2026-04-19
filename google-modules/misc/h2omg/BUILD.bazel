@@ -2,7 +2,7 @@
 
 # Google Water Detection
 
-load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
+load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_module")
 
 filegroup(
     name = "h2omg.kconfig",

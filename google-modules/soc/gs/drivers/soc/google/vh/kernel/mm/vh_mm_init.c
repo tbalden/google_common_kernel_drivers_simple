@@ -17,6 +17,7 @@
 #include <uapi/linux/sched/types.h>
 
 #include "../../include/pixel_mm_hint.h"
+#include "../../include/pixel_mm.h"
 
 static struct task_struct *tsk_kswapd, *tsk_kcompactd;
 
@@ -279,19 +280,16 @@ static void vh_swap_writepage(void *data,
 	*sis_flag &= ~SWP_SYNCHRONOUS_IO;
 }
 
+/*
+ * For allocations larger than a page, skip direct reclaim to prevent potential
+ * latency spikes unless the caller specifies __GFP_RETRY_MAYFAIL. This aligns
+ * with the upstream kernel's behavior. See:
+ * https://source.corp.google.com/h/android/kernel/common/+/46459154f9979387486fb5f50e4aa425e33a306c
+ */
 static void vh_kvmalloc_high_order_skip_direct_reclaim(void *data,
 		size_t size, gfp_t *gfp_flags, bool *use_vmalloc)
 {
-	/* Return early if size is 0, as get_order(0) is undefined. */
-	if (size == 0)
-		return;
-
-	/*
-	 * If the allocation order meets or exceeds the threshold, clear
-	 * __GFP_DIRECT_RECLAIM to prevent potential latency spikes from
-	 * direct reclaim.
-	 */
-	if (get_order(size) > PAGE_ALLOC_COSTLY_ORDER)
+	if (size > PAGE_SIZE && !(*gfp_flags & __GFP_RETRY_MAYFAIL))
 		*gfp_flags &= ~__GFP_DIRECT_RECLAIM;
 }
 
@@ -398,6 +396,10 @@ static int vh_mm_init(void)
 	if (ret)
 		goto out_err;
 
+	ret = pixel_mm_filemap_sysfs(vendor_mm_kobj);
+	if (ret)
+		goto out_err;
+
 	ret = register_trace_android_vh_mm_kcompactd_cpu_online(
 		vh_kcompactd_cpu_online, NULL);
 	if (ret)
@@ -441,6 +443,10 @@ static int vh_mm_init(void)
 		goto out_err;
 
 	ret = register_trace_android_vh_calculate_totalreserve_pages(vh_update_lmkd_watermark, NULL);
+	if (ret)
+		goto out_err;
+
+	ret = register_trace_android_vh_do_async_mmap_readahead(vh_do_async_mmap_readahead, NULL);
 	if (ret)
 		goto out_err;
 
